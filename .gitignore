@@ -1,0 +1,98 @@
+# ==========================================
+# Root
+# ==========================================
+.env
+*.log
+*.tmp
+*.bak
+*.swp
+Thumbs.db
+.DS_Store
+
+# ==========================================
+# VS Code / Editor
+# ==========================================
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.vs/
+
+# ==========================================
+# Node modules
+# ==========================================
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# ==========================================
+# Build / Output / Cache
+# ==========================================
+client/dist/
+server/dist/
+*.tsbuildinfo
+.cache/
+.temp/
+coverage/
+reports/
+
+# ==========================================
+# Environment & Lock files
+# ==========================================
+client/.env
+server/.env
+client/package-lock.json
+server/package-lock.json
+
+# ==========================================
+# Frontend (React + Vite)
+# ==========================================
+client/.vite/
+client/.eslintcache
+client/.turbo/
+client/.next/
+client/.nuxt/
+client/.cache/
+client/build/
+client/out/
+
+# ==========================================
+# Backend (Express + TypeScript)
+# ==========================================
+server/logs/
+server/*.log
+server/.eslintcache
+server/.tsbuildinfo
+server/public/uploads/
+server/public/temp/
+
+# ==========================================
+# Temporary / Misc
+# ==========================================
+logs/
+tmp/
+temp/
+*.bak
+*.old
+*.orig
+*.rej
+*.seed
+*.zip
+*.tar.gz
+
+# ==========================================
+# Security / Private Files
+# ==========================================
+**/secrets.json
+**/config/private.json
+**/config/keys/
+*.pem
+*.key
+*.crt
+
+# ==========================================
+# Optional Docs
+# ==========================================
+README.md
