@@ -1,0 +1,18 @@
+{
+  "name": "mirth-connect-monolith",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "install:all": "npm install --prefix client && npm install --prefix server",
+    "build": "npm run build --prefix client && npm run build --prefix server",
+    "start": "node server/dist/server.js",
+    "start:all": "npm run build --prefix client && npm run build --prefix server && cd server && node dist/server.js",
+    "dev": "npm run build --prefix client && ts-node-dev --respawn --transpile-only server/src/server.ts"
+  },
+  "devDependencies": {
+    "ts-node-dev": "^2.0.0"
+  }
+}

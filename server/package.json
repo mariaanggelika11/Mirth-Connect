@@ -1,0 +1,50 @@
+{
+  "name": "mirth-connect-server",
+  "version": "1.0.0",
+  "description": "Backend monolith for Mirth Connect (Express + TypeScript + MSSQL)",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "rimraf dist && tsc",
+    "start": "node dist/server.js",
+    "lint": "tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "axios": "^1.13.1",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "mirth-connect-monolith": "file:..",
+    "mssql": "^9.3.0",
+    "simple-hl7": "^3.3.0",
+    "socket.io": "^4.7.5",
+    "vm2": "^3.10.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/mssql": "^9.1.6",
+    "@types/node": "^20.12.12",
+    "rimraf": "^5.0.5",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "express",
+    "typescript",
+    "monolith",
+    "mssql",
+    "jwt",
+    "mirth-connect"
+  ],
+  "author": "Maria Anggelika",
+  "license": "MIT"
+}
