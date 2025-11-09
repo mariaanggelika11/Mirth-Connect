@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { fetchMonitorStats } from "../services/api";
 import { MonitorStats } from "../types";
 
-// 🟢 Komponen kecil untuk 1 kartu metrik
+//  Komponen kecil untuk 1 kartu metrik
 const MetricCard: React.FC<{ title: string; value: number; colorClass: string }> = ({ title, value, colorClass }) => (
   <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 shadow-sm">
     <h3 className="text-sm font-medium text-slate-400">{title}</h3>
@@ -23,7 +23,7 @@ const MonitorMetrics: React.FC = () => {
       const data = await fetchMonitorStats();
       setStats(data);
     } catch (err) {
-      console.error("❌ Failed to load monitor stats:", err);
+      console.error(" Failed to load monitor stats:", err);
       setError("Failed to fetch metrics");
     } finally {
       setLoading(false);
@@ -60,7 +60,7 @@ const MonitorMetrics: React.FC = () => {
     return <div className="p-4 bg-slate-800/50 text-slate-400 rounded-lg border border-slate-700">No data available yet.</div>;
   }
 
-  // ✅ Tampilan utama
+  // Tampilan utama
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
       <MetricCard title="Total Received" value={stats.totalReceived} colorClass="text-sky-400" />

@@ -15,7 +15,7 @@ export const sendToDestinations = async (req: Request, res: Response) => {
   try {
     const pool = await getConnection();
 
-    // 1️⃣ Ambil daftar destination aktif
+    // 1️ Ambil daftar destination aktif
     const result = await pool.request().input("channel_id", channelId).query(`SELECT * FROM Destinations WHERE channel_id = @channel_id AND is_enabled = 1`);
 
     const destinations = result.recordset;
@@ -25,7 +25,7 @@ export const sendToDestinations = async (req: Request, res: Response) => {
 
     const logs: any[] = [];
 
-    // 2️⃣ Kirim ke setiap destination
+    // 2️ Kirim ke setiap destination
     for (const dest of destinations) {
       try {
         const response = await axios.post(dest.endpoint, payload);
@@ -50,7 +50,7 @@ export const sendToDestinations = async (req: Request, res: Response) => {
       }
     }
 
-    // 3️⃣ Update status message
+    // 3️ Update status message
     await pool.request().input("message_id", messageId).query(`UPDATE Messages SET status = 'SENT', updated_at = GETDATE() WHERE id = @message_id`);
 
     return res.json({ message: "Payload sent to all destinations", results: logs });

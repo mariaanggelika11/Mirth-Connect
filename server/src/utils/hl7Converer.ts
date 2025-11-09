@@ -1,7 +1,7 @@
 import hl7 from "simple-hl7";
 
 /**
- * 🔁 Convert HL7 string → JSON (parsing basic segment & fields)
+ *  Convert HL7 string → JSON (parsing basic segment & fields)
  */
 export function hl7ToJson(raw: string): any {
   try {
@@ -28,13 +28,13 @@ export function hl7ToJson(raw: string): any {
     json._segments = segments; // simpan detail lengkap kalau dibutuhkan
     return json;
   } catch (err) {
-    console.error("❌ Error parsing HL7:", err);
+    console.error(" Error parsing HL7:", err);
     return { error: "Invalid HL7", raw };
   }
 }
 
 /**
- * 🔁 Convert JSON → HL7 string
+ *  Convert JSON → HL7 string
  */
 export function jsonToHl7(data: any): string {
   try {
@@ -46,7 +46,7 @@ export function jsonToHl7(data: any): string {
 
     return msg.toString();
   } catch (err) {
-    console.error("❌ Error building HL7:", err);
+    console.error(" Error building HL7:", err);
     return "";
   }
 }

@@ -3,10 +3,10 @@ import net from "net";
 const PORT = 2575; // sama dengan HL7 listener di Mini-Mirth
 const HOST = "localhost";
 
-console.log(`✅ Dummy HL7 TCP Receiver listening on tcp://${HOST}:${PORT}`);
+console.log(` Dummy HL7 TCP Receiver listening on tcp://${HOST}:${PORT}`);
 
 const server = net.createServer((socket) => {
-  console.log("\n📩 [TCP] Incoming HL7 message connection...");
+  console.log(" [TCP] Incoming HL7 message connection...");
 
   let rawData = "";
 
@@ -15,7 +15,7 @@ const server = net.createServer((socket) => {
     rawData += received;
 
     // tampilkan semua data mentah (apapun formatnya)
-    console.log("📦 [TCP] Raw data received:");
+    console.log(" [TCP] Raw data received:");
     console.log("---------------------------------------");
     console.log(received);
     console.log("---------------------------------------");
@@ -27,7 +27,7 @@ const server = net.createServer((socket) => {
         .replace(/\u001c\r/g, "")
         .replace(/\r/g, "\n")
         .trim();
-      console.log("🧾 [TCP] Cleaned HL7 message:");
+      console.log(" [TCP] Cleaned HL7 message:");
       console.log("---------------------------------------");
       console.log(cleanMsg);
       console.log("---------------------------------------");
@@ -39,14 +39,14 @@ const server = net.createServer((socket) => {
   });
 
   socket.on("end", () => {
-    console.log("🔚 [TCP] Connection closed\n");
+    console.log(" [TCP] Connection closed\n");
   });
 
   socket.on("error", (err) => {
-    console.error("❌ [TCP] Socket error:", err.message);
+    console.error(" [TCP] Socket error:", err.message);
   });
 });
 
 server.listen(PORT, HOST, () => {
-  console.log("🚀 HL7 Dummy Receiver is now active.\n");
+  console.log(" HL7 Dummy Receiver is now active.\n");
 });

@@ -115,13 +115,16 @@ export const fetchLogs = async (channelId?: number): Promise<LogEntry[]> => {
   return data.map((msg: any) => ({
     id: msg.id,
     channelId: msg.channel_id,
-    channelName: msg.channel_name || `Channel ${msg.channel_id}`, // ✅ fallback
+    channelName: msg.channel_name || `Channel ${msg.channel_id}`,
     timestamp: msg.created_at,
-    level: msg.status === "ERROR" ? "ERROR" : "INFO",
-    message: `${msg.direction} - ${msg.status}`,
+    direction: msg.direction,
     originalPayload: msg.original_payload ? JSON.parse(msg.original_payload) : {},
     transformedPayload: msg.transformed_payload ? JSON.parse(msg.transformed_payload) : {},
-    error: msg.error_detail,
+    status: msg.status?.toUpperCase() || "UNKNOWN", // ✅ penting!
+    level: msg.status === "ERROR" ? "ERROR" : "INFO", // ✅ biar LogLevelIndicator bisa jalan
+    message: `${msg.direction} - ${msg.status ?? "UNKNOWN"}`,
+    error: msg.error_detail ?? undefined,
+    content: msg.transformed_payload || msg.original_payload,
   }));
 };
 

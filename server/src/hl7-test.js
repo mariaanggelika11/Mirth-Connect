@@ -6,20 +6,20 @@ const hl7 = "\x0b" + "MSH|^~\\&|HIS|HOSP|LAB|HOSP|202511031430||ADT^A01|1234|P|2
 const client = new net.Socket();
 
 client.connect(2575, "127.0.0.1", () => {
-  console.log("✅ Connected to HL7 Listener");
+  console.log(" Connected to HL7 Listener");
   client.write(hl7);
-  console.log("📨 HL7 message sent");
+  console.log(" HL7 message sent");
 });
 
 client.on("data", (data) => {
-  console.log("📥 Received ACK:", data.toString());
+  console.log(" Received ACK:", data.toString());
   client.destroy();
 });
 
 client.on("error", (err) => {
-  console.error("❌ Connection error:", err);
+  console.error(" Connection error:", err);
 });
 
 client.on("close", () => {
-  console.log("🔌 Connection closed");
+  console.log(" Connection closed");
 });

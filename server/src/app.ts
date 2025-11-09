@@ -39,7 +39,7 @@ app.use("/api/message", messageRoutes);
 
 // === Dummy receiver for testing ===
 app.post("/api/test-destination", (req, res) => {
-  console.log("📥 LIS menerima data:", req.body);
+  console.log(" LIS menerima data:", req.body);
   res.json({ received: true });
 });
 

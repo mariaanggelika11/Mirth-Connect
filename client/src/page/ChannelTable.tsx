@@ -137,8 +137,12 @@ const ChannelRow: React.FC<{
         <td className="p-4 whitespace-nowrap text-slate-300 font-mono text-sm">{channel.source.endpoint}</td>
         {/* fix: gunakan ?? 0 agar aman */}
         <td className="p-4 whitespace-nowrap text-center text-slate-300">{(channel.received ?? 0).toLocaleString()}</td>
-        <td className="p-4 whitespace-nowrap text-center text-green-400">{(channel.sent ?? 0).toLocaleString()}</td>
-        <td className="p-4 whitespace-nowrap text-center text-red-400">{(channel.errors ?? 0).toLocaleString()}</td>
+        {/*  Hitung total sent dari semua destinations */}
+        <td className="p-4 whitespace-nowrap text-center text-green-400">{channel.destinations ? channel.destinations.reduce((total, dest) => total + (dest.sent ?? 0), 0).toLocaleString() : 0}</td>
+
+        {/* Hitung total errors dari semua destinations */}
+        <td className="p-4 whitespace-nowrap text-center text-red-400">{channel.destinations ? channel.destinations.reduce((total, dest) => total + (dest.errors ?? 0), 0).toLocaleString() : 0}</td>
+
         <td className="p-4 whitespace-nowrap text-right">
           <div className="flex items-center justify-end gap-2">
             {channel.status?.toString().toUpperCase() === "STOPPED" || channel.status?.toString().toUpperCase() === "ERROR" ? (

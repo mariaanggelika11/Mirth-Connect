@@ -57,8 +57,8 @@ export const getAllChannels = async (req: Request, res: Response) => {
         name: d.name,
         type: d.type,
         endpoint: d.endpoint,
-        sent: d.total_sent, // ✅ ambil dari DB
-        errors: d.total_error, // ✅ ambil dari DB
+        sent: d.total_sent, //  ambil dari DB
+        errors: d.total_error, //  ambil dari DB
         isEnabled: d.is_enabled,
         processingScript: d.processing_script || "",
       }));
@@ -80,7 +80,7 @@ export const getAllChannels = async (req: Request, res: Response) => {
 
     res.json(channels);
   } catch (err: any) {
-    console.error("❌ Error getAllChannels:", err?.message || err);
+    console.error(" Error getAllChannels:", err?.message || err);
     res.status(500).json({
       message: "Failed to fetch channels",
       error: err?.message || err,
@@ -225,49 +225,49 @@ export const deleteChannel = async (req: Request, res: Response) => {
     await transaction.begin();
 
     try {
-      // 1️⃣ Ambil semua destination id untuk channel ini
+      // 1️ Ambil semua destination id untuk channel ini
       const destRes = await transaction.request().input("channel_id", id).query(`
           SELECT id FROM Destinations WHERE channel_id = @channel_id
         `);
 
       const destinationIds = destRes.recordset.map((d) => d.id);
 
-      // 2️⃣ Hapus semua log MessageDestinationLog yang terkait dengan destinasi
+      // 2️ Hapus semua log MessageDestinationLog yang terkait dengan destinasi
       for (const destId of destinationIds) {
         await transaction.request().input("destination_id", destId).query(`
             DELETE FROM MessageDestinationLog WHERE destination_id = @destination_id
           `);
       }
 
-      // 3️⃣ Hapus semua messages milik channel ini
+      // 3️ Hapus semua messages milik channel ini
       await transaction.request().input("channel_id", id).query(`
           DELETE FROM Messages WHERE channel_id = @channel_id
         `);
 
-      // 4️⃣ Hapus semua destinations milik channel ini
+      // 4️ Hapus semua destinations milik channel ini
       await transaction.request().input("channel_id", id).query(`
           DELETE FROM Destinations WHERE channel_id = @channel_id
         `);
 
-      // 5️⃣ Hapus channel-nya sendiri
+      // 5️ Hapus channel-nya sendiri
       await transaction.request().input("id", id).query(`
           DELETE FROM Channels WHERE id = @id
         `);
 
-      // 6️⃣ Commit transaksi
+      // 6️ Commit transaksi
       await transaction.commit();
 
-      res.json({ message: `✅ Channel ${id} and all related data deleted successfully` });
+      res.json({ message: ` Channel ${id} and all related data deleted successfully` });
     } catch (innerErr) {
       await transaction.rollback();
-      console.error("❌ Rollback deleteChannel:", innerErr);
+      console.error(" Rollback deleteChannel:", innerErr);
       res.status(500).json({
         message: "Failed to delete channel (transaction rolled back)",
         error: String(innerErr),
       });
     }
   } catch (err) {
-    console.error("❌ Error deleteChannel:", err);
+    console.error("Error deleteChannel:", err);
     res.status(500).json({ message: "Failed to delete channel", error: String(err) });
   }
 };
