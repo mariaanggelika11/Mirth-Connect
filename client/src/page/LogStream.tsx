@@ -52,12 +52,11 @@ const GroupedLogs: React.FC<{
     return () => clearInterval(interval);
   }, []);
 
-  // Format waktu lokal (Asia/Jakarta)
   const formatTimestamp = (timestamp: string | Date) => {
     try {
-      return new Date(timestamp).toLocaleString("id-ID", {
-        timeZone: "Asia/Jakarta",
-        hour12: false,
+      return new Date(timestamp).toLocaleString("en-US", {
+        timeZone: "America/New_York",
+        hour12: true,
       });
     } catch {
       return String(timestamp);

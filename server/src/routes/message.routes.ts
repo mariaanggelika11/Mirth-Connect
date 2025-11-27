@@ -1,47 +1,33 @@
 import express from "express";
 import bodyParser from "body-parser";
 import * as messageService from "../services/message.services.js";
-import { processInboundMessage } from "../services/messageProcessor.services.js";
 
 const router = express.Router();
 
-/**
- *  Inbound message endpoint
- *  Menerima data HL7 atau JSON dari external system
- *  dan memprosesnya menggunakan engine messageProcessor.
- */
-
-// Gunakan bodyParser.text() agar bisa menerima HL7 (plain text)
+// ============================================================
+// INBOUND MESSAGE (HL7 / JSON / XML / TEXT)
+// ============================================================
 router.post(
   "/inbound/:channelId",
-  bodyParser.text({ type: "*/*" }), // tambahkan ini!
-  async (req, res) => {
-    try {
-      const { channelId } = req.params;
-      const rawBody = req.body;
-
-      console.log("📩 Received inbound message:", rawBody.substring(0, 100));
-
-      // Kirim ke processor
-      const result = await processInboundMessage(Number(channelId), rawBody);
-
-      res.json({ success: true, message: "Message processed successfully", result });
-    } catch (err) {
-      console.error("❌ Error processing message:", err);
-      res.status(500).json({ success: false, message: "Failed to process message" });
-    }
-  }
+  bodyParser.text({
+    type: ["text/*", "application/hl7-v2", "x-application/hl7-v2", "application/octet-stream", "*/*"],
+  }),
+  messageService.handleInboundMessage
 );
 
-/**
- *  Get all message logs
- *  Menampilkan log dari tabel Messages
- */
+// ============================================================
+// GET MESSAGES
+// ============================================================
 router.get("/", messageService.getMessages);
 
-/**
- *  Get message statistics (untuk Dashboard UI)
- */
+// ============================================================
+// GET MESSAGE STATS
+// ============================================================
 router.get("/stats", messageService.getMessageStats);
+
+// ============================================================
+// RESEND MESSAGE
+// ============================================================
+router.post("/resend/:id", messageService.resendMessage);
 
 export default router;

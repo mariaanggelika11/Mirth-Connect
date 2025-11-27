@@ -4,6 +4,16 @@ import { successResponse, errorResponse } from "../utils/response.js";
 
 const router = Router();
 
+router.post("/register", async (req, res) => {
+  try {
+    const { username, password, name, role } = req.body;
+    const result = await AuthService.register(username, password, name, role);
+    return successResponse(res, result, "User created");
+  } catch (error: any) {
+    return errorResponse(res, error.message, 400);
+  }
+});
+
 router.post("/login", async (req, res) => {
   try {
     const { username, password } = req.body;

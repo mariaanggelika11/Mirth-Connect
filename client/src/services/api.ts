@@ -1,6 +1,6 @@
 import axios from "axios";
 import { Channel, ChannelFormData, ChannelStatus, LogEntry, MonitorStats } from "../types";
-import { MOCK_LOGS, MOCK_HISTORICAL_LOGS, MOCK_STATS } from "./mockData";
+import { MOCK_LOGS, MOCK_HISTORICAL_LOGS } from "./mockData";
 
 const API_DELAY = 500;
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:9000";
@@ -12,21 +12,9 @@ const api = axios.create({
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// ====================================================
-// HEALTH CHECK
-// ====================================================
-export const checkServerStatus = async (): Promise<{ status: string }> => {
-  try {
-    await api.get("/health");
-    return { status: "ok" };
-  } catch {
-    throw new Error("Failed to connect to server");
-  }
-};
-
-// ====================================================
-// CHANNEL API
-// ====================================================
+/* ====================================================
+   CHANNEL API
+==================================================== */
 export const fetchChannels = async (): Promise<Channel[]> => {
   const { data } = await api.get("/channel");
   return data;
@@ -52,43 +40,39 @@ export const updateChannelStatus = async (id: number, status: ChannelStatus): Pr
   return res.data;
 };
 
-// ====================================================
-// DESTINATION API
-// ====================================================
-
-/**
- * Kirim payload hasil transform ke semua destination channel
- * @param channelId ID channel
- * @param messageId ID pesan dari tabel Messages
- * @param payload Payload hasil transformasi
- */
+/* ====================================================
+   DESTINATION API
+==================================================== */
 export const sendToDestinations = async (channelId: number, messageId: number, payload: object): Promise<{ message: string; results: any[] }> => {
   const { data } = await api.post("/destination/send", { channelId, messageId, payload });
   return data;
 };
 
-/**
- * Ambil log pengiriman per message
- * @param messageId ID pesan
- */
-export const fetchDestinationLogs = async (
-  messageId: number
-): Promise<
-  {
-    id: number;
-    destination_name: string;
-    status: string;
-    response_text: string;
-    sent_at: string;
-  }[]
-> => {
+export const fetchDestinationLogs = async (messageId: number) => {
   const { data } = await api.get(`/destination/log/${messageId}`);
-  return data;
+
+  return data.map((d: any) => ({
+    id: d.id,
+    destinationName: d.destination_name,
+    status: d.status,
+    responseText: d.response_text,
+    requestData: safeParse(d.request_data),
+    outboundData: safeParse(d.outbound_data),
+    sentAt: d.sent_at,
+  }));
 };
 
-// ====================================================
-// FILE UPLOAD
-// ====================================================
+function safeParse(v: any) {
+  try {
+    return typeof v === "string" ? JSON.parse(v) : v;
+  } catch {
+    return v;
+  }
+}
+
+/* ====================================================
+   FILE UPLOAD
+==================================================== */
 export const uploadXmlConfig = async (file: File): Promise<{ message: string }> => {
   const formData = new FormData();
   formData.append("file", file);
@@ -99,32 +83,37 @@ export const uploadXmlConfig = async (file: File): Promise<{ message: string }> 
   return res.data;
 };
 
-// ====================================================
-// MONITORING & LOGS (sementara mock)
-// ====================================================
-// ====================================================
-// MONITORING & LOGS (sementara mock)
-// ====================================================
-/**
- * Ambil log pesan dari backend
- * @param channelId (opsional) filter berdasarkan channel ID
- */
 export const fetchLogs = async (channelId?: number): Promise<LogEntry[]> => {
   const { data } = await api.get("/message", { params: { channelId } });
 
   return data.map((msg: any) => ({
     id: msg.id,
-    channelId: msg.channel_id,
-    channelName: msg.channel_name || `Channel ${msg.channel_id}`,
-    timestamp: msg.created_at,
+
+    // ✔ sesuai backend
+    channelId: msg.channelId,
+    channelName: msg.channelName,
+
+    // ✔ pakai timestamp baru
+    timestamp: msg.timestamp,
+
     direction: msg.direction,
-    originalPayload: msg.original_payload ? JSON.parse(msg.original_payload) : {},
-    transformedPayload: msg.transformed_payload ? JSON.parse(msg.transformed_payload) : {},
-    status: msg.status?.toUpperCase() || "UNKNOWN", // ✅ penting!
-    level: msg.status === "ERROR" ? "ERROR" : "INFO", // ✅ biar LogLevelIndicator bisa jalan
-    message: `${msg.direction} - ${msg.status ?? "UNKNOWN"}`,
-    error: msg.error_detail ?? undefined,
-    content: msg.transformed_payload || msg.original_payload,
+    status: msg.status?.toUpperCase() || "UNKNOWN",
+    level: msg.level || "INFO",
+
+    message: `${msg.direction || "UNKNOWN"} - ${msg.status || "UNKNOWN"}`,
+
+    // ✔ sesuai backend
+    originalPayload: msg.originalPayload,
+    transformedPayload: msg.transformedPayload,
+
+    destinationLogs: (msg.destinationLogs || []).map((d: any) => ({
+      destinationName: d.destinationName,
+      status: d.status,
+      requestData: d.requestData,
+      outboundData: d.outboundData,
+      responseText: d.responseText,
+      sentAt: d.sentAt,
+    })),
   }));
 };
 
@@ -133,29 +122,30 @@ export const fetchHistoricalLogs = async (): Promise<LogEntry[]> => {
   return JSON.parse(JSON.stringify(MOCK_HISTORICAL_LOGS));
 };
 
-/**
- * Ambil statistik total dari backend
- */
 export const fetchMonitorStats = async (): Promise<MonitorStats> => {
   const { data } = await api.get("/message/stats");
   return {
     totalReceived: data.totalReceived || 0,
     totalSent: data.totalSent || 0,
     totalErrors: data.totalErrors || 0,
-    channelsRunning: 0, // nanti bisa dihitung dari /api/channel
+    channelsRunning: 0,
     channelsStopped: 0,
     channelsError: 0,
   };
 };
-export const resendMessage = async (logId: number): Promise<{ message: string }> => {
-  await sleep(API_DELAY);
-  return { message: `Message from log ${logId} has been successfully resent.` };
-};
 
-// ====================================================
-// AUTHENTICATION
-// ====================================================
+/* ====================================================
+   AUTH
+==================================================== */
 export const login = async (username: string, password: string): Promise<{ token: string }> => {
   const { data } = await api.post("/auth/login", { username, password });
   return { token: data.data?.token || data.token };
 };
+
+/* ====================================================
+   RESEND OUTBOUND
+==================================================== */
+export async function resendMessage(id: number) {
+  const { data } = await api.post(`/message/resend/${id}`);
+  return data;
+}

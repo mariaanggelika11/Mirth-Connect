@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { Modal } from "../components/shared/Modal";
 import { Button } from "../components/shared/Button";
-import { DestinationType, Channel, ChannelFormData } from "../types";
+import { DestinationType, Channel, ChannelFormData, DataType } from "../types";
 import { TrashIcon, CodeIcon } from "../components/icons/Icon";
 import { ScriptEditorModal } from "../components/shared/ScriptEditorModal";
 
 interface ChannelFormProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (data: ChannelFormData) => void;
+  onSubmit: (data: ChannelFormData) => Promise<void> | void;
   initialData?: Channel | null;
 }
 
@@ -16,54 +16,82 @@ interface DestinationFormData {
   name: string;
   type: DestinationType;
   endpoint: string;
+  outboundDataType: DataType;
   processingScript?: string;
+  responseScript?: string;
+  templateScript?: string;
 }
 
 const DEFAULT_DESTINATION: DestinationFormData = {
   name: "",
   type: DestinationType.HL7,
   endpoint: "",
+  outboundDataType: DataType.HL7V2,
   processingScript: "",
+  responseScript: "",
+  templateScript: "",
 };
 
 const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, initialData }) => {
   const [name, setName] = useState("");
+  const [sourceConnectorType, setSourceConnectorType] = useState<"HTTP" | "HL7">("HTTP");
   const [sourceEndpoint, setSourceEndpoint] = useState("");
+  const [sourceInboundDataType, setSourceInboundDataType] = useState<DataType>(DataType.HL7V2);
+  const [sourceTransformerScript, setSourceTransformerScript] = useState("");
+
   const [destinations, setDestinations] = useState<DestinationFormData[]>([{ ...DEFAULT_DESTINATION }]);
-  const [processingScript, setProcessingScript] = useState("");
-  const [responseScript, setResponseScript] = useState("");
-  const [editingScriptForDestination, setEditingScriptForDestination] = useState<number | null>(null);
+
+  const [editingScriptForDestination, setEditingScriptForDestination] = useState<{
+    index: number;
+    type: "processing" | "response" | "template";
+  } | null>(null);
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [successMsg, setSuccessMsg] = useState("");
 
   const isEditing = !!initialData;
 
+  // LOAD INITIAL DATA
   useEffect(() => {
     if (!isOpen) return;
 
     if (isEditing && initialData) {
       setName(initialData.name || "");
+      const srcType = initialData.source?.type;
+      setSourceConnectorType(srcType === "HL7" ? "HL7" : "HTTP");
       setSourceEndpoint(initialData.source?.endpoint || "");
+      setSourceInboundDataType(initialData.source?.inboundDataType || DataType.HL7V2);
+      setSourceTransformerScript(initialData.processingScript || "");
+
       setDestinations(
         initialData.destinations?.length
           ? initialData.destinations.map((d) => ({
               name: d.name || "",
               type: d.type || DestinationType.HL7,
               endpoint: d.endpoint || "",
+              outboundDataType: d.outboundDataType || DataType.HL7V2,
               processingScript: d.processingScript || "",
+              responseScript: d.responseScript || "",
+              templateScript: d.templateScript || "",
             }))
           : [{ ...DEFAULT_DESTINATION }]
       );
-      setProcessingScript(initialData.processingScript || "");
-      setResponseScript(initialData.responseScript || "");
     } else {
       setName("");
+      setSourceConnectorType("HTTP");
       setSourceEndpoint("");
+      setSourceInboundDataType(DataType.HL7V2);
+      setSourceTransformerScript("");
       setDestinations([{ ...DEFAULT_DESTINATION }]);
-      setProcessingScript("");
-      setResponseScript("");
+      setErrors({});
+      setSuccessMsg("");
     }
   }, [isOpen, initialData, isEditing]);
 
+  // ADD / REMOVE DESTINATION
   const handleAddDestination = () => setDestinations((prev) => [...prev, { ...DEFAULT_DESTINATION }]);
+
   const handleRemoveDestination = (index: number) => setDestinations((prev) => prev.filter((_, i) => i !== index));
 
   const handleDestinationChange = (index: number, field: keyof DestinationFormData, value: string) => {
@@ -74,60 +102,151 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
     });
   };
 
+  // SCRIPT SAVE
   const handleDestinationScriptSave = (script: string) => {
     if (editingScriptForDestination !== null) {
-      handleDestinationChange(editingScriptForDestination, "processingScript", script);
+      const { index, type } = editingScriptForDestination;
+
+      if (type === "processing") handleDestinationChange(index, "processingScript", script);
+      else if (type === "response") handleDestinationChange(index, "responseScript", script);
+      else if (type === "template") handleDestinationChange(index, "templateScript", script);
+
       setEditingScriptForDestination(null);
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSubmit({
-      name,
-      source: { type: "HTTP", endpoint: sourceEndpoint },
-      destinations,
-      processingScript,
-      responseScript,
+  // VALIDATION
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+
+    if (!name.trim()) newErrors.name = "Channel name is required.";
+
+    if (sourceConnectorType === "HTTP" && !sourceEndpoint.trim()) {
+      newErrors.sourceEndpoint = "Endpoint is required for HTTP source.";
+    }
+
+    destinations.forEach((d, i) => {
+      if (!d.name.trim()) newErrors[`dest_name_${i}`] = "Destination name is required.";
+      if (!d.endpoint.trim()) newErrors[`dest_endpoint_${i}`] = "Endpoint is required.";
     });
-    onClose();
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
+
+  // SUBMIT FORM
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validateForm()) return;
+
+    try {
+      setSubmitting(true);
+
+      await onSubmit({
+        name,
+        source: {
+          type: sourceConnectorType,
+          endpoint: sourceEndpoint,
+          inboundDataType: sourceInboundDataType,
+        },
+        processingScript: sourceTransformerScript,
+        destinations,
+      });
+
+      setSuccessMsg(isEditing ? "Channel updated successfully" : "Channel created successfully");
+
+      setTimeout(() => {
+        setSubmitting(false);
+        onClose();
+      }, 600);
+    } catch (err) {
+      setErrors({ global: "Failed to save channel." });
+      setSubmitting(false);
+    }
+  };
+
+  const dataTypeOptions = [
+    { value: DataType.HL7V2, label: "HL7 v2.x" },
+    { value: DataType.XML, label: "XML" },
+    { value: DataType.JSON, label: "JSON" },
+    { value: DataType.TEXT, label: "Text" },
+  ];
+
+  const sourceConnectorOptions = [
+    { value: "HTTP", label: "HTTP Receiver" },
+    { value: "HL7", label: "HL7/MLLP Listener" },
+  ];
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={onClose} title={isEditing ? "Edit Channel" : "Create New Channel"} keepMounted>
+      <Modal isOpen={isOpen} onClose={onClose} title="Create / Edit Channel" keepMounted>
         <form onSubmit={handleSubmit}>
           <div className="p-6 space-y-4">
-            <Input label="Channel Name" value={name} onChange={setName} placeholder="e.g., Patient Admissions (ADT)" />
+            <Input label="Channel Name" value={name} onChange={setName} error={errors.name} />
 
-            <Section title="Source (HTTP)">
-              <Input label="Source Endpoint" value={sourceEndpoint} onChange={setSourceEndpoint} placeholder="/api/adt" />
+            {/* SOURCE SECTION */}
+            <Section title="Source Connector">
+              <Select label="Source Connector Type" value={sourceConnectorType} onChange={(v) => setSourceConnectorType(v as "HTTP" | "HL7")} options={sourceConnectorOptions} />
+
+              {/* Show endpoint only for HTTP */}
+              {sourceConnectorType === "HTTP" && <Input label="Source Endpoint" value={sourceEndpoint} onChange={setSourceEndpoint} placeholder="/api/adt" error={errors.sourceEndpoint} />}
+
+              <Select label="Inbound Data Type" value={sourceInboundDataType} onChange={(v) => setSourceInboundDataType(v as DataType)} options={dataTypeOptions} />
+
+              <TextArea label="Source Transformer Script" value={sourceTransformerScript} onChange={setSourceTransformerScript} help="Optional JS executed before routing." />
             </Section>
 
-            <Section title="Channel Scripts (Optional)">
-              <TextArea label="Processing Script (runs before destinations)" value={processingScript} onChange={setProcessingScript} help="JavaScript to transform the message before sending to any destination." />
-              <TextArea label="Response Script" value={responseScript} onChange={setResponseScript} help="JavaScript to generate the HTTP response to the sender." />
-            </Section>
-
+            {/* DESTINATIONS */}
             <Section title="Destinations">
               {destinations.map((dest, index) => (
-                <div key={index} className="p-4 bg-slate-800/70 rounded-md mb-3 space-y-4 relative border border-slate-700">
+                <div key={index} className="p-4 bg-slate-800/70 rounded-md border border-slate-700 space-y-4 mb-4 relative">
+                  <Input label="Destination Name" value={dest.name} onChange={(v) => handleDestinationChange(index, "name", v)} error={errors[`dest_name_${index}`]} />
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Input label="Destination Name" value={dest.name} onChange={(v) => handleDestinationChange(index, "name", v)} placeholder="EMR HL7 Feed" />
+                    {/* FIX: safe cast for DestinationType */}
                     <Select
-                      label="Type"
+                      label="Connector Type"
                       value={dest.type}
+                      onChange={(v) => handleDestinationChange(index, "type", v === "REST" ? "REST" : v === "HL7" ? "HL7" : "MLLP")}
                       options={[
-                        { value: DestinationType.HL7, label: "HL7" },
-                        { value: DestinationType.REST, label: "REST" },
+                        { value: "REST", label: "REST" },
+                        { value: "HL7", label: "HL7 (MLLP)" },
+                        { value: "MLLP", label: "MLLP (Raw HL7)" },
                       ]}
-                      onChange={(v) => handleDestinationChange(index, "type", v)}
+                    />
+
+                    {/* FIX: safely convert outboundDataType */}
+                    <Select
+                      label="Outbound Data Type"
+                      value={dest.outboundDataType}
+                      onChange={(v) => {
+                        const mapped = v === "HL7V2" ? DataType.HL7V2 : v === "XML" ? DataType.XML : v === "JSON" ? DataType.JSON : DataType.TEXT;
+
+                        handleDestinationChange(index, "outboundDataType", mapped);
+                      }}
+                      options={dataTypeOptions}
                     />
                   </div>
-                  <Input label="Endpoint" value={dest.endpoint} onChange={(v) => handleDestinationChange(index, "endpoint", v)} placeholder="emr.hospital.local:5000" />
-                  <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination(index)}>
-                    <CodeIcon /> {dest.processingScript ? "Edit Script" : "Add Script"}
-                  </Button>
+
+                  <Input label="Endpoint" value={dest.endpoint} onChange={(v) => handleDestinationChange(index, "endpoint", v)} placeholder="example: localhost:5000" error={errors[`dest_endpoint_${index}`]} />
+
+                  <div className="flex flex-col md:flex-row gap-2">
+                    <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "processing" })}>
+                      <CodeIcon />
+                      {dest.processingScript ? "Edit Transformer" : "Add Transformer"}
+                    </Button>
+
+                    <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "response" })}>
+                      <CodeIcon />
+                      {dest.responseScript ? "Edit Response" : "Add Response"}
+                    </Button>
+
+                    <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "template" })}>
+                      <CodeIcon />
+                      {dest.templateScript ? "Edit Template" : "Add Template"}
+                    </Button>
+                  </div>
+
                   {destinations.length > 1 && (
                     <button type="button" onClick={() => handleRemoveDestination(index)} className="absolute top-2 right-2 p-1 text-slate-400 hover:text-red-400">
                       <TrashIcon />
@@ -135,17 +254,23 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
                   )}
                 </div>
               ))}
+
               <Button type="button" variant="secondary" onClick={handleAddDestination}>
                 Add Destination
               </Button>
             </Section>
+
+            {errors.global && <p className="text-red-400 text-sm">{errors.global}</p>}
+            {successMsg && <p className="text-green-400 text-sm">{successMsg}</p>}
           </div>
 
-          <div className="bg-slate-900/50 px-6 py-4 flex justify-end gap-3 border-t border-slate-700 sticky bottom-0">
+          <div className="px-6 py-4 flex justify-end gap-3 border-t border-slate-700 bg-slate-900/50">
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit">{isEditing ? "Save Changes" : "Create Channel"}</Button>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? "Saving..." : "Save Channel"}
+            </Button>
           </div>
         </form>
       </Modal>
@@ -155,26 +280,33 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
           isOpen={true}
           onClose={() => setEditingScriptForDestination(null)}
           onSave={handleDestinationScriptSave}
-          initialScript={destinations[editingScriptForDestination]?.processingScript || ""}
-          title={`Edit Script for: ${destinations[editingScriptForDestination]?.name || "New Destination"}`}
+          initialScript={
+            editingScriptForDestination.type === "processing"
+              ? destinations[editingScriptForDestination.index]?.processingScript || ""
+              : editingScriptForDestination.type === "response"
+              ? destinations[editingScriptForDestination.index]?.responseScript || ""
+              : destinations[editingScriptForDestination.index]?.templateScript || ""
+          }
+          title={`Edit ${editingScriptForDestination.type === "processing" ? "Transformer" : editingScriptForDestination.type === "response" ? "Response" : "Template"} Script`}
         />
       )}
     </>
   );
 };
 
-// small reusable inputs for cleaner code
-const Input = ({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) => (
+// INPUT COMPONENTS
+const Input = ({ label, value, onChange, placeholder, error }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; error?: string }) => (
   <div>
     <label className="block text-sm font-medium text-slate-300 mb-1">{label}</label>
-    <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="w-full bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white focus:ring-indigo-500 focus:border-indigo-500" />
+    <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={`w-full bg-slate-700 border ${error ? "border-red-500" : "border-slate-600"} rounded-md px-3 py-2 text-white`} />
+    {error && <p className="text-red-400 text-xs mt-1">{error}</p>}
   </div>
 );
 
 const TextArea = ({ label, value, onChange, help }: { label: string; value: string; onChange: (v: string) => void; help: string }) => (
   <div>
     <label className="block text-sm font-medium text-slate-300 mb-1">{label}</label>
-    <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={5} className="w-full bg-slate-900 border border-slate-600 rounded-md px-3 py-2 text-cyan-300 font-mono text-sm focus:ring-indigo-500 focus:border-indigo-500" />
+    <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={5} className="w-full bg-slate-900 border border-slate-600 rounded-md px-3 py-2 text-cyan-300 font-mono text-sm" />
     <p className="text-xs text-slate-500 mt-1">{help}</p>
   </div>
 );
@@ -182,7 +314,7 @@ const TextArea = ({ label, value, onChange, help }: { label: string; value: stri
 const Select = ({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) => (
   <div>
     <label className="block text-sm font-medium text-slate-300 mb-1">{label}</label>
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white focus:ring-indigo-500 focus:border-indigo-500">
+    <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white">
       {options.map((opt) => (
         <option key={opt.value} value={opt.value}>
           {opt.label}

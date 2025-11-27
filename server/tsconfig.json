@@ -19,7 +19,9 @@
       "@services/*": ["services/*"],
       "@middleware/*": ["middleware/*"],
       "@utils/*": ["utils/*"]
-    }
+    },
+    "typeRoots": ["./node_modules/@types", "./src/types"],
+    "sourceMap": true
   },
   "include": ["src/**/*", "dummy-receiver.js"],
   "exclude": ["node_modules", "dist"]

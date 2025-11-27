@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "axios": "^1.12.2",
+    "lucide-react": "^0.553.0",
     "mirth-connect-monolith": "file:..",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
