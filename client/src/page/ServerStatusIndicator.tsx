@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { checkServerStatus } from "../services/api";
+import { checkServerStatus } from "../services/server.api";
 
 const ServerStatusIndicator: React.FC = () => {
   const [isConnected, setIsConnected] = useState<boolean>(false);

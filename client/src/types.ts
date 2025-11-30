@@ -9,7 +9,10 @@ export enum ChannelStatus {
 
 export enum DestinationType {
   HL7 = "HL7",
+  MLLP = "MLLP",
   REST = "REST",
+  TCP = "TCP",
+  RAW = "RAW",
 }
 
 export enum DataType {
@@ -24,7 +27,7 @@ export enum DataType {
 // ================================
 export interface Source {
   type: string;
-  endpoint: string;
+  endpoint?: string;
   inboundDataType?: DataType;
 }
 

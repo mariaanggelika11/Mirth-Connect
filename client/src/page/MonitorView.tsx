@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { fetchLogs, fetchChannels } from "../services/api";
+import { fetchChannels } from "../services/channel.api";
+import { fetchLogs } from "../services/message.api";
 import { LogEntry, Channel, LogLevel } from "../types";
 import { RefreshIcon } from "../components/icons/Icon";
 import { Button } from "../components/shared/Button";

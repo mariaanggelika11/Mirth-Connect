@@ -45,12 +45,15 @@ function detectRuntimeType(msg: any): string {
 function executeTemplateScript(templateScript, msg) {
   const context = { msg, hl7ToJson, jsonToHl7 };
 
-  const vm = new VM({ sandbox: context, timeout: 3000 });
+  const vm = new VM({
+    sandbox: context,
+    timeout: 3000,
+  });
 
   const wrapped = `
     (function () {
       try {
-        return (${templateScript});
+        ${templateScript}
       } catch (err) {
         throw new Error(
           "TemplateScriptError: " +
@@ -376,17 +379,26 @@ export async function processInboundMessage(channelId: number, payload: any) {
   // ======================================================
   // 3) LOOP DESTINATION
   // ======================================================
+
   const dests = (
     await pool.request().input("channel_id", channelId).query(`
-        SELECT * FROM Destinations 
-        WHERE channel_id=@channel_id AND ISNULL(is_enabled,1)=1
-      `)
+      SELECT * FROM Destinations 
+      WHERE channel_id=@channel_id AND ISNULL(is_enabled,1)=1
+    `)
   ).recordset;
 
   const outboundResults: any[] = [];
 
+  // Clone hasil SOURCE TRANSFORM sekali saja
+  const sourceResult = JSON.parse(JSON.stringify(transformed));
+
   for (const dest of dests) {
-    let msgForDest: any = transformed;
+    // pesan untuk tujuan ini (di-clone supaya transform tidak mempengaruhi channel lain)
+    let msgForDest = JSON.parse(JSON.stringify(sourceResult));
+
+    // sebelum transform = hasil source transform (INI YANG BENAR)
+    let beforeDestTransform = JSON.parse(JSON.stringify(sourceResult));
+
     let finalStatus: OutboundStatus = "OUT-SENT";
     let originalResponse = "";
     let responseText = "";
@@ -405,33 +417,28 @@ export async function processInboundMessage(channelId: number, payload: any) {
       // -----------------------------------------------
       // 3.b TEMPLATE SCRIPT
       // -----------------------------------------------
-      const hasTemplate = !!dest.template_script?.trim();
-      if (hasTemplate) {
+      if (dest.template_script?.trim()) {
         msgForDest = executeTemplateScript(dest.template_script, msgForDest);
       }
 
       // -----------------------------------------------
-      // 3.c FORMAT HANDLING (auto-convert)
+      // 3.c FORMAT HANDLING
       // -----------------------------------------------
       const runtimeType = detectRuntimeType(msgForDest);
 
-      if (!hasTemplate) {
-        if (outboundType === "HL7V2") {
-          if (runtimeType !== "HL7V2") {
-            msgForDest = typeof msgForDest === "string" ? msgForDest : JSON.stringify(msgForDest);
+      if (outboundType === "JSON") {
+        if (typeof msgForDest === "string") {
+          try {
+            msgForDest = JSON.parse(msgForDest);
+          } catch {
+            msgForDest = { raw: msgForDest };
           }
-        } else if (outboundType === "JSON") {
-          if (typeof msgForDest === "string") {
-            try {
-              msgForDest = JSON.parse(msgForDest);
-            } catch {
-              msgForDest = { raw: msgForDest };
-            }
-          }
-        } else if (outboundType === "XML") {
-          const builder = new Builder({ headless: true });
-          msgForDest = builder.buildObject(typeof msgForDest === "string" ? { raw: msgForDest } : msgForDest);
-        } else {
+        }
+      } else if (outboundType === "XML") {
+        const builder = new Builder({ headless: true });
+        msgForDest = builder.buildObject(typeof msgForDest === "string" ? { raw: msgForDest } : msgForDest);
+      } else if (outboundType === "HL7V2") {
+        if (runtimeType !== "HL7V2") {
           msgForDest = typeof msgForDest === "string" ? msgForDest : JSON.stringify(msgForDest);
         }
       }
@@ -470,7 +477,7 @@ export async function processInboundMessage(channelId: number, payload: any) {
       }
 
       // -----------------------------------------------
-      // 3.e RESPONSE SCRIPT (REST/HL7)
+      // 3.e RESPONSE SCRIPT
       // -----------------------------------------------
       if (dest.response_script?.trim()) {
         responseText = executeResponseScript(dest.response_script, msgForDest, originalResponse);
@@ -488,16 +495,13 @@ export async function processInboundMessage(channelId: number, payload: any) {
     const outboundMessageId = await insertOutboundMessage(pool, {
       channelId,
       messageType: dest.outbound_data_type || inboundType,
-      requestData: transformed,
+      requestData: beforeDestTransform, // <- FIX UTAMA
       outboundData: msgForDest,
       status: finalStatus,
       inboundId: inboundMessageId,
     });
 
-    // -----------------------------------------------
-    // 3.g SAVE DESTINATION LOG
-    // -----------------------------------------------
-    await logDestination(pool, outboundMessageId, dest.id, finalStatus, responseText, transformed, msgForDest);
+    await logDestination(pool, outboundMessageId, dest.id, finalStatus, responseText, beforeDestTransform, msgForDest);
 
     outboundResults.push({
       destinationId: dest.id,

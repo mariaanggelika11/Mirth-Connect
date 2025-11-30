@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, ReactNode } from "react";
-import { login as apiLogin } from "../services/api";
+import { login as apiLogin } from "../services/auth.api";
 
 interface AuthContextType {
   token: string | null;

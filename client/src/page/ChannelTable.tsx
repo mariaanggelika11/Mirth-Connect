@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Channel, ChannelStatus, Destination, DestinationType } from "../types";
-import { updateChannelStatus } from "../services/api";
+import { updateChannelStatus } from "../services/channel.api";
 import { PlayIcon, StopIcon, EditIcon, TrashIcon, ChevronDownIcon, CodeIcon } from "../components/icons/Icon";
 
 interface ChannelTableProps {
@@ -169,15 +169,15 @@ const ChannelRow: React.FC<{
           <td colSpan={7} className="p-0">
             <div className="p-4 bg-slate-900/50">
               <h4 className="font-semibold text-slate-200 mb-2">Destinations</h4>
-              <table className="min-w-full text-sm">
+              <table className="min-w-full text-sm table-fixed">
                 <thead className="text-slate-400">
                   <tr>
-                    <th className="text-left p-2 font-medium">Name</th>
-                    <th className="text-left p-2 font-medium">Type</th>
-                    <th className="text-left p-2 font-medium">Endpoint</th>
-                    <th className="text-center p-2 font-medium">Script</th>
-                    <th className="text-center p-2 font-medium">Sent</th>
-                    <th className="text-center p-2 font-medium">Errors</th>
+                    <th className="text-left p-2 font-medium w-64">Name</th>
+                    <th className="text-left p-2 font-medium w-20">Type</th>
+                    <th className="text-left p-2 font-medium w-64">Endpoint</th>
+                    <th className="text-center p-2 font-medium w-24">Script</th>
+                    <th className="text-center p-2 font-medium w-20">Sent</th>
+                    <th className="text-center p-2 font-medium w-20">Errors</th>
                   </tr>
                 </thead>
                 <tbody className="text-slate-300 divide-y divide-slate-700/50">

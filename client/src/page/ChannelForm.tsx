@@ -13,6 +13,8 @@ interface ChannelFormProps {
 }
 
 interface DestinationFormData {
+  id?: number;
+  channelId?: number;
   name: string;
   type: DestinationType;
   endpoint: string;
@@ -35,9 +37,13 @@ const DEFAULT_DESTINATION: DestinationFormData = {
 const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, initialData }) => {
   const [name, setName] = useState("");
   const [sourceConnectorType, setSourceConnectorType] = useState<"HTTP" | "HL7">("HTTP");
-  const [sourceEndpoint, setSourceEndpoint] = useState("");
   const [sourceInboundDataType, setSourceInboundDataType] = useState<DataType>(DataType.HL7V2);
   const [sourceTransformerScript, setSourceTransformerScript] = useState("");
+
+  // NEW: state untuk modal source script
+  const [editingSourceScript, setEditingSourceScript] = useState(false);
+
+  const [autoEndpoint, setAutoEndpoint] = useState("");
 
   const [destinations, setDestinations] = useState<DestinationFormData[]>([{ ...DEFAULT_DESTINATION }]);
 
@@ -52,7 +58,9 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
 
   const isEditing = !!initialData;
 
-  // LOAD INITIAL DATA
+  /* =========================================================
+     LOAD INITIAL DATA
+  ========================================================= */
   useEffect(() => {
     if (!isOpen) return;
 
@@ -60,13 +68,15 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
       setName(initialData.name || "");
       const srcType = initialData.source?.type;
       setSourceConnectorType(srcType === "HL7" ? "HL7" : "HTTP");
-      setSourceEndpoint(initialData.source?.endpoint || "");
+      setAutoEndpoint(initialData.source?.endpoint || "");
       setSourceInboundDataType(initialData.source?.inboundDataType || DataType.HL7V2);
       setSourceTransformerScript(initialData.processingScript || "");
 
       setDestinations(
         initialData.destinations?.length
           ? initialData.destinations.map((d) => ({
+              id: d.id,
+              channelId: d.channel_id,
               name: d.name || "",
               type: d.type || DestinationType.HL7,
               endpoint: d.endpoint || "",
@@ -80,7 +90,7 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
     } else {
       setName("");
       setSourceConnectorType("HTTP");
-      setSourceEndpoint("");
+      setAutoEndpoint("");
       setSourceInboundDataType(DataType.HL7V2);
       setSourceTransformerScript("");
       setDestinations([{ ...DEFAULT_DESTINATION }]);
@@ -89,10 +99,14 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
     }
   }, [isOpen, initialData, isEditing]);
 
-  // ADD / REMOVE DESTINATION
+  /* =========================================================
+     Add / Remove Destinations
+  ========================================================= */
   const handleAddDestination = () => setDestinations((prev) => [...prev, { ...DEFAULT_DESTINATION }]);
 
-  const handleRemoveDestination = (index: number) => setDestinations((prev) => prev.filter((_, i) => i !== index));
+  const handleRemoveDestination = (index: number) => {
+    setDestinations((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const handleDestinationChange = (index: number, field: keyof DestinationFormData, value: string) => {
     setDestinations((prev) => {
@@ -102,7 +116,9 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
     });
   };
 
-  // SCRIPT SAVE
+  /* =========================================================
+     SAVE SCRIPT DESTINATION
+  ========================================================= */
   const handleDestinationScriptSave = (script: string) => {
     if (editingScriptForDestination !== null) {
       const { index, type } = editingScriptForDestination;
@@ -115,15 +131,13 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
     }
   };
 
-  // VALIDATION
+  /* =========================================================
+     VALIDATION
+  ========================================================= */
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
     if (!name.trim()) newErrors.name = "Channel name is required.";
-
-    if (sourceConnectorType === "HTTP" && !sourceEndpoint.trim()) {
-      newErrors.sourceEndpoint = "Endpoint is required for HTTP source.";
-    }
 
     destinations.forEach((d, i) => {
       if (!d.name.trim()) newErrors[`dest_name_${i}`] = "Destination name is required.";
@@ -134,7 +148,9 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
     return Object.keys(newErrors).length === 0;
   };
 
-  // SUBMIT FORM
+  /* =========================================================
+     SUBMIT FORM
+  ========================================================= */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateForm()) return;
@@ -146,7 +162,6 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
         name,
         source: {
           type: sourceConnectorType,
-          endpoint: sourceEndpoint,
           inboundDataType: sourceInboundDataType,
         },
         processingScript: sourceTransformerScript,
@@ -165,6 +180,9 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
     }
   };
 
+  /* =========================================================
+     SELECT OPTIONS
+  ========================================================= */
   const dataTypeOptions = [
     { value: DataType.HL7V2, label: "HL7 v2.x" },
     { value: DataType.XML, label: "XML" },
@@ -177,6 +195,9 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
     { value: "HL7", label: "HL7/MLLP Listener" },
   ];
 
+  /* =========================================================
+     UI
+  ========================================================= */
   return (
     <>
       <Modal isOpen={isOpen} onClose={onClose} title="Create / Edit Channel" keepMounted>
@@ -188,12 +209,20 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
             <Section title="Source Connector">
               <Select label="Source Connector Type" value={sourceConnectorType} onChange={(v) => setSourceConnectorType(v as "HTTP" | "HL7")} options={sourceConnectorOptions} />
 
-              {/* Show endpoint only for HTTP */}
-              {sourceConnectorType === "HTTP" && <Input label="Source Endpoint" value={sourceEndpoint} onChange={setSourceEndpoint} placeholder="/api/adt" error={errors.sourceEndpoint} />}
+              {isEditing && autoEndpoint && (
+                <div>
+                  <label className="block text-sm text-slate-300 mb-1">Auto Generated Endpoint</label>
+                  <input value={autoEndpoint} readOnly className="w-full bg-slate-800 border border-slate-600 rounded-md px-3 py-2 text-slate-400" />
+                  <p className="text-xs text-slate-500 mt-1">Generated automatically by backend</p>
+                </div>
+              )}
 
               <Select label="Inbound Data Type" value={sourceInboundDataType} onChange={(v) => setSourceInboundDataType(v as DataType)} options={dataTypeOptions} />
-
-              <TextArea label="Source Transformer Script" value={sourceTransformerScript} onChange={setSourceTransformerScript} help="Optional JS executed before routing." />
+              {/* NEW BUTTON SOURCE SCRIPT */}
+              <Button type="button" variant="secondary" onClick={() => setEditingSourceScript(true)}>
+                <CodeIcon />
+                {sourceTransformerScript ? "Edit Source Script" : "Add Source Script"}
+              </Button>
             </Section>
 
             {/* DESTINATIONS */}
@@ -203,7 +232,6 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
                   <Input label="Destination Name" value={dest.name} onChange={(v) => handleDestinationChange(index, "name", v)} error={errors[`dest_name_${index}`]} />
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* FIX: safe cast for DestinationType */}
                     <Select
                       label="Connector Type"
                       value={dest.type}
@@ -215,7 +243,6 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
                       ]}
                     />
 
-                    {/* FIX: safely convert outboundDataType */}
                     <Select
                       label="Outbound Data Type"
                       value={dest.outboundDataType}
@@ -231,17 +258,44 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
                   <Input label="Endpoint" value={dest.endpoint} onChange={(v) => handleDestinationChange(index, "endpoint", v)} placeholder="example: localhost:5000" error={errors[`dest_endpoint_${index}`]} />
 
                   <div className="flex flex-col md:flex-row gap-2">
-                    <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "processing" })}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() =>
+                        setEditingScriptForDestination({
+                          index,
+                          type: "processing",
+                        })
+                      }
+                    >
                       <CodeIcon />
                       {dest.processingScript ? "Edit Transformer" : "Add Transformer"}
                     </Button>
 
-                    <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "response" })}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() =>
+                        setEditingScriptForDestination({
+                          index,
+                          type: "response",
+                        })
+                      }
+                    >
                       <CodeIcon />
                       {dest.responseScript ? "Edit Response" : "Add Response"}
                     </Button>
 
-                    <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "template" })}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() =>
+                        setEditingScriptForDestination({
+                          index,
+                          type: "template",
+                        })
+                      }
+                    >
                       <CodeIcon />
                       {dest.templateScript ? "Edit Template" : "Add Template"}
                     </Button>
@@ -275,6 +329,21 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
         </form>
       </Modal>
 
+      {/* SOURCE SCRIPT MODAL */}
+      {editingSourceScript && (
+        <ScriptEditorModal
+          isOpen={true}
+          onClose={() => setEditingSourceScript(false)}
+          onSave={(newScript) => {
+            setSourceTransformerScript(newScript);
+            setEditingSourceScript(false);
+          }}
+          initialScript={sourceTransformerScript}
+          title="Edit Source Transformer Script"
+        />
+      )}
+
+      {/* DESTINATION SCRIPT MODAL */}
       {editingScriptForDestination !== null && (
         <ScriptEditorModal
           isOpen={true}
@@ -294,7 +363,9 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
   );
 };
 
-// INPUT COMPONENTS
+/* =========================================================
+   SMALL INPUT COMPONENTS
+========================================================= */
 const Input = ({ label, value, onChange, placeholder, error }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; error?: string }) => (
   <div>
     <label className="block text-sm font-medium text-slate-300 mb-1">{label}</label>

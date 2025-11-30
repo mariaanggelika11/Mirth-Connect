@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { fetchMonitorStats } from "../services/api";
+import { fetchMonitorStats } from "../services/monitor.api";
 import { MonitorStats } from "../types";
 
 //  Komponen kecil untuk 1 kartu metrik

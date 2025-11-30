@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { LogEntry } from "../types";
 import { ChevronDownIcon } from "../components/icons/Icon";
-import { sendToDestinations } from "../services/api";
+import { sendToDestinations } from "../services/destination.api";
 
 interface LogStreamProps {
   logs: LogEntry[];

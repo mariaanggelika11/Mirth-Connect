@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { fetchChannels, createChannel, uploadXmlConfig, updateChannel, deleteChannel } from "../services/api";
+import { fetchChannels, createChannel, updateChannel, deleteChannel } from "../services/channel.api";
+import { uploadXmlConfig } from "../services/upload.api";
 import { Channel, ChannelFormData } from "../types";
 import ChannelTable from "../page/ChannelTable";
 import ChannelForm from "./ChannelForm";
@@ -129,7 +130,7 @@ const ChannelDashboard: React.FC = () => {
 
       {React.useMemo(
         () => (
-          <ChannelForm key={editingChannel ? editingChannel.id : "new"} isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} onSubmit={handleFormSubmit} initialData={editingChannel} />
+          <ChannelForm key={editingChannel ? `edit-${editingChannel.id}-${isFormOpen}` : `new-${isFormOpen}`} isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} onSubmit={handleFormSubmit} initialData={editingChannel} />
         ),
         [isFormOpen, editingChannel]
       )}
