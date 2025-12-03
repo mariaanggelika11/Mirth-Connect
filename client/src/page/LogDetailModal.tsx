@@ -1,15 +1,20 @@
 import React, { useState } from "react";
 import { LogEntry, DestinationLog } from "../types";
 import { Button } from "../components/shared/Button";
+import { HL7Tree } from "../components/shared/HL7Tree";
+
+// =============== HELPERS ===============
+const isHL7 = (data: any) => {
+  if (!data) return false;
+  if (typeof data !== "string") return false;
+  return data.trim().startsWith("MSH|");
+};
 
 interface LogDetailModalProps {
   log: LogEntry;
   onClose: () => void;
 }
 
-/* ============================
-   STATUS BADGE (SAFE TS)
-============================ */
 const StatusBadge = ({ status }: { status: string }) => {
   const s = (status ?? "UNKNOWN").toUpperCase();
 
@@ -17,7 +22,6 @@ const StatusBadge = ({ status }: { status: string }) => {
     "OUT-SENT": "bg-green-700 text-green-200",
     "OUT-ERROR": "bg-red-700 text-red-200",
 
-    // inbound statuses
     SUCCESS: "bg-green-700 text-green-200",
     FAILED: "bg-red-700 text-red-200",
     PARTIAL: "bg-yellow-600 text-yellow-200",
@@ -33,9 +37,17 @@ const StatusBadge = ({ status }: { status: string }) => {
 
 const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
   const [viewMode, setViewMode] = useState({
-    inbound: "pretty",
-    outbound: "pretty",
-    destination: {} as Record<number, { open: boolean; request: "pretty" | "raw"; outbound: "pretty" | "raw"; response: "pretty" | "raw" }>,
+    inbound: "pretty" as "pretty" | "raw" | "tree",
+    outbound: "pretty" as "pretty" | "raw" | "tree",
+    destination: {} as Record<
+      number,
+      {
+        open: boolean;
+        request: "pretty" | "raw" | "tree";
+        outbound: "pretty" | "raw" | "tree";
+        response: "pretty" | "raw" | "tree";
+      }
+    >,
   });
 
   const toggleDest = (i: number) => {
@@ -71,6 +83,21 @@ const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
     return isNaN(parsed.getTime()) ? "-" : parsed.toLocaleString("en-US", { timeZone: "America/New_York" });
   };
 
+  // ============================================
+  // RENDER PAYLOAD VIEWER
+  // ============================================
+  const RenderPayload = (mode: string, content: any) => {
+    if (mode === "tree") {
+      return (
+        <div className="bg-slate-800 p-2 rounded-md h-64 overflow-auto border border-slate-700">
+          <HL7Tree hl7={typeof content === "string" ? content : JSON.stringify(content)} />
+        </div>
+      );
+    }
+
+    return <pre className="bg-slate-800 text-cyan-300 text-xs p-4 rounded-md overflow-x-auto">{mode === "pretty" ? formatJSON(content, true) : formatJSON(content, false)}</pre>;
+  };
+
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-900 rounded-xl shadow-2xl border border-slate-700 w-[950px] max-h-[90vh] overflow-y-auto">
@@ -88,23 +115,18 @@ const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
             <div>
               <strong>Timestamp:</strong>
               <br />
-              {new Date(log.timestamp).toLocaleString("en-US", {
-                timeZone: "America/New_York",
-              })}
+              {safeDate(log.timestamp)}
             </div>
-
             <div>
               <strong>Channel:</strong>
               <br />
               {log.channelName}
             </div>
-
             <div>
               <strong>Status:</strong>
               <br />
               <StatusBadge status={log.status ?? "UNKNOWN"} />
             </div>
-
             <div>
               <strong>Level:</strong>
               <br />
@@ -114,38 +136,48 @@ const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
 
           {/* PAYLOADS */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* INBOUND */}
+            {/* INBOUND (TREE REMOVED) */}
             <div>
               <div className="flex justify-between mb-2">
                 <h3 className="text-slate-200 font-semibold">Inbound Payload</h3>
                 <div className="space-x-2">
-                  <Button variant={viewMode.inbound === "pretty" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, inbound: "pretty" }))}>
+                  {/* Pretty */}
+                  <Button onClick={() => setViewMode((v) => ({ ...v, inbound: "pretty" }))} variant={viewMode.inbound === "pretty" ? "primary" : "secondary"}>
                     Pretty
                   </Button>
-                  <Button variant={viewMode.inbound === "raw" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, inbound: "raw" }))}>
+
+                  {/* Raw */}
+                  <Button onClick={() => setViewMode((v) => ({ ...v, inbound: "raw" }))} variant={viewMode.inbound === "raw" ? "primary" : "secondary"}>
                     Raw
                   </Button>
                 </div>
               </div>
 
-              <pre className="bg-slate-800 text-cyan-300 text-xs p-4 rounded-md overflow-x-auto">{formatJSON(log.originalPayload, viewMode.inbound === "pretty")}</pre>
+              {RenderPayload(viewMode.inbound, log.originalPayload)}
             </div>
 
-            {/* OUTBOUND */}
+            {/* TRANSFORMED PAYLOAD — TREE ONLY IF HL7 */}
             <div>
               <div className="flex justify-between mb-2">
                 <h3 className="text-slate-200 font-semibold">Transformed Payload</h3>
+
                 <div className="space-x-2">
-                  <Button variant={viewMode.outbound === "pretty" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, outbound: "pretty" }))}>
+                  <Button onClick={() => setViewMode((v) => ({ ...v, outbound: "pretty" }))} variant={viewMode.outbound === "pretty" ? "primary" : "secondary"}>
                     Pretty
                   </Button>
-                  <Button variant={viewMode.outbound === "raw" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, outbound: "raw" }))}>
+                  {/* TREE ONLY IF HL7 */} {/* NEW */}
+                  {isHL7(log.transformedPayload) && (
+                    <Button onClick={() => setViewMode((v) => ({ ...v, outbound: "tree" }))} variant={viewMode.outbound === "tree" ? "primary" : "secondary"}>
+                      Tree
+                    </Button>
+                  )}
+                  <Button onClick={() => setViewMode((v) => ({ ...v, outbound: "raw" }))} variant={viewMode.outbound === "raw" ? "primary" : "secondary"}>
                     Raw
                   </Button>
                 </div>
               </div>
 
-              <pre className="bg-slate-800 text-cyan-300 text-xs p-4 rounded-md overflow-x-auto">{formatJSON(log.transformedPayload, viewMode.outbound === "pretty")}</pre>
+              {RenderPayload(viewMode.outbound, log.transformedPayload)}
             </div>
           </div>
 
@@ -167,32 +199,144 @@ const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
                     <div key={i} className="border border-slate-700 rounded-lg bg-slate-800/40">
                       {/* HEADER */}
                       <div className="flex justify-between items-center p-4 hover:bg-slate-700/30 cursor-pointer" onClick={() => toggleDest(i)}>
-                        <div>
-                          <h4 className="text-slate-100 font-semibold">{dest.destinationName ?? `Destination #${i + 1}`}</h4>
-                        </div>
-
+                        <h4 className="text-slate-100 font-semibold">{dest.destinationName ?? `Destination #${i + 1}`}</h4>
                         <StatusBadge status={dest.status ?? "OUT-UNKNOWN"} />
                       </div>
 
-                      {/* COLLAPSE CONTENT */}
                       {state.open && (
                         <div className="p-4 space-y-6">
-                          {/* REQUEST */}
+                          {/* REQUEST DATA (NO TREE) */}
                           <div>
-                            <h5 className="text-slate-300 font-medium mb-2">Request Data (Before Destination Transformer)</h5>
-                            <pre className="bg-slate-900 text-cyan-300 text-xs p-3 rounded-md overflow-x-auto">{formatJSON(dest.requestData, state.request === "pretty")}</pre>
+                            <h5 className="text-slate-300 font-medium mb-2">Request Data</h5>
+
+                            <div className="space-x-2 mb-2">
+                              <Button
+                                variant={state.request === "pretty" ? "primary" : "secondary"}
+                                onClick={() =>
+                                  setViewMode((v) => ({
+                                    ...v,
+                                    destination: {
+                                      ...v.destination,
+                                      [i]: { ...state, request: "pretty" },
+                                    },
+                                  }))
+                                }
+                              >
+                                Pretty
+                              </Button>
+
+                              <Button
+                                variant={state.request === "raw" ? "primary" : "secondary"}
+                                onClick={() =>
+                                  setViewMode((v) => ({
+                                    ...v,
+                                    destination: {
+                                      ...v.destination,
+                                      [i]: { ...state, request: "raw" },
+                                    },
+                                  }))
+                                }
+                              >
+                                Raw
+                              </Button>
+                            </div>
+
+                            {RenderPayload(state.request, dest.requestData)}
                           </div>
 
-                          {/* OUTBOUND FINAL */}
+                          {/* OUTBOUND DATA — TREE ONLY IF HL7 */}
                           <div>
-                            <h5 className="text-slate-300 font-medium mb-2">Outbound Data (Final Payload)</h5>
-                            <pre className="bg-slate-900 text-cyan-300 text-xs p-3 rounded-md overflow-x-auto">{formatJSON(dest.outboundData, state.outbound === "pretty")}</pre>
+                            <h5 className="text-slate-300 font-medium mb-2">Outbound Data</h5>
+
+                            <div className="space-x-2 mb-2">
+                              <Button
+                                variant={state.outbound === "pretty" ? "primary" : "secondary"}
+                                onClick={() =>
+                                  setViewMode((v) => ({
+                                    ...v,
+                                    destination: {
+                                      ...v.destination,
+                                      [i]: { ...state, outbound: "pretty" },
+                                    },
+                                  }))
+                                }
+                              >
+                                Pretty
+                              </Button>
+                              {/* TREE ONLY IF OUTBOUND HL7 */} {/* NEW */}
+                              {isHL7(dest.outboundData) && (
+                                <Button
+                                  variant={state.outbound === "tree" ? "primary" : "secondary"}
+                                  onClick={() =>
+                                    setViewMode((v) => ({
+                                      ...v,
+                                      destination: {
+                                        ...v.destination,
+                                        [i]: { ...state, outbound: "tree" },
+                                      },
+                                    }))
+                                  }
+                                >
+                                  Tree
+                                </Button>
+                              )}
+                              <Button
+                                variant={state.outbound === "raw" ? "primary" : "secondary"}
+                                onClick={() =>
+                                  setViewMode((v) => ({
+                                    ...v,
+                                    destination: {
+                                      ...v.destination,
+                                      [i]: { ...state, outbound: "raw" },
+                                    },
+                                  }))
+                                }
+                              >
+                                Raw
+                              </Button>
+                            </div>
+
+                            {RenderPayload(state.outbound, dest.outboundData)}
                           </div>
 
-                          {/* RESPONSE */}
+                          {/* RESPONSE (NO TREE) */}
                           <div>
                             <h5 className="text-slate-300 font-medium mb-2">Destination Response</h5>
-                            <pre className="bg-slate-900 text-cyan-300 text-xs p-3 rounded-md overflow-x-auto">{formatJSON(dest.responseText, state.response === "pretty")}</pre>
+
+                            <div className="space-x-2 mb-2">
+                              <Button
+                                variant={state.response === "pretty" ? "primary" : "secondary"}
+                                onClick={() =>
+                                  setViewMode((v) => ({
+                                    ...v,
+                                    destination: {
+                                      ...v.destination,
+                                      [i]: { ...state, response: "pretty" },
+                                    },
+                                  }))
+                                }
+                              >
+                                Pretty
+                              </Button>
+
+                              <Button
+                                variant={state.response === "raw" ? "primary" : "secondary"}
+                                onClick={() =>
+                                  setViewMode((v) => ({
+                                    ...v,
+                                    destination: {
+                                      ...v.destination,
+                                      [i]: { ...state, response: "raw" },
+                                    },
+                                  }))
+                                }
+                              >
+                                Raw
+                              </Button>
+                            </div>
+
+                            {RenderPayload(state.response, dest.responseText)}
+
                             <p className="text-right text-xs text-slate-500 mt-2">Sent At: {safeDate(dest.sentAt)}</p>
                           </div>
                         </div>

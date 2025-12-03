@@ -81,3 +81,9 @@ export const RefreshIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
     <path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
   </svg>
 );
+
+export const ChevronRightIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+  </svg>
+);

@@ -180,7 +180,7 @@ export const createChannel = async (req: Request, res: Response) => {
     if (source.type === "HTTP") {
       finalEndpoint = `${BASE_URL}${INBOUND_BASE}${newChannelId}`;
     } else if (source.type === "HL7") {
-      finalEndpoint = `tcp://0.0.0.0:${DEFAULT_HL7_PORT}`;
+      finalEndpoint = `MLLP:${DEFAULT_HL7_PORT}`;
     }
 
     // Save endpoint

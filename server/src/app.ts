@@ -10,6 +10,7 @@ import channelRoutes from "./routes/channel.routes.js";
 import destinationRoutes from "./routes/destination.routes.js";
 import messageRoutes from "./routes/message.routes.js";
 import { startHl7Listener } from "./services/hl7Listener.services.js";
+import hl7Routes from "./routes/hl7.js";
 
 dotenv.config();
 const app = express();
@@ -18,10 +19,10 @@ const app = express();
 
 // REGISTER / LOGIN
 app.use("/api/auth", express.json(), authRoutes); // ⬅️ INI YANG HILANG
-
 app.use("/api/channel", express.json(), channelRoutes);
 app.use("/api/destination", express.json(), destinationRoutes);
 app.use("/api/message", messageRoutes);
+app.use("/api/hl7", express.json(), hl7Routes);
 
 // === CORS ===
 app.use(

@@ -209,7 +209,7 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
             <Section title="Source Connector">
               <Select label="Source Connector Type" value={sourceConnectorType} onChange={(v) => setSourceConnectorType(v as "HTTP" | "HL7")} options={sourceConnectorOptions} />
 
-              {isEditing && autoEndpoint && (
+              {autoEndpoint && (
                 <div>
                   <label className="block text-sm text-slate-300 mb-1">Auto Generated Endpoint</label>
                   <input value={autoEndpoint} readOnly className="w-full bg-slate-800 border border-slate-600 rounded-md px-3 py-2 text-slate-400" />
