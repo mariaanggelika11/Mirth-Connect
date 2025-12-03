@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, ReactNode } from "react";
+import React, { createContext, useState, useContext, ReactNode, useEffect } from "react";
 import { login as apiLogin } from "../services/auth.api";
 
 interface AuthContextType {
@@ -12,13 +12,22 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [token, setToken] = useState<string | null>(localStorage.getItem("authToken"));
+  const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    const savedToken = localStorage.getItem("authToken");
+    if (savedToken) {
+      setToken(savedToken);
+    }
+  }, []);
 
   const login = async (username: string, password: string) => {
     setIsLoading(true);
     try {
       const { token } = await apiLogin(username, password);
+
+      // simpan dan update state
       localStorage.setItem("authToken", token);
       setToken(token);
     } catch (error) {
@@ -33,7 +42,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setToken(null);
   };
 
-  return <AuthContext.Provider value={{ token, isLoggedIn: !!token, login, logout, isLoading }}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider
+      value={{
+        token,
+        isLoggedIn: !!token,
+        login,
+        logout,
+        isLoading,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
 };
 
 export const useAuth = () => {
