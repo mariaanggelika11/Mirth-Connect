@@ -42,7 +42,7 @@ function detectRuntimeType(msg: any): string {
   return "UNKNOWN";
 }
 
-function executeTemplateScript(templateScript, msg) {
+function executeTemplateScript(templateScript: string, msg: any) {
   const context = { msg, hl7ToJson, jsonToHl7 };
 
   const vm = new VM({
@@ -52,82 +52,16 @@ function executeTemplateScript(templateScript, msg) {
 
   const wrapped = `
     (function () {
-      try {
-        ${templateScript}
-      } catch (err) {
-        throw new Error(
-          "TemplateScriptError: " +
-          err.message +
-          "\\n--- TEMPLATE SCRIPT ---\\n" +
-          templateScript +
-          "\\n--- END SCRIPT ---"
-        );
-      }
+      ${templateScript}
+      return typeof msg !== "undefined" ? msg : undefined;
     })();
   `;
 
-  return vm.run(wrapped);
-}
-
-/* =====================================================================
-   HELPER: DATA CONVERSION (dipakai untuk RESEND & mode generic)
-   (sekarang belum terlalu dipakai, tapi disimpan kalau nanti perlu)
-===================================================================== */
-async function convertDataFormat(msg: any, fromType: string, toType: string) {
-  const f = (fromType || "").toUpperCase();
-  const t = (toType || "").toUpperCase();
-
-  if (f === t) return msg;
-
   try {
-    let data = msg;
-
-    if (f === "JSON" && typeof msg === "string") {
-      try {
-        data = JSON.parse(msg);
-      } catch {
-        throw new Error("Invalid JSON string during conversion");
-      }
-    }
-
-    if (f === "HL7V2" && t === "JSON") {
-      const hl7 = typeof data === "string" ? data : String(data);
-      return hl7ToJson(hl7);
-    }
-
-    if (f === "JSON" && t === "HL7V2") {
-      const obj = typeof data === "string" ? JSON.parse(data) : data;
-      return jsonToHl7(obj);
-    }
-
-    if (f === "XML" && t === "JSON") {
-      const xml = typeof data === "string" ? data : String(data);
-      return await parseStringPromise(xml);
-    }
-
-    if (f === "JSON" && t === "XML") {
-      const builder = new Builder({ headless: true });
-      const obj = typeof data === "string" ? JSON.parse(data) : data;
-      return builder.buildObject(obj);
-    }
-
-    if (f === "JSON" && t === "TEXT") {
-      const obj = typeof data === "string" ? JSON.parse(data) : data;
-      return JSON.stringify(obj);
-    }
-
-    if (f === "TEXT" && t === "JSON") {
-      try {
-        return JSON.parse(data);
-      } catch {
-        return { text: data };
-      }
-    }
+    return vm.run(wrapped);
   } catch (err) {
-    throw new Error(`ConvertError (${f} to ${t}): ${formatError(err)}`);
+    throw new Error("TemplateScriptError: " + formatError(err) + "\n--- TEMPLATE SCRIPT ---\n" + templateScript + "\n--- END SCRIPT ---");
   }
-
-  return msg;
 }
 
 /* =====================================================================
@@ -137,29 +71,22 @@ async function convertDataFormat(msg: any, fromType: string, toType: string) {
      * Destination Transformer (dest.processing_script)
      * Template (dest.template_script)
 ===================================================================== */
-function executeTransformScript(script, baseMsg) {
+function executeTransformScript(script: string, baseMsg: any) {
   const context = { msg: baseMsg, hl7ToJson, jsonToHl7 };
-
   const vm = new VM({ sandbox: context, timeout: 3000 });
 
   const wrapped = `
     (function () {
-      try {
-        ${script}
-        return msg;
-      } catch (err) {
-        throw new Error(
-          "TransformScriptError: " +
-          err.message +
-          "\\n--- TRANSFORM SCRIPT ---\\n" +
-          script +
-          "\\n--- END SCRIPT ---"
-        );
-      }
+      ${script}
+      return typeof msg !== "undefined" ? msg : undefined;
     })();
   `;
 
-  return vm.run(wrapped);
+  try {
+    return vm.run(wrapped);
+  } catch (err) {
+    throw new Error("TransformScriptError: " + formatError(err) + "\n--- TRANSFORM SCRIPT ---\n" + script + "\n--- END SCRIPT ---");
+  }
 }
 
 /* =====================================================================
@@ -168,29 +95,22 @@ function executeTransformScript(script, baseMsg) {
      contoh REST JSON  → "YEY SUKSES"
      contoh HL7       → "ACK RECEIVED: Message delivered. ✓"
 ===================================================================== */
-function executeResponseScript(script, baseMsg, baseResponse) {
+function executeResponseScript(script: string, baseMsg: any, baseResponse: any) {
   const context = { msg: baseMsg, response: baseResponse, hl7ToJson, jsonToHl7 };
-
   const vm = new VM({ sandbox: context, timeout: 3000 });
 
   const wrapped = `
     (function () {
-      try {
-        ${script}
-        return response;
-      } catch (err) {
-        throw new Error(
-          "ResponseScriptError: " +
-          err.message +
-          "\\n--- RESPONSE SCRIPT ---\\n" +
-          script +
-          "\\n--- END SCRIPT ---"
-        );
-      }
+      ${script}
+      return typeof response !== "undefined" ? response : undefined;
     })();
   `;
 
-  return vm.run(wrapped);
+  try {
+    return vm.run(wrapped);
+  } catch (err) {
+    throw new Error("ResponseScriptError: " + formatError(err) + "\n--- RESPONSE SCRIPT ---\n" + script + "\n--- END SCRIPT ---");
+  }
 }
 
 /* =====================================================================

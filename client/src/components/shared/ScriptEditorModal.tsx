@@ -65,10 +65,12 @@ return {
   ============================================================ */
 
   const INSERT_SNIPPETS = {
-    transformer: `// Example Transformer
-msg.processedAt = new Date().toISOString();
-msg.source = "Channel";
-return msg;`,
+    transformer: `var json = hl7ToJson(msg);
+msg = {
+  firstName: json["PID"]["5"]["2"],
+  lastName:  json["PID"]["5"]["1"],
+  email:     json["PID"]["13"]["4"]
+};`,
 
     response: `// Example Response Modifier
 if (response.includes("OK")) {
