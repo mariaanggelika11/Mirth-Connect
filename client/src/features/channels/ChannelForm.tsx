@@ -92,7 +92,9 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
 
   const handleAddDestination = () => setDestinations((prev) => [...prev, { ...DEFAULT_DESTINATION }]);
 
-  const handleRemoveDestination = (index: number) => setDestinations((prev) => prev.filter((_, i) => i !== index));
+  const handleRemoveDestination = (index: number) => {
+    setDestinations((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const handleDestinationChange = (index: number, field: keyof DestinationFormData, value: string) => {
     setDestinations((prev) => {
@@ -103,22 +105,25 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
   };
 
   const handleDestinationScriptSave = (script: string) => {
-    if (editingScriptForDestination !== null) {
-      const { index, type } = editingScriptForDestination;
-      if (type === "processing") handleDestinationChange(index, "processingScript", script);
-      else if (type === "response") handleDestinationChange(index, "responseScript", script);
-      else if (type === "template") handleDestinationChange(index, "templateScript", script);
-      setEditingScriptForDestination(null);
-    }
+    if (!editingScriptForDestination) return;
+    const { index, type } = editingScriptForDestination;
+
+    if (type === "processing") handleDestinationChange(index, "processingScript", script);
+    if (type === "response") handleDestinationChange(index, "responseScript", script);
+    if (type === "template") handleDestinationChange(index, "templateScript", script);
+
+    setEditingScriptForDestination(null);
   };
 
-  const validateForm = (): boolean => {
+  const validateForm = () => {
     const newErrors: Record<string, string> = {};
     if (!name.trim()) newErrors.name = "Channel name is required.";
+
     destinations.forEach((d, i) => {
       if (!d.name.trim()) newErrors[`dest_name_${i}`] = "Destination name is required.";
       if (!d.endpoint.trim()) newErrors[`dest_endpoint_${i}`] = "Endpoint is required.";
     });
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -167,91 +172,73 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
   return (
     <>
       <Modal isOpen={isOpen} onClose={onClose} title="Create / Edit Channel" keepMounted>
-        <form onSubmit={handleSubmit}>
-          <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
-            <Input label="Channel Name" value={name} onChange={setName} error={errors.name} />
+        <form onSubmit={handleSubmit} className="space-y-6 p-6">
+          <Input label="Channel Name" value={name} onChange={setName} error={errors.name} />
 
-            <Section title="Source Connector">
-              <Select label="Source Connector Type" value={sourceConnectorType} onChange={(v) => setSourceConnectorType(v as "HTTP" | "HL7")} options={sourceConnectorOptions} />
+          <Section title="Source Connector">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Select label="Source Connector Type" value={sourceConnectorType} onChange={(v: string) => setSourceConnectorType(v as "HTTP" | "HL7")} options={sourceConnectorOptions} />
+              <Select label="Inbound Data Type" value={sourceInboundDataType} onChange={(v: string) => setSourceInboundDataType(v as DataType)} options={dataTypeOptions} />
+            </div>
 
-              {autoEndpoint && (
-                <div>
-                  <label style={{ fontSize: 13, color: "var(--text-soft)" }}>Auto Generated Endpoint</label>
-                  <input value={autoEndpoint} readOnly className="input-bw" />
+            <Button type="button" variant="secondary" onClick={() => setEditingSourceScript(true)}>
+              <CodeIcon /> {sourceTransformerScript ? "Edit Source Script" : "Add Source Script"}
+            </Button>
+          </Section>
+
+          <Section title="Destinations">
+            {destinations.map((dest, index) => (
+              <div key={index} className="card-bw p-4 relative space-y-4">
+                <Input label="Destination Name" value={dest.name} onChange={(v: string) => handleDestinationChange(index, "name", v)} error={errors[`dest_name_${index}`]} />
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Select
+                    label="Connector Type"
+                    value={dest.type}
+                    onChange={(v: string) => handleDestinationChange(index, "type", v as DestinationType)}
+                    options={[
+                      { value: "REST", label: "REST" },
+                      { value: "HL7", label: "HL7 (MLLP)" },
+                      { value: "MLLP", label: "MLLP (Raw HL7)" },
+                    ]}
+                  />
+
+                  <Select label="Outbound Data Type" value={dest.outboundDataType} onChange={(v: string) => handleDestinationChange(index, "outboundDataType", v as DataType)} options={dataTypeOptions} />
                 </div>
-              )}
 
-              <Select label="Inbound Data Type" value={sourceInboundDataType} onChange={(v) => setSourceInboundDataType(v as DataType)} options={dataTypeOptions} />
+                <Input label="Endpoint" value={dest.endpoint} onChange={(v: string) => handleDestinationChange(index, "endpoint", v)} placeholder="example: localhost:5000" error={errors[`dest_endpoint_${index}`]} />
 
-              <Button type="button" variant="secondary" onClick={() => setEditingSourceScript(true)}>
-                <CodeIcon /> {sourceTransformerScript ? "Edit Source Script" : "Add Source Script"}
-              </Button>
-            </Section>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "processing" })}>
+                    <CodeIcon /> Transformer
+                  </Button>
 
-            <Section title="Destinations">
-              {destinations.map((dest, index) => (
-                <div key={index} className="card-bw" style={{ padding: 16, position: "relative" }}>
-                  <Input label="Destination Name" value={dest.name} onChange={(v) => handleDestinationChange(index, "name", v)} error={errors[`dest_name_${index}`]} />
+                  <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "response" })}>
+                    <CodeIcon /> Response
+                  </Button>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                    <Select
-                      label="Connector Type"
-                      value={dest.type}
-                      onChange={(v) => handleDestinationChange(index, "type", v)}
-                      options={[
-                        { value: "REST", label: "REST" },
-                        { value: "HL7", label: "HL7 (MLLP)" },
-                        { value: "MLLP", label: "MLLP (Raw HL7)" },
-                      ]}
-                    />
-
-                    <Select label="Outbound Data Type" value={dest.outboundDataType} onChange={(v) => handleDestinationChange(index, "outboundDataType", v)} options={dataTypeOptions} />
-                  </div>
-
-                  <Input label="Endpoint" value={dest.endpoint} onChange={(v) => handleDestinationChange(index, "endpoint", v)} placeholder="example: localhost:5000" error={errors[`dest_endpoint_${index}`]} />
-
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "processing" })}>
-                      <CodeIcon /> {dest.processingScript ? "Edit Transformer" : "Add Transformer"}
-                    </Button>
-
-                    <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "response" })}>
-                      <CodeIcon /> {dest.responseScript ? "Edit Response" : "Add Response"}
-                    </Button>
-
-                    <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "template" })}>
-                      <CodeIcon /> {dest.templateScript ? "Edit Template" : "Add Template"}
-                    </Button>
-                  </div>
-
-                  {destinations.length > 1 && (
-                    <button type="button" onClick={() => handleRemoveDestination(index)} className="icon-btn icon-btn-danger" style={{ position: "absolute", top: 8, right: 8 }}>
-                      <TrashIcon />
-                    </button>
-                  )}
+                  <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "template" })}>
+                    <CodeIcon /> Template
+                  </Button>
                 </div>
-              ))}
 
-              <Button type="button" variant="secondary" onClick={handleAddDestination}>
-                Add Destination
-              </Button>
-            </Section>
+                {destinations.length > 1 && (
+                  <button type="button" onClick={() => handleRemoveDestination(index)} className="absolute top-2 right-2 text-red-500">
+                    <TrashIcon />
+                  </button>
+                )}
+              </div>
+            ))}
 
-            {errors.global && <p style={{ color: "var(--danger)", fontSize: 13 }}>{errors.global}</p>}
+            <Button type="button" variant="secondary" onClick={handleAddDestination}>
+              Add Destination
+            </Button>
+          </Section>
 
-            {successMsg && <p style={{ color: "#047857", fontSize: 13 }}>{successMsg}</p>}
-          </div>
+          {errors.global && <p className="text-red-600 text-sm">{errors.global}</p>}
+          {successMsg && <p className="text-green-700 text-sm">{successMsg}</p>}
 
-          <div
-            style={{
-              padding: "16px 24px",
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: 12,
-              borderTop: "1px solid var(--border-main)",
-              background: "var(--bg-soft)",
-            }}
-          >
+          <div className="flex justify-end gap-3 pt-4 border-t">
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
             </Button>
@@ -275,7 +262,7 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
         />
       )}
 
-      {editingScriptForDestination !== null && (
+      {editingScriptForDestination && (
         <ScriptEditorModal
           isOpen={true}
           onClose={() => setEditingScriptForDestination(null)}
@@ -287,25 +274,36 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
               ? destinations[editingScriptForDestination.index]?.responseScript || ""
               : destinations[editingScriptForDestination.index]?.templateScript || ""
           }
-          title={`Edit ${editingScriptForDestination.type === "processing" ? "Transformer" : editingScriptForDestination.type === "response" ? "Response" : "Template"} Script`}
+          title="Edit Script"
         />
       )}
     </>
   );
 };
 
-const Input = ({ label, value, onChange, placeholder, error }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; error?: string }) => (
-  <div>
-    <label style={{ fontSize: 13, color: "var(--text-soft)" }}>{label}</label>
-    <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="input-bw" />
-    {error && <div style={{ color: "var(--danger)", fontSize: 12 }}>{error}</div>}
+const Input: React.FC<{
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  error?: string;
+}> = ({ label, value, onChange, placeholder, error }) => (
+  <div className="space-y-1">
+    <label className="text-sm text-[var(--text-soft)]">{label}</label>
+    <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="input-bw w-full px-3 py-2" />
+    {error && <div className="text-red-500 text-xs">{error}</div>}
   </div>
 );
 
-const Select = ({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) => (
-  <div>
-    <label style={{ fontSize: 13, color: "var(--text-soft)" }}>{label}</label>
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="input-bw">
+const Select: React.FC<{
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (v: string) => void;
+}> = ({ label, value, options, onChange }) => (
+  <div className="space-y-1">
+    <label className="text-sm text-[var(--text-soft)]">{label}</label>
+    <select value={value} onChange={(e) => onChange(e.target.value)} className="input-bw w-full px-3 py-2">
       {options.map((opt) => (
         <option key={opt.value} value={opt.value}>
           {opt.label}
@@ -315,10 +313,10 @@ const Select = ({ label, value, options, onChange }: { label: string; value: str
   </div>
 );
 
-const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <div style={{ borderTop: "1px solid var(--border-main)", paddingTop: 12 }}>
-    <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>{title}</h3>
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>{children}</div>
+const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+  <div className="space-y-3 pt-4 border-t">
+    <h3 className="text-lg font-semibold">{title}</h3>
+    {children}
   </div>
 );
 

@@ -13,13 +13,16 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // ✅ PENTING: default TRUE
 
   useEffect(() => {
     const savedToken = localStorage.getItem("authToken");
+
     if (savedToken) {
       setToken(savedToken);
     }
+
+    setIsLoading(false);
   }, []);
 
   const login = async (username: string, password: string) => {
@@ -27,7 +30,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       const { token } = await apiLogin(username, password);
 
-      // simpan dan update state
       localStorage.setItem("authToken", token);
       setToken(token);
     } catch (error) {

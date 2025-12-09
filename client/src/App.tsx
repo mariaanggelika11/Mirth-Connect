@@ -10,7 +10,32 @@ type View = "dashboard" | "monitor";
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>("dashboard");
-  const { isLoggedIn, logout } = useAuth();
+  const { isLoggedIn, logout, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div
+        style={{
+          height: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "var(--bg-soft)",
+        }}
+      >
+        <div
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: "50%",
+            border: "3px solid var(--border-main)",
+            borderTop: "3px solid var(--primary)",
+            animation: "spin 1s linear infinite",
+          }}
+        />
+      </div>
+    );
+  }
 
   if (!isLoggedIn) return <LoginPage />;
 

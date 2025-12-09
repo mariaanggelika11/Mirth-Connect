@@ -4,8 +4,7 @@ import { Button } from "../../components/ui/Button";
 import { HL7Tree } from "../../components/hl7/HL7Tree";
 
 const isHL7 = (data: any) => {
-  if (!data) return false;
-  if (typeof data !== "string") return false;
+  if (!data || typeof data !== "string") return false;
   return data.trim().startsWith("MSH|");
 };
 
@@ -34,13 +33,13 @@ const StatusBadge = ({ status }: { status: string }) => {
 
 const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
   const [viewMode, setViewMode] = useState({
-    inbound: "pretty" as "pretty" | "raw" | "tree",
+    inbound: "pretty" as "pretty" | "raw",
     outbound: "pretty" as "pretty" | "raw" | "tree",
     destination: {} as Record<
       number,
       {
         open: boolean;
-        request: "pretty" | "raw" | "tree";
+        request: "pretty" | "raw";
         outbound: "pretty" | "raw" | "tree";
         response: "pretty" | "raw";
       }
@@ -83,72 +82,52 @@ const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
   const RenderPayload = (mode: string, content: any) => {
     if (mode === "tree") {
       return (
-        <div className="card-bw" style={{ padding: 8, height: 260, overflow: "auto" }}>
+        <div className="code-box h-[240px] overflow-auto">
           <HL7Tree hl7={typeof content === "string" ? content : JSON.stringify(content)} />
         </div>
       );
     }
 
-    return <pre className="code-box">{mode === "pretty" ? formatJSON(content, true) : formatJSON(content, false)}</pre>;
+    return <pre className="code-box h-[240px] overflow-auto">{mode === "pretty" ? formatJSON(content, true) : formatJSON(content, false)}</pre>;
   };
 
   return (
-    <div className="fixed inset-0" style={{ background: "rgba(0,0,0,0.6)", zIndex: 50 }}>
-      <div
-        className="card-bw"
-        style={{
-          width: 950,
-          maxHeight: "90vh",
-          overflowY: "auto",
-          margin: "5vh auto",
-          padding: 0,
-        }}
-      >
-        <div
-          style={{
-            padding: 16,
-            borderBottom: "1px solid var(--border-main)",
-            display: "flex",
-            justifyContent: "space-between",
-          }}
-        >
-          <h2 style={{ fontSize: 18, fontWeight: 600 }}>Message Details: #{log.id}</h2>
-          <button onClick={onClose} className="icon-btn">
+    <div className="fixed inset-0 flex items-center justify-center bg-black/60 z-50">
+      <div className="card-bw w-[1100px] max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center px-6 py-4 border-b shrink-0">
+          <h2 className="text-lg font-semibold">Message Details #{log.id}</h2>
+          <button onClick={onClose} className="icon-btn text-xl">
             ×
           </button>
         </div>
 
-        <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 24 }}>
-          <div className="table">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
-              <div>
-                <strong>Timestamp</strong>
-                <br />
-                {safeDate(log.timestamp)}
-              </div>
-              <div>
-                <strong>Channel</strong>
-                <br />
-                {log.channelName}
-              </div>
-              <div>
-                <strong>Status</strong>
-                <br />
-                <StatusBadge status={log.status ?? "UNKNOWN"} />
-              </div>
-              <div>
-                <strong>Level</strong>
-                <br />
-                {log.level}
-              </div>
+        <div className="flex-1 overflow-y-auto p-6 space-y-8">
+          {/* META */}
+          <div className="grid grid-cols-4 gap-6 text-sm">
+            <div>
+              <div className="font-semibold mb-1">Timestamp</div>
+              {safeDate(log.timestamp)}
+            </div>
+            <div>
+              <div className="font-semibold mb-1">Channel</div>
+              {log.channelName}
+            </div>
+            <div>
+              <div className="font-semibold mb-1">Status</div>
+              <StatusBadge status={log.status ?? "UNKNOWN"} />
+            </div>
+            <div>
+              <div className="font-semibold mb-1">Level</div>
+              {log.level}
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+          {/* PAYLOAD */}
+          <div className="grid grid-cols-2 gap-6 items-start">
+            <div className="space-y-2">
+              <div className="flex justify-between">
                 <strong>Inbound Payload</strong>
-                <div>
+                <div className="flex gap-2">
                   <Button variant={viewMode.inbound === "pretty" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, inbound: "pretty" }))}>
                     Pretty
                   </Button>
@@ -160,10 +139,10 @@ const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
               {RenderPayload(viewMode.inbound, log.originalPayload)}
             </div>
 
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <div className="space-y-2">
+              <div className="flex justify-between">
                 <strong>Transformed Payload</strong>
-                <div>
+                <div className="flex gap-2">
                   <Button variant={viewMode.outbound === "pretty" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, outbound: "pretty" }))}>
                     Pretty
                   </Button>
@@ -177,151 +156,90 @@ const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
                   </Button>
                 </div>
               </div>
+
               {RenderPayload(viewMode.outbound, log.transformedPayload)}
             </div>
           </div>
 
+          {/* DESTINATION */}
           {(log.destinationLogs?.length ?? 0) > 0 && (
-            <div>
-              <h3 style={{ fontWeight: 600, marginBottom: 16 }}>Destination Results</h3>
+            <div className="space-y-6">
+              <h3 className="text-lg font-semibold">Destination Results</h3>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-                {(log.destinationLogs ?? []).map((dest: DestinationLog, i: number) => {
-                  const state = viewMode.destination[i] || {
-                    open: true,
-                    request: "pretty",
-                    outbound: "pretty",
-                    response: "pretty",
-                  };
+              {log.destinationLogs!.map((dest: DestinationLog, i: number) => {
+                const state = viewMode.destination[i] || {
+                  open: true,
+                  request: "pretty",
+                  outbound: "pretty",
+                  response: "pretty",
+                };
 
-                  return (
-                    <div key={i} className="card-bw">
-                      <div
-                        style={{
-                          padding: 12,
-                          display: "flex",
-                          justifyContent: "space-between",
-                          cursor: "pointer",
-                        }}
-                        onClick={() => toggleDest(i)}
-                      >
-                        <strong>{dest.destinationName ?? `Destination #${i + 1}`}</strong>
-                        <StatusBadge status={dest.status ?? "OUT-UNKNOWN"} />
-                      </div>
-
-                      {state.open && (
-                        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 24 }}>
-                          <div>
-                            <strong>Request Data</strong>
-                            <div>
-                              <Button
-                                variant={state.request === "pretty" ? "primary" : "secondary"}
-                                onClick={() =>
-                                  setViewMode((v) => ({
-                                    ...v,
-                                    destination: { ...v.destination, [i]: { ...state, request: "pretty" } },
-                                  }))
-                                }
-                              >
-                                Pretty
-                              </Button>
-
-                              <Button
-                                variant={state.request === "raw" ? "primary" : "secondary"}
-                                onClick={() =>
-                                  setViewMode((v) => ({
-                                    ...v,
-                                    destination: { ...v.destination, [i]: { ...state, request: "raw" } },
-                                  }))
-                                }
-                              >
-                                Raw
-                              </Button>
-                            </div>
-                            {RenderPayload(state.request, dest.requestData)}
-                          </div>
-
-                          <div>
-                            <strong>Outbound Data</strong>
-                            <div>
-                              <Button
-                                variant={state.outbound === "pretty" ? "primary" : "secondary"}
-                                onClick={() =>
-                                  setViewMode((v) => ({
-                                    ...v,
-                                    destination: { ...v.destination, [i]: { ...state, outbound: "pretty" } },
-                                  }))
-                                }
-                              >
-                                Pretty
-                              </Button>
-
-                              {isHL7(dest.outboundData) && (
-                                <Button
-                                  variant={state.outbound === "tree" ? "primary" : "secondary"}
-                                  onClick={() =>
-                                    setViewMode((v) => ({
-                                      ...v,
-                                      destination: { ...v.destination, [i]: { ...state, outbound: "tree" } },
-                                    }))
-                                  }
-                                >
-                                  Tree
-                                </Button>
-                              )}
-
-                              <Button
-                                variant={state.outbound === "raw" ? "primary" : "secondary"}
-                                onClick={() =>
-                                  setViewMode((v) => ({
-                                    ...v,
-                                    destination: { ...v.destination, [i]: { ...state, outbound: "raw" } },
-                                  }))
-                                }
-                              >
-                                Raw
-                              </Button>
-                            </div>
-                            {RenderPayload(state.outbound, dest.outboundData)}
-                          </div>
-
-                          <div>
-                            <strong>Destination Response</strong>
-                            <div>
-                              <Button
-                                variant={state.response === "pretty" ? "primary" : "secondary"}
-                                onClick={() =>
-                                  setViewMode((v) => ({
-                                    ...v,
-                                    destination: { ...v.destination, [i]: { ...state, response: "pretty" } },
-                                  }))
-                                }
-                              >
-                                Pretty
-                              </Button>
-
-                              <Button
-                                variant={state.response === "raw" ? "primary" : "secondary"}
-                                onClick={() =>
-                                  setViewMode((v) => ({
-                                    ...v,
-                                    destination: { ...v.destination, [i]: { ...state, response: "raw" } },
-                                  }))
-                                }
-                              >
-                                Raw
-                              </Button>
-                            </div>
-
-                            {RenderPayload(state.response, dest.responseText)}
-                            <div style={{ textAlign: "right", fontSize: 12, color: "var(--text-soft)" }}>Sent At: {safeDate(dest.sentAt)}</div>
-                          </div>
-                        </div>
-                      )}
+                return (
+                  <div key={i} className="card-bw">
+                    <div onClick={() => toggleDest(i)} className="flex justify-between items-center px-4 py-3 cursor-pointer border-b">
+                      <strong>{dest.destinationName ?? `Destination #${i + 1}`}</strong>
+                      <StatusBadge status={dest.status ?? "OUT-UNKNOWN"} />
                     </div>
-                  );
-                })}
-              </div>
+
+                    {state.open && (
+                      <div className="p-4 space-y-6">
+                        {/* REQUEST */}
+                        <div>
+                          <strong>Request Data</strong>
+                          <div className="flex gap-2 my-2">
+                            <Button variant={state.request === "pretty" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, destination: { ...v.destination, [i]: { ...state, request: "pretty" } } }))}>
+                              Pretty
+                            </Button>
+                            <Button variant={state.request === "raw" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, destination: { ...v.destination, [i]: { ...state, request: "raw" } } }))}>
+                              Raw
+                            </Button>
+                          </div>
+                          {RenderPayload(state.request, dest.requestData)}
+                        </div>
+
+                        {/* OUTBOUND */}
+                        <div>
+                          <strong>Outbound Data</strong>
+                          <div className="flex gap-2 my-2">
+                            <Button variant={state.outbound === "pretty" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, destination: { ...v.destination, [i]: { ...state, outbound: "pretty" } } }))}>
+                              Pretty
+                            </Button>
+
+                            {isHL7(dest.outboundData) && (
+                              <Button variant={state.outbound === "tree" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, destination: { ...v.destination, [i]: { ...state, outbound: "tree" } } }))}>
+                                Tree
+                              </Button>
+                            )}
+
+                            <Button variant={state.outbound === "raw" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, destination: { ...v.destination, [i]: { ...state, outbound: "raw" } } }))}>
+                              Raw
+                            </Button>
+                          </div>
+                          {RenderPayload(state.outbound, dest.outboundData)}
+                        </div>
+
+                        {/* RESPONSE */}
+                        <div>
+                          <strong>Destination Response</strong>
+                          <div className="flex gap-2 my-2">
+                            <Button variant={state.response === "pretty" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, destination: { ...v.destination, [i]: { ...state, response: "pretty" } } }))}>
+                              Pretty
+                            </Button>
+
+                            <Button variant={state.response === "raw" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, destination: { ...v.destination, [i]: { ...state, response: "raw" } } }))}>
+                              Raw
+                            </Button>
+                          </div>
+
+                          {RenderPayload(state.response, dest.responseText)}
+
+                          <div className="text-right text-xs text-[var(--text-soft)] mt-2">Sent At: {safeDate(dest.sentAt)}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
