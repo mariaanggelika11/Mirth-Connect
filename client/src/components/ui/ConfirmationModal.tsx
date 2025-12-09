@@ -15,16 +15,24 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({ isOpen, on
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={title}>
-      <div className="p-6">
-        <p className="text-sm text-slate-300">{message}</p>
+      <div style={{ padding: 24 }}>
+        <p style={{ fontSize: 14, color: "var(--text-soft)" }}>{message}</p>
       </div>
-      <div className="bg-slate-800 px-6 py-4 flex justify-end gap-3 border-t border-slate-700">
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: 12,
+          padding: "16px 24px",
+          borderTop: "1px solid var(--border-main)",
+          background: "var(--bg-soft)",
+        }}
+      >
         <Button variant="secondary" onClick={onClose}>
           Cancel
         </Button>
-        <Button variant="danger" onClick={onConfirm}>
-          Confirm Delete
-        </Button>
+        <Button onClick={onConfirm}>Confirm Delete</Button>
       </div>
     </Modal>
   );

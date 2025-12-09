@@ -38,8 +38,8 @@
 // export default XmlUpload;
 
 import React, { useRef, useState } from "react";
-import { UploadIcon } from "../components/icons/Icon";
-import { Button } from "../components/shared/Button";
+import { UploadIcon } from "../../components/icons/Icon";
+import { Button } from "../../components/ui/Button";
 
 interface XmlUploadProps {
   onUpload: (file: File) => void;

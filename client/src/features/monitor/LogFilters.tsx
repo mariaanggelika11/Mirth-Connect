@@ -1,5 +1,6 @@
 import React from "react";
-import { Channel, LogLevel } from "../types";
+import { Channel, LogLevel } from "../../types";
+import { Button } from "../../components/ui/Button";
 
 interface LogFiltersProps {
   channels: Channel[];
@@ -22,11 +23,10 @@ interface LogFiltersProps {
 
 const LogFilters: React.FC<LogFiltersProps> = ({ channels, filters, onFilterChange, onExport }) => {
   return (
-    <div className="bg-slate-800 rounded-lg p-4 flex flex-wrap gap-4 justify-between items-center">
-      <div className="flex flex-wrap gap-3 items-center">
-        {/* Channel Filter */}
+    <div className="card-bw" style={{ padding: 16, display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <select
-          className="bg-slate-700 text-white p-2 rounded"
+          className="input-bw"
           value={filters.channel}
           onChange={(e) => {
             const value = e.target.value === "ALL" ? "ALL" : Number(e.target.value);
@@ -41,8 +41,7 @@ const LogFilters: React.FC<LogFiltersProps> = ({ channels, filters, onFilterChan
           ))}
         </select>
 
-        {/* Level Filter */}
-        <select className="bg-slate-700 text-white p-2 rounded" value={filters.level} onChange={(e) => onFilterChange.setLevel(e.target.value as LogLevel | "ALL")}>
+        <select className="input-bw" value={filters.level} onChange={(e) => onFilterChange.setLevel(e.target.value as LogLevel | "ALL")}>
           <option value="ALL">All Levels</option>
           <option value="INFO">Info</option>
           <option value="DEBUG">Debug</option>
@@ -50,24 +49,20 @@ const LogFilters: React.FC<LogFiltersProps> = ({ channels, filters, onFilterChan
           <option value="ERROR">Error</option>
         </select>
 
-        {/* Search */}
-        <input type="text" placeholder="Search logs..." className="bg-slate-700 text-white p-2 rounded w-60" value={filters.search} onChange={(e) => onFilterChange.setSearch(e.target.value)} />
+        <input type="text" placeholder="Search logs..." className="input-bw" style={{ width: 240 }} value={filters.search} onChange={(e) => onFilterChange.setSearch(e.target.value)} />
 
-        {/* Checkboxes */}
-        <label className="flex items-center text-white gap-2">
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14 }}>
           <input type="checkbox" checked={filters.isGrouped} onChange={(e) => onFilterChange.setIsGrouped(e.target.checked)} />
           Grouped
         </label>
 
-        <label className="flex items-center text-white gap-2">
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14 }}>
           <input type="checkbox" checked={filters.isRealtime} onChange={(e) => onFilterChange.setIsRealtime(e.target.checked)} />
           Realtime
         </label>
       </div>
 
-      <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded" onClick={onExport}>
-        Export Logs
-      </button>
+      <Button onClick={onExport}>Export Logs</Button>
     </div>
   );
 };
