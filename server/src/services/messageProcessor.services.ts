@@ -366,28 +366,123 @@ export async function processInboundMessage(channelId: number, payload: any) {
       // -----------------------------------------------
       // 3.d SEND TO DESTINATION
       // -----------------------------------------------
+      // if (destType === "REST") {
+      //   const headers = {
+      //     "Content-Type": outboundType === "HL7V2" ? "text/plain" : outboundType === "XML" ? "application/xml" : "application/json",
+      //     "x-channel-id": String(channelId),
+      //     "x-destination-id": String(dest.id),
+      //   };
+
+      //   const body = typeof msgForDest === "string" ? msgForDest : JSON.stringify(msgForDest);
+
+      //   const resp = await axios.post(dest.endpoint.trim(), body, {
+      //     headers,
+      //     timeout: 8000,
+      //   });
+
+      //   originalResponse = JSON.stringify(resp.data);
+      //   responseText = originalResponse;
+      // } else if (destType === "HL7" || destType === "MLLP") {
+      //   const hl7Payload = typeof msgForDest === "string" ? msgForDest : jsonToHl7(msgForDest);
+      //   const ack = await sendTcp(dest.endpoint.trim(), hl7Payload);
+
+      //   originalResponse = ack;
+      //   responseText = ack;
+      // } else if (destType === "TCP" || destType === "RAW") {
+      //   const raw = typeof msgForDest === "string" ? msgForDest : JSON.stringify(msgForDest);
+      //   await sendTcp(dest.endpoint.trim(), raw);
+
+      //   originalResponse = "TCP message sent successfully";
+      //   responseText = originalResponse;
+      // } else {
+      //   throw new Error(`Unknown destination type: ${destType}`);
+      // }
+
+      // -----------------------------------------------
+      // 3.d SEND TO DESTINATION (WITH FULL DEBUG)
+      // -----------------------------------------------
       if (destType === "REST") {
+        console.log("======================================");
+        console.log("[DESTINATION REST] START");
+        console.log("Channel ID        :", channelId);
+        console.log("Destination ID    :", dest.id);
+        console.log("Destination Name  :", dest.name);
+        console.log("Endpoint (raw)    :", JSON.stringify(dest.endpoint));
+        console.log("Endpoint (trim)   :", JSON.stringify(dest.endpoint.trim()));
+        console.log("Outbound Type     :", outboundType);
+        console.log("msgForDest type   :", typeof msgForDest);
+
         const headers = {
           "Content-Type": outboundType === "HL7V2" ? "text/plain" : outboundType === "XML" ? "application/xml" : "application/json",
+          "x-channel-id": String(channelId),
+          "x-destination-id": String(dest.id),
         };
+
+        console.log("Request Headers   :", headers);
 
         const body = typeof msgForDest === "string" ? msgForDest : JSON.stringify(msgForDest);
 
-        const resp = await axios.post(dest.endpoint.trim(), body, {
-          headers,
-          timeout: 8000,
-        });
+        console.log("Request Body Type :", typeof body);
+        console.log("Request Body Peek:", typeof body === "string" ? body.substring(0, 200) : body);
 
-        originalResponse = JSON.stringify(resp.data);
-        responseText = originalResponse;
+        try {
+          console.log("[AXIOS] Sending request...");
+          const resp = await axios.post(dest.endpoint.trim(), body, {
+            headers,
+            timeout: 8000,
+            validateStatus: () => true, // ⬅️ penting: supaya 4xx/5xx tidak throw
+          });
+
+          console.log("[AXIOS] Response Status :", resp.status);
+          console.log("[AXIOS] Response Headers:", resp.headers);
+          console.log("[AXIOS] Response Data   :", resp.data);
+
+          originalResponse = JSON.stringify(resp.data);
+          responseText = originalResponse;
+
+          // anggap sukses hanya jika status < 400
+          if (resp.status >= 400) {
+            throw new Error(`REST destination returned HTTP ${resp.status}: ${originalResponse}`);
+          }
+        } catch (axiosErr: any) {
+          console.error("[AXIOS ERROR]");
+          console.error("Message :", axiosErr.message);
+
+          if (axiosErr.code) {
+            console.error("Code    :", axiosErr.code);
+          }
+
+          if (axiosErr.response) {
+            console.error("Status  :", axiosErr.response.status);
+            console.error("Headers :", axiosErr.response.headers);
+            console.error("Data    :", axiosErr.response.data);
+          }
+
+          throw axiosErr; // ⬅️ biar masuk ke catch besar
+        }
+
+        console.log("[DESTINATION REST] END");
+        console.log("======================================");
       } else if (destType === "HL7" || destType === "MLLP") {
+        console.log("[DESTINATION HL7/MLLP] Sending HL7");
+
         const hl7Payload = typeof msgForDest === "string" ? msgForDest : jsonToHl7(msgForDest);
+
+        console.log("HL7 Payload Peek:", hl7Payload.substring(0, 200));
+
         const ack = await sendTcp(dest.endpoint.trim(), hl7Payload);
+
+        console.log("HL7 ACK:", ack);
 
         originalResponse = ack;
         responseText = ack;
       } else if (destType === "TCP" || destType === "RAW") {
+        console.log("[DESTINATION TCP/RAW] Sending RAW");
+
         const raw = typeof msgForDest === "string" ? msgForDest : JSON.stringify(msgForDest);
+
+        console.log("RAW Payload Peek:", raw.substring(0, 200));
+
         await sendTcp(dest.endpoint.trim(), raw);
 
         originalResponse = "TCP message sent successfully";
