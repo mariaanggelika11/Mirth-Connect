@@ -6,7 +6,7 @@ import sql from "mssql";
 // =============================
 const dbConfig = {
   user: "sa",
-  password: "PasswordBaru123!",
+  password: "PasswordBaru123",
   database: "EksternalDatabase",
   server: "localhost",
   port: 1433,

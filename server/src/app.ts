@@ -3,9 +3,9 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
-import router from "./routes/index.js";
 import { errorHandler } from "./middleware/errorHandler.js";
-import authRoutes from "./routes/auth.routes.js"; // ⬅️ TAMBAHKAN
+import { authenticate } from "./middleware/auth.js";
+import authRoutes from "./routes/auth.routes.js"; 
 import channelRoutes from "./routes/channel.routes.js";
 import destinationRoutes from "./routes/destination.routes.js";
 import messageRoutes from "./routes/message.routes.js";
@@ -15,15 +15,11 @@ import hl7Routes from "./routes/hl7.js";
 dotenv.config();
 const app = express();
 
-// === ROUTES ===
-
-// REGISTER / LOGIN
-app.use("/api/auth", express.json(), authRoutes); // ⬅️ INI YANG HILANG
-app.use("/api/channel", express.json(), channelRoutes);
-app.use("/api/destination", express.json(), destinationRoutes);
-app.use("/api/message", messageRoutes);
-app.use("/api/hl7", express.json(), hl7Routes);
-
+app.use("/api/auth", express.json(), authRoutes);
+app.use("/api/channel", authenticate, express.json(), channelRoutes);
+app.use("/api/destination", authenticate, express.json(), destinationRoutes);
+app.use("/api/message", authenticate, messageRoutes);
+app.use("/api/hl7", authenticate, express.json(), hl7Routes);
 // === CORS ===
 app.use(
   cors({
