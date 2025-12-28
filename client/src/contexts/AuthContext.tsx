@@ -6,36 +6,35 @@ interface AuthContextType {
   isLoggedIn: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
-  isLoading: boolean;
+  isInitializing: boolean;
+  isLoggingIn: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true); // ✅ PENTING: default TRUE
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   useEffect(() => {
     const savedToken = localStorage.getItem("authToken");
-
     if (savedToken) {
       setToken(savedToken);
     }
-
-    setIsLoading(false);
+    setIsInitializing(false);
   }, []);
 
   const login = async (username: string, password: string) => {
-    setIsLoading(true);
+    setIsLoggingIn(true);
     try {
       const { token } = await apiLogin(username, password);
-
       localStorage.setItem("authToken", token);
       setToken(token);
     } catch (error) {
-      throw new Error("Invalid username or password");
+      throw error;
     } finally {
-      setIsLoading(false);
+      setIsLoggingIn(false);
     }
   };
 
@@ -51,7 +50,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isLoggedIn: !!token,
         login,
         logout,
-        isLoading,
+        isInitializing,
+        isLoggingIn,
       }}
     >
       {children}

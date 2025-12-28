@@ -27,20 +27,20 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-/**
- * RESPONSE INTERCEPTOR
- * - Tangani session expired
- */
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    const isLoginRequest =
+      error.config?.url?.includes("/auth/login");
+    if (isLoginRequest) {
+      return Promise.reject(error);
+    }
+
     if (
       error.response?.status === 401 &&
       error.response?.data?.code === "TOKEN_EXPIRED"
     ) {
       localStorage.removeItem("authToken");
-
-      // redirect ke login
       window.location.href = "/login";
     }
 
