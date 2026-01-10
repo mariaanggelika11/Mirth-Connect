@@ -34,21 +34,30 @@ const DEFAULT_DESTINATION: DestinationFormData = {
   templateScript: "",
 };
 
-const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, initialData }) => {
+const ChannelForm: React.FC<ChannelFormProps> = ({
+  isOpen,
+  onClose,
+  onSubmit,
+  initialData,
+}) => {
   const [name, setName] = useState("");
-  const [sourceConnectorType, setSourceConnectorType] = useState<"HTTP" | "HL7">("HTTP");
-  const [sourceInboundDataType, setSourceInboundDataType] = useState<DataType>(DataType.HL7V2);
+  const [sourceConnectorType, setSourceConnectorType] = useState<"HTTP" | "HL7">(
+    "HTTP"
+  );
+  const [sourceInboundDataType, setSourceInboundDataType] =
+    useState<DataType>(DataType.HL7V2);
   const [sourceTransformerScript, setSourceTransformerScript] = useState("");
   const [editingSourceScript, setEditingSourceScript] = useState(false);
-  const [autoEndpoint, setAutoEndpoint] = useState("");
-  const [destinations, setDestinations] = useState<DestinationFormData[]>([{ ...DEFAULT_DESTINATION }]);
-  const [editingScriptForDestination, setEditingScriptForDestination] = useState<{
-    index: number;
-    type: "processing" | "response" | "template";
-  } | null>(null);
+  const [destinations, setDestinations] = useState<DestinationFormData[]>([
+    { ...DEFAULT_DESTINATION },
+  ]);
+  const [editingScriptForDestination, setEditingScriptForDestination] =
+    useState<{
+      index: number;
+      type: "processing" | "response" | "template";
+    } | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
-  const [successMsg, setSuccessMsg] = useState("");
 
   const isEditing = !!initialData;
 
@@ -57,12 +66,13 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
 
     if (isEditing && initialData) {
       setName(initialData.name || "");
-      const srcType = initialData.source?.type;
-      setSourceConnectorType(srcType === "HL7" ? "HL7" : "HTTP");
-      setAutoEndpoint(initialData.source?.endpoint || "");
-      setSourceInboundDataType(initialData.source?.inboundDataType || DataType.HL7V2);
+      setSourceConnectorType(
+        initialData.source?.type === "HL7" ? "HL7" : "HTTP"
+      );
+      setSourceInboundDataType(
+        initialData.source?.inboundDataType || DataType.HL7V2
+      );
       setSourceTransformerScript(initialData.processingScript || "");
-
       setDestinations(
         initialData.destinations?.length
           ? initialData.destinations.map((d) => ({
@@ -81,22 +91,26 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
     } else {
       setName("");
       setSourceConnectorType("HTTP");
-      setAutoEndpoint("");
       setSourceInboundDataType(DataType.HL7V2);
       setSourceTransformerScript("");
       setDestinations([{ ...DEFAULT_DESTINATION }]);
       setErrors({});
-      setSuccessMsg("");
     }
   }, [isOpen, initialData, isEditing]);
 
-  const handleAddDestination = () => setDestinations((prev) => [...prev, { ...DEFAULT_DESTINATION }]);
+  const handleAddDestination = () =>
+    setDestinations((p) => [...p, { ...DEFAULT_DESTINATION }]);
 
-  const handleRemoveDestination = (index: number) => {
-    setDestinations((prev) => prev.filter((_, i) => i !== index));
-  };
+  const handleRemoveDestination = (index: number) =>
+    setDestinations((p) => p.filter((_, i) => i !== index));
 
-  const handleDestinationChange = (index: number, field: keyof DestinationFormData, value: string) => {
+  const handleDestinationChange = <
+    K extends keyof DestinationFormData
+  >(
+    index: number,
+    field: K,
+    value: DestinationFormData[K]
+  ) => {
     setDestinations((prev) => {
       const updated = [...prev];
       updated[index] = { ...updated[index], [field]: value };
@@ -107,34 +121,32 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
   const handleDestinationScriptSave = (script: string) => {
     if (!editingScriptForDestination) return;
     const { index, type } = editingScriptForDestination;
-
-    if (type === "processing") handleDestinationChange(index, "processingScript", script);
-    if (type === "response") handleDestinationChange(index, "responseScript", script);
-    if (type === "template") handleDestinationChange(index, "templateScript", script);
-
+    if (type === "processing")
+      handleDestinationChange(index, "processingScript", script);
+    if (type === "response")
+      handleDestinationChange(index, "responseScript", script);
+    if (type === "template")
+      handleDestinationChange(index, "templateScript", script);
     setEditingScriptForDestination(null);
   };
 
   const validateForm = () => {
-    const newErrors: Record<string, string> = {};
-    if (!name.trim()) newErrors.name = "Channel name is required.";
-
+    const e: Record<string, string> = {};
+    if (!name.trim()) e.name = "Channel name is required";
     destinations.forEach((d, i) => {
-      if (!d.name.trim()) newErrors[`dest_name_${i}`] = "Destination name is required.";
-      if (!d.endpoint.trim()) newErrors[`dest_endpoint_${i}`] = "Endpoint is required.";
+      if (!d.name.trim()) e[`dest_name_${i}`] = "Destination name is required";
+      if (!d.endpoint.trim())
+        e[`dest_endpoint_${i}`] = "Endpoint is required";
     });
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    setErrors(e);
+    return Object.keys(e).length === 0;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (ev: React.FormEvent) => {
+    ev.preventDefault();
     if (!validateForm()) return;
-
+    setSubmitting(true);
     try {
-      setSubmitting(true);
-
       await onSubmit({
         name,
         source: {
@@ -144,15 +156,8 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
         processingScript: sourceTransformerScript,
         destinations,
       });
-
-      setSuccessMsg(isEditing ? "Channel updated successfully" : "Channel created successfully");
-
-      setTimeout(() => {
-        setSubmitting(false);
-        onClose();
-      }, 600);
-    } catch {
-      setErrors({ global: "Failed to save channel." });
+      onClose();
+    } finally {
       setSubmitting(false);
     }
   };
@@ -171,79 +176,158 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={onClose} title="Create / Edit Channel" keepMounted>
+      <Modal isOpen={isOpen} onClose={onClose} title="Create / Edit Channel">
         <form onSubmit={handleSubmit} className="space-y-6 p-6">
-          <Input label="Channel Name" value={name} onChange={setName} error={errors.name} />
+          <Input
+            label="Channel Name"
+            value={name}
+            onChange={setName}
+            error={errors.name}
+          />
 
           <Section title="Source Connector">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Select label="Source Connector Type" value={sourceConnectorType} onChange={(v: string) => setSourceConnectorType(v as "HTTP" | "HL7")} options={sourceConnectorOptions} />
-              <Select label="Inbound Data Type" value={sourceInboundDataType} onChange={(v: string) => setSourceInboundDataType(v as DataType)} options={dataTypeOptions} />
+              <Select
+                label="Source Connector Type"
+                value={sourceConnectorType}
+                options={sourceConnectorOptions}
+                onChange={setSourceConnectorType}
+              />
+              <Select
+                label="Inbound Data Type"
+                value={sourceInboundDataType}
+                options={dataTypeOptions}
+                onChange={setSourceInboundDataType}
+              />
             </div>
 
-            <Button type="button" variant="secondary" onClick={() => setEditingSourceScript(true)}>
-              <CodeIcon /> {sourceTransformerScript ? "Edit Source Script" : "Add Source Script"}
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setEditingSourceScript(true)}
+            >
+              <CodeIcon /> Transformer Script
             </Button>
           </Section>
 
           <Section title="Destinations">
             {destinations.map((dest, index) => (
-              <div key={index} className="card-bw p-4 relative space-y-4">
-                <Input label="Destination Name" value={dest.name} onChange={(v: string) => handleDestinationChange(index, "name", v)} error={errors[`dest_name_${index}`]} />
+              <div key={index} className="card-bw p-4 space-y-4 relative">
+                <Input
+                  label="Destination Name"
+                  value={dest.name}
+                  onChange={(v) =>
+                    handleDestinationChange(index, "name", v)
+                  }
+                  error={errors[`dest_name_${index}`]}
+                />
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Select
                     label="Connector Type"
                     value={dest.type}
-                    onChange={(v: string) => handleDestinationChange(index, "type", v as DestinationType)}
                     options={[
                       { value: "REST", label: "REST" },
-                      { value: "HL7", label: "HL7 (MLLP)" },
-                      { value: "MLLP", label: "MLLP (Raw HL7)" },
+                      { value: "HL7", label: "HL7" },
+                      { value: "MLLP", label: "MLLP" },
                     ]}
+                    onChange={(v) =>
+                      handleDestinationChange(
+                        index,
+                        "type",
+                        v as DestinationType
+                      )
+                    }
                   />
-
-                  <Select label="Outbound Data Type" value={dest.outboundDataType} onChange={(v: string) => handleDestinationChange(index, "outboundDataType", v as DataType)} options={dataTypeOptions} />
+                  <Select
+                    label="Outbound Data Type"
+                    value={dest.outboundDataType}
+                    options={dataTypeOptions}
+                    onChange={(v) =>
+                      handleDestinationChange(
+                        index,
+                        "outboundDataType",
+                        v as DataType
+                      )
+                    }
+                  />
                 </div>
 
-                <Input label="Endpoint" value={dest.endpoint} onChange={(v: string) => handleDestinationChange(index, "endpoint", v)} placeholder="example: localhost:5000" error={errors[`dest_endpoint_${index}`]} />
+                <Input
+                  label="Endpoint"
+                  value={dest.endpoint}
+                  onChange={(v) =>
+                    handleDestinationChange(index, "endpoint", v)
+                  }
+                  error={errors[`dest_endpoint_${index}`]}
+                />
 
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "processing" })}>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      setEditingScriptForDestination({
+                        index,
+                        type: "processing",
+                      })
+                    }
+                  >
                     <CodeIcon /> Transformer
                   </Button>
-
-                  <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "response" })}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      setEditingScriptForDestination({
+                        index,
+                        type: "response",
+                      })
+                    }
+                  >
                     <CodeIcon /> Response
                   </Button>
-
-                  <Button type="button" variant="secondary" onClick={() => setEditingScriptForDestination({ index, type: "template" })}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      setEditingScriptForDestination({
+                        index,
+                        type: "template",
+                      })
+                    }
+                  >
                     <CodeIcon /> Template
                   </Button>
                 </div>
 
                 {destinations.length > 1 && (
-                  <button type="button" onClick={() => handleRemoveDestination(index)} className="absolute top-2 right-2 text-red-500">
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveDestination(index)}
+                    className="absolute top-2 right-2 text-red-500"
+                  >
                     <TrashIcon />
                   </button>
                 )}
               </div>
             ))}
 
-            <Button type="button" variant="secondary" onClick={handleAddDestination}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleAddDestination}
+            >
               Add Destination
             </Button>
           </Section>
-
-          {errors.global && <p className="text-red-600 text-sm">{errors.global}</p>}
-          {successMsg && <p className="text-green-700 text-sm">{successMsg}</p>}
 
           <div className="flex justify-end gap-3 pt-4 border-t">
             <Button type="button" variant="secondary" onClick={onClose}>
               Cancel
             </Button>
             <Button type="submit" disabled={submitting}>
-              {submitting ? "Saving..." : "Save Channel"}
+              Save Channel
             </Button>
           </div>
         </form>
@@ -251,20 +335,22 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
 
       {editingSourceScript && (
         <ScriptEditorModal
-          isOpen={true}
+          isOpen
           onClose={() => setEditingSourceScript(false)}
-          onSave={(newScript) => {
-            setSourceTransformerScript(newScript);
-            setEditingSourceScript(false);
+          onSave={(s) => {
+            setSourceTransformerScript(s)
+            setEditingSourceScript(false)
           }}
           initialScript={sourceTransformerScript}
           title="Edit Source Transformer Script"
+          scriptType="transformer"
         />
       )}
 
+
       {editingScriptForDestination && (
         <ScriptEditorModal
-          isOpen={true}
+          isOpen
           onClose={() => setEditingScriptForDestination(null)}
           onSave={handleDestinationScriptSave}
           initialScript={
@@ -274,7 +360,14 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ isOpen, onClose, onSubmit, in
               ? destinations[editingScriptForDestination.index]?.responseScript || ""
               : destinations[editingScriptForDestination.index]?.templateScript || ""
           }
-          title="Edit Script"
+          title={`Edit ${editingScriptForDestination.type} Script`}
+          scriptType={
+            editingScriptForDestination.type === "processing"
+              ? "transformer"
+              : editingScriptForDestination.type === "response"
+              ? "response"
+              : "template"
+          }
         />
       )}
     </>
@@ -285,35 +378,57 @@ const Input: React.FC<{
   label: string;
   value: string;
   onChange: (v: string) => void;
-  placeholder?: string;
   error?: string;
-}> = ({ label, value, onChange, placeholder, error }) => (
+}> = ({ label, value, onChange, error }) => (
   <div className="space-y-1">
-    <label className="text-sm text-[var(--text-soft)]">{label}</label>
-    <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="input-bw w-full px-3 py-2" />
-    {error && <div className="text-red-500 text-xs">{error}</div>}
+    <label className="text-sm">{label}</label>
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="input-bw w-full px-3 py-2"
+    />
+    {error && <div className="text-xs text-red-500">{error}</div>}
   </div>
 );
 
-const Select: React.FC<{
-  label: string;
+interface SelectOption {
   value: string;
-  options: { value: string; label: string }[];
-  onChange: (v: string) => void;
-}> = ({ label, value, options, onChange }) => (
+  label: string;
+}
+
+interface SelectProps<T extends string> {
+  label: string;
+  value: T;
+  options: SelectOption[];
+  onChange: (value: T) => void;
+}
+
+const Select = <T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: SelectProps<T>) => (
   <div className="space-y-1">
-    <label className="text-sm text-[var(--text-soft)]">{label}</label>
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="input-bw w-full px-3 py-2">
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
+    <label className="text-sm">{label}</label>
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as T)}
+      className="input-bw w-full px-3 py-2"
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
         </option>
       ))}
     </select>
   </div>
 );
 
-const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+const Section: React.FC<{ title: string; children: React.ReactNode }> = ({
+  title,
+  children,
+}) => (
   <div className="space-y-3 pt-4 border-t">
     <h3 className="text-lg font-semibold">{title}</h3>
     {children}

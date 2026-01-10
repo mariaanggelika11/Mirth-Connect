@@ -33,8 +33,8 @@ const StatusBadge = ({ status }: { status: string }) => {
 
 const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
   const [viewMode, setViewMode] = useState({
-    inbound: "pretty" as "pretty" | "raw",
-    outbound: "pretty" as "pretty" | "raw" | "tree",
+    inbound: "pretty" as "pretty" | "raw" | "tree",
+    outbound: "pretty" as "pretty" | "raw",
     destination: {} as Record<
       number,
       {
@@ -69,7 +69,9 @@ const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
       const parsed = typeof data === "string" ? JSON.parse(data) : data;
       return pretty ? JSON.stringify(parsed, null, 2) : JSON.stringify(parsed);
     } catch {
-      return typeof data === "string" ? data : JSON.stringify(data, null, 2);
+      return typeof data === "string"
+        ? data
+        : JSON.stringify(data, null, 2);
     }
   };
 
@@ -83,19 +85,27 @@ const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
     if (mode === "tree") {
       return (
         <div className="code-box h-[240px] overflow-auto">
-          <HL7Tree hl7={typeof content === "string" ? content : JSON.stringify(content)} />
+          <HL7Tree hl7={content} />
         </div>
       );
     }
 
-    return <pre className="code-box h-[240px] overflow-auto">{mode === "pretty" ? formatJSON(content, true) : formatJSON(content, false)}</pre>;
+    return (
+      <pre className="code-box h-[240px] overflow-auto">
+        {mode === "pretty"
+          ? formatJSON(content, true)
+          : formatJSON(content, false)}
+      </pre>
+    );
   };
 
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-black/60 z-50">
       <div className="card-bw w-[1100px] max-h-[90vh] overflow-hidden flex flex-col">
-        <div className="flex justify-between items-center px-6 py-4 border-b shrink-0">
-          <h2 className="text-lg font-semibold">Message Details #{log.id}</h2>
+        <div className="flex justify-between items-center px-6 py-4 border-b">
+          <h2 className="text-lg font-semibold">
+            Message Details #{log.id}
+          </h2>
           <button onClick={onClose} className="icon-btn text-xl">
             ×
           </button>
@@ -123,35 +133,86 @@ const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
           </div>
 
           {/* PAYLOAD */}
-          <div className="grid grid-cols-2 gap-6 items-start">
+          <div className="grid grid-cols-2 gap-6">
+            {/* INBOUND */}
             <div className="space-y-2">
               <div className="flex justify-between">
                 <strong>Inbound Payload</strong>
                 <div className="flex gap-2">
-                  <Button variant={viewMode.inbound === "pretty" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, inbound: "pretty" }))}>
+                  <Button
+                    variant={
+                      viewMode.inbound === "pretty"
+                        ? "primary"
+                        : "secondary"
+                    }
+                    onClick={() =>
+                      setViewMode((v) => ({ ...v, inbound: "pretty" }))
+                    }
+                  >
                     Pretty
                   </Button>
-                  <Button variant={viewMode.inbound === "raw" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, inbound: "raw" }))}>
+
+                  <Button
+                    variant={
+                      viewMode.inbound === "raw"
+                        ? "primary"
+                        : "secondary"
+                    }
+                    onClick={() =>
+                      setViewMode((v) => ({ ...v, inbound: "raw" }))
+                    }
+                  >
                     Raw
                   </Button>
+
+                  {isHL7(log.originalPayload) && (
+                    <Button
+                      variant={
+                        viewMode.inbound === "tree"
+                          ? "primary"
+                          : "secondary"
+                      }
+                      onClick={() =>
+                        setViewMode((v) => ({ ...v, inbound: "tree" }))
+                      }
+                    >
+                      Tree
+                    </Button>
+                  )}
                 </div>
               </div>
+
               {RenderPayload(viewMode.inbound, log.originalPayload)}
             </div>
 
+            {/* TRANSFORMED */}
             <div className="space-y-2">
               <div className="flex justify-between">
                 <strong>Transformed Payload</strong>
                 <div className="flex gap-2">
-                  <Button variant={viewMode.outbound === "pretty" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, outbound: "pretty" }))}>
+                  <Button
+                    variant={
+                      viewMode.outbound === "pretty"
+                        ? "primary"
+                        : "secondary"
+                    }
+                    onClick={() =>
+                      setViewMode((v) => ({ ...v, outbound: "pretty" }))
+                    }
+                  >
                     Pretty
                   </Button>
-                  {isHL7(log.transformedPayload) && (
-                    <Button variant={viewMode.outbound === "tree" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, outbound: "tree" }))}>
-                      Tree
-                    </Button>
-                  )}
-                  <Button variant={viewMode.outbound === "raw" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, outbound: "raw" }))}>
+
+                  <Button
+                    variant={
+                      viewMode.outbound === "raw"
+                        ? "primary"
+                        : "secondary"
+                    }
+                    onClick={() =>
+                      setViewMode((v) => ({ ...v, outbound: "raw" }))
+                    }
+                  >
                     Raw
                   </Button>
                 </div>
@@ -161,7 +222,7 @@ const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
             </div>
           </div>
 
-          {/* DESTINATION */}
+          {/* DESTINATIONS */}
           {(log.destinationLogs?.length ?? 0) > 0 && (
             <div className="space-y-6">
               <h3 className="text-lg font-semibold">Destination Results</h3>
@@ -176,8 +237,13 @@ const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
 
                 return (
                   <div key={i} className="card-bw">
-                    <div onClick={() => toggleDest(i)} className="flex justify-between items-center px-4 py-3 cursor-pointer border-b">
-                      <strong>{dest.destinationName ?? `Destination #${i + 1}`}</strong>
+                    <div
+                      onClick={() => toggleDest(i)}
+                      className="flex justify-between items-center px-4 py-3 cursor-pointer border-b"
+                    >
+                      <strong>
+                        {dest.destinationName ?? `Destination #${i + 1}`}
+                      </strong>
                       <StatusBadge status={dest.status ?? "OUT-UNKNOWN"} />
                     </div>
 
@@ -186,14 +252,6 @@ const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
                         {/* REQUEST */}
                         <div>
                           <strong>Request Data</strong>
-                          <div className="flex gap-2 my-2">
-                            <Button variant={state.request === "pretty" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, destination: { ...v.destination, [i]: { ...state, request: "pretty" } } }))}>
-                              Pretty
-                            </Button>
-                            <Button variant={state.request === "raw" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, destination: { ...v.destination, [i]: { ...state, request: "raw" } } }))}>
-                              Raw
-                            </Button>
-                          </div>
                           {RenderPayload(state.request, dest.requestData)}
                         </div>
 
@@ -201,39 +259,76 @@ const LogDetailModal: React.FC<LogDetailModalProps> = ({ log, onClose }) => {
                         <div>
                           <strong>Outbound Data</strong>
                           <div className="flex gap-2 my-2">
-                            <Button variant={state.outbound === "pretty" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, destination: { ...v.destination, [i]: { ...state, outbound: "pretty" } } }))}>
+                            <Button
+                              variant={
+                                state.outbound === "pretty"
+                                  ? "primary"
+                                  : "secondary"
+                              }
+                              onClick={() =>
+                                setViewMode((v) => ({
+                                  ...v,
+                                  destination: {
+                                    ...v.destination,
+                                    [i]: { ...state, outbound: "pretty" },
+                                  },
+                                }))
+                              }
+                            >
                               Pretty
                             </Button>
 
                             {isHL7(dest.outboundData) && (
-                              <Button variant={state.outbound === "tree" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, destination: { ...v.destination, [i]: { ...state, outbound: "tree" } } }))}>
+                              <Button
+                                variant={
+                                  state.outbound === "tree"
+                                    ? "primary"
+                                    : "secondary"
+                                }
+                                onClick={() =>
+                                  setViewMode((v) => ({
+                                    ...v,
+                                    destination: {
+                                      ...v.destination,
+                                      [i]: { ...state, outbound: "tree" },
+                                    },
+                                  }))
+                                }
+                              >
                                 Tree
                               </Button>
                             )}
 
-                            <Button variant={state.outbound === "raw" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, destination: { ...v.destination, [i]: { ...state, outbound: "raw" } } }))}>
+                            <Button
+                              variant={
+                                state.outbound === "raw"
+                                  ? "primary"
+                                  : "secondary"
+                              }
+                              onClick={() =>
+                                setViewMode((v) => ({
+                                  ...v,
+                                  destination: {
+                                    ...v.destination,
+                                    [i]: { ...state, outbound: "raw" },
+                                  },
+                                }))
+                              }
+                            >
                               Raw
                             </Button>
                           </div>
+
                           {RenderPayload(state.outbound, dest.outboundData)}
                         </div>
 
                         {/* RESPONSE */}
                         <div>
                           <strong>Destination Response</strong>
-                          <div className="flex gap-2 my-2">
-                            <Button variant={state.response === "pretty" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, destination: { ...v.destination, [i]: { ...state, response: "pretty" } } }))}>
-                              Pretty
-                            </Button>
-
-                            <Button variant={state.response === "raw" ? "primary" : "secondary"} onClick={() => setViewMode((v) => ({ ...v, destination: { ...v.destination, [i]: { ...state, response: "raw" } } }))}>
-                              Raw
-                            </Button>
-                          </div>
-
                           {RenderPayload(state.response, dest.responseText)}
-
-                          <div className="text-right text-xs text-[var(--text-soft)] mt-2">Sent At: {safeDate(dest.sentAt)}</div>
+                          <div className="text-right text-xs text-[var(--text-soft)] mt-2">
+                            Sent At: {safeDate(dest.sentAt)}
+                          </div>
                         </div>
                       </div>
                     )}

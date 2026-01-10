@@ -7,19 +7,10 @@ const BASE_URL = process.env.BASE_URL || "http://localhost:9000";
 const INBOUND_BASE = process.env.INBOUND_BASE || "/api/message/inbound/";
 const DEFAULT_HL7_PORT = process.env.HL7_PORT || "2575";
 
-/* =========================================================
-   GET ALL CHANNELS
-   ========================================================= */
-/* =========================================================
-   GET ALL CHANNELS (FINAL FIXED VERSION)
-   ========================================================= */
 export const getAllChannels = async (req: Request, res: Response) => {
   try {
     const pool = await getConnection();
 
-    /* =========================================================
-       1) Ambil data channel + total RECEIVED (IN) + total OUTBOUND
-    ========================================================= */
     const channelQuery = await pool.request().query(`
       SELECT 
         c.id,
@@ -52,9 +43,6 @@ export const getAllChannels = async (req: Request, res: Response) => {
 
     const channels = channelQuery.recordset;
 
-    /* =========================================================
-       2) AMBIL SEMUA DESTINATION + HITUNG SENT/ERROR REALTIME
-    ========================================================= */
     for (const ch of channels) {
       const destQuery = await pool.request().input("channel_id", ch.id).query(`
         SELECT 
@@ -68,8 +56,6 @@ export const getAllChannels = async (req: Request, res: Response) => {
             d.response_script,
             d.template_script,
             ISNULL(d.is_enabled, 1) AS is_enabled,
-
-            -- 🔥 HITUNG SENT REALTIME (OUT-SENT)
             (
                 SELECT COUNT(*)
                 FROM Messages m
@@ -79,7 +65,6 @@ export const getAllChannels = async (req: Request, res: Response) => {
                   AND m.status = 'OUT-SENT'
             ) AS sent,
 
-            -- 🔥 HITUNG ERROR REALTIME (OUT-ERROR)
             (
                 SELECT COUNT(*)
                 FROM Messages m
@@ -94,9 +79,6 @@ export const getAllChannels = async (req: Request, res: Response) => {
         ORDER BY d.id ASC;
       `);
 
-      /* =========================================================
-         3) Mapping destinasi untuk frontend
-      ========================================================= */
       const destinations = destQuery.recordset.map((d) => ({
         id: d.id,
         channel_id: d.channel_id,
@@ -112,9 +94,6 @@ export const getAllChannels = async (req: Request, res: Response) => {
         templateScript: d.template_script || "",
       }));
 
-      /* =========================================================
-         4) Finalize channel object for frontend
-      ========================================================= */
       ch.source = {
         type: ch.source_type,
         endpoint: ch.source_endpoint,
@@ -131,10 +110,6 @@ export const getAllChannels = async (req: Request, res: Response) => {
       delete ch.processing_script;
       delete ch.response_script;
     }
-
-    /* =========================================================
-       RETURN RESULT
-    ========================================================= */
     res.json(channels);
   } catch (err: any) {
     res.status(500).json({
@@ -144,9 +119,6 @@ export const getAllChannels = async (req: Request, res: Response) => {
   }
 };
 
-/* =========================================================
-   CREATE CHANNEL
-   ========================================================= */
 export const createChannel = async (req: Request, res: Response) => {
   const { name, source, destinations, processingScript, responseScript } = req.body;
 
