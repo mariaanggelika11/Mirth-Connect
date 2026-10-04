@@ -151,11 +151,6 @@ body {
   border-color: var(--border-main);
 }
 
-.icon-btn-danger:hover {
-  background: #fef2f2;
-  color: var(--danger);
-}
-
 /* Code */
 .code-box {
   background: var(--bg-soft);

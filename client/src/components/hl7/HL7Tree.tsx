@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronRightIcon, ChevronDownIcon } from '../icons/Icon';
+import { ChevronRight as ChevronRightIcon, ChevronDown as ChevronDownIcon } from 'lucide-react';
 import { fetchHL7Tree } from '../../services/hl7.api';
 
 export interface HL7Node {

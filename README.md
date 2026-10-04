@@ -191,8 +191,6 @@ node server/dummy-hl7-receiver.js
 node server/send-hl7.js /path/to/synthetic-message.hl7
 ```
 
-`dummy-receiver.js` adalah harness SQL tambahan, memakai centralized root config dan membutuhkan tabel `InboundMessages` pada database uji. Tidak dipakai aplikasi production.
-
 ## Docker (opsional)
 
 Dockerfile membangun monolith existing, menjalankan Node non-root dan memisahkan build/runtime. Tidak ada secret yang di-copy ke image.

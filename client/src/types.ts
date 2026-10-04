@@ -1,6 +1,4 @@
-// ================================
 // ENUMS
-// ================================
 export enum ChannelStatus {
   RUNNING = 'RUNNING',
   STOPPED = 'STOPPED',
@@ -23,9 +21,7 @@ export enum DataType {
   TEXT = 'TEXT',
 }
 
-// ================================
 // SOURCE / DESTINATION
-// ================================
 export interface Source {
   type: string;
   endpoint?: string;
@@ -53,9 +49,7 @@ export interface Destination {
   errors?: number;
 }
 
-// ================================
 // CHANNEL ENTITY
-// ================================
 export interface Channel {
   id: number;
   name: string;
@@ -72,9 +66,7 @@ export interface Channel {
   errors?: number;
 }
 
-// ================================
 // CHANNEL FORM
-// ================================
 export interface ChannelFormData {
   name: string;
   source: Source;
@@ -84,9 +76,7 @@ export interface ChannelFormData {
   filterScript?: string;
 }
 
-// ================================
 // MONITOR & USERS
-// ================================
 export interface MonitorStats {
   totalReceived: number;
   totalSent: number;
@@ -106,9 +96,7 @@ export interface User {
   role: string;
 }
 
-// ================================
 // LOG SYSTEM
-// ================================
 export enum LogLevel {
   INFO = 'INFO',
   WARN = 'WARN',
@@ -116,9 +104,7 @@ export enum LogLevel {
   DEBUG = 'DEBUG',
 }
 
-// ================================
-// DESTINATION LOG (FINAL CORRECT)
-// ================================
+// DESTINATION LOG
 export interface DestinationLog {
   messageId?: number;
   canResend?: boolean;
@@ -132,9 +118,7 @@ export interface DestinationLog {
   outboundData?: unknown;
 }
 
-// ================================
-// FINAL MAIN LOG ENTRY
-// ================================
+// LOG ENTRY
 export interface LogEntry {
   id: number;
   payloadAllowed?: boolean;

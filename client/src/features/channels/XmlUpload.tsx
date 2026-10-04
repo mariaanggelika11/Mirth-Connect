@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { UploadIcon } from '../../components/icons/Icon';
+import { Upload as UploadIcon } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 
 interface XmlUploadProps {
