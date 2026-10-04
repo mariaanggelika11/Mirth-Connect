@@ -6,13 +6,38 @@
     "server"
   ],
   "scripts": {
-    "install:all": "npm install --prefix client && npm install --prefix server",
-    "build": "npm run build --prefix client && npm run build --prefix server",
+    "dev": "npm run dev -w server",
+    "dev:client": "npm run dev -w client",
+    "build": "npm run build --workspaces",
     "start": "node server/dist/server.js",
-    "start:all": "npm run build --prefix client && npm run build --prefix server && cd server && node dist/server.js",
-    "dev": "npm run build --prefix client && ts-node-dev --respawn --transpile-only server/src/server.ts"
+    "typecheck": "npm run typecheck --workspaces",
+    "lint": "eslint client/src client/test client/e2e server/src server/test",
+    "format": "prettier --write client/src server/src server/test",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "db:migrate": "npm run db:migrate -w server",
+    "bootstrap:admin": "npm run bootstrap:admin -w server",
+    "test:e2e": "playwright test",
+    "test:sql": "tsx --test server/test/sql.integration.ts"
   },
   "devDependencies": {
-    "ts-node-dev": "^2.0.0"
+    "@playwright/test": "^1.63.0",
+    "@types/cors": "^2.8.19",
+    "@types/supertest": "^7.2.1",
+    "@vitest/coverage-v8": "^5.0.3",
+    "eslint": "^10.12.0",
+    "prettier": "^3.9.9",
+    "supertest": "^7.3.1",
+    "tsx": "^4.23.15",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "type": "module",
+  "overrides": {
+    "@types/express": "4.17.23",
+    "@types/express-serve-static-core": "4.19.7"
   }
 }

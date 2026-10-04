@@ -1,0 +1,11 @@
+<channel>
+  <name>Example HTTP to REST</name>
+  <source><type>HTTP</type><inboundDataType>JSON</inboundDataType></source>
+  <destinations>
+    <destination>
+      <name>Local REST receiver</name><type>REST</type><endpoint>http://127.0.0.1:9200/api/inbound/2</endpoint>
+      <outboundDataType>JSON</outboundDataType><retryEnabled>true</retryEnabled><maxRetries>3</maxRetries>
+      <retryIntervalSeconds>30</retryIntervalSeconds><timeoutMs>10000</timeoutMs>
+    </destination>
+  </destinations>
+</channel>

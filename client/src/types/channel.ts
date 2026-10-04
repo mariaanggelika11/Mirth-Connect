@@ -1,17 +1,17 @@
-import { DataType } from "./monitor";
+import { DataType } from './monitor';
 
 export enum ChannelStatus {
-  RUNNING = "RUNNING",
-  STOPPED = "STOPPED",
-  ERROR = "ERROR",
+  RUNNING = 'RUNNING',
+  STOPPED = 'STOPPED',
+  ERROR = 'ERROR',
 }
 
 export enum DestinationType {
-  HL7 = "HL7",
-  MLLP = "MLLP",
-  REST = "REST",
-  TCP = "TCP",
-  RAW = "RAW",
+  HL7 = 'HL7',
+  MLLP = 'MLLP',
+  REST = 'REST',
+  TCP = 'TCP',
+  RAW = 'RAW',
 }
 
 export interface Source {
@@ -30,6 +30,13 @@ export interface Destination {
   processingScript?: string;
   responseScript?: string;
   templateScript?: string;
+  filterScript?: string;
+  isEnabled?: boolean;
+  retryEnabled?: boolean;
+  maxRetries?: number;
+  retryIntervalSeconds?: number;
+  timeoutMs?: number;
+  credentialConfigured?: boolean;
   sent?: number;
   errors?: number;
 }
@@ -42,6 +49,7 @@ export interface Channel {
   destinations: Destination[];
   processingScript?: string;
   responseScript?: string;
+  filterScript?: string;
   created_at?: string;
   updated_at?: string;
   received?: number;
@@ -55,4 +63,5 @@ export interface ChannelFormData {
   destinations: Destination[];
   processingScript?: string;
   responseScript?: string;
+  filterScript?: string;
 }

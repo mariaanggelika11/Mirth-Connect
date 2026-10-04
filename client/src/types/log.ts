@@ -1,8 +1,8 @@
 export enum LogLevel {
-  INFO = "INFO",
-  WARN = "WARN",
-  ERROR = "ERROR",
-  DEBUG = "DEBUG",
+  INFO = 'INFO',
+  WARN = 'WARN',
+  ERROR = 'ERROR',
+  DEBUG = 'DEBUG',
 }
 
 export interface DestinationLog {
@@ -10,8 +10,8 @@ export interface DestinationLog {
   status: string;
   responseText: string;
   sentAt: string;
-  requestData?: any;
-  outboundData?: any;
+  requestData?: unknown;
+  outboundData?: unknown;
 }
 
 export interface LogEntry {
@@ -25,11 +25,11 @@ export interface LogEntry {
   content?: string;
   error?: string;
 
-  originalPayload?: any;
-  transformedPayload?: any;
+  originalPayload?: unknown;
+  transformedPayload?: unknown;
 
   status?: string;
-  direction?: "IN" | "OUT";
+  direction?: 'IN' | 'OUT';
 
   destinationLogs?: DestinationLog[];
 }

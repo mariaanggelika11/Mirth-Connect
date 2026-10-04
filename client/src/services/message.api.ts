@@ -1,24 +1,30 @@
-import { api } from "./api";
-import { LogEntry } from "../types";
-
-export const fetchLogs = async (channelId?: number): Promise<LogEntry[]> => {
-  const { data } = await api.get("/message", { params: { channelId } });
-
-  return data.map((msg: any) => ({
-    id: msg.id,
-    channelId: msg.channelId,
-    channelName: msg.channelName,
-    timestamp: msg.timestamp,
-    direction: msg.direction,
-    status: msg.status?.toUpperCase(),
-    level: msg.level || "INFO",
-    message: `${msg.direction} - ${msg.status}`,
-    originalPayload: msg.originalPayload,
-    transformedPayload: msg.transformedPayload,
-    destinationLogs: msg.destinationLogs || [],
-  }));
-};
-
+import { api } from './api';
+import type { LogEntry } from '../types';
+export interface MessageFilters {
+  page?: number;
+  pageSize?: number;
+  channelId?: number;
+  direction?: string;
+  status?: string;
+  statusGroup?: 'errors' | 'pending';
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+export async function fetchLogPage(params: MessageFilters = {}) {
+  const { data } = await api.get('/message', { params });
+  return data as {
+    data: LogEntry[];
+    pagination: { page: number; pageSize: number; total: number };
+  };
+}
+export async function fetchLogs(channelId?: number): Promise<LogEntry[]> {
+  return (await fetchLogPage({ channelId })).data;
+}
+export async function fetchLogDetail(id: number, logPage = 1): Promise<LogEntry> {
+  const { data } = await api.get(`/message/${id}`, { params: { logPage } });
+  return data.data;
+}
 export const resendMessage = async (id: number) => {
   const { data } = await api.post(`/message/resend/${id}`);
   return data;

@@ -1,15 +1,19 @@
 {
   "name": "mirth-connect-server",
   "version": "1.0.0",
-  "description": "Backend monolith for Mirth Connect (Express + TypeScript + MSSQL)",
+  "description": "Backend monolith for Mirth Connect (Express + TypeScript + PostgreSQL)",
   "type": "module",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "rimraf dist && tsc",
+    "build": "tsc",
     "start": "node dist/server.js",
-    "lint": "tsc --noEmit",
-    "clean": "rimraf dist"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run --root .. server/test",
+    "test:coverage": "vitest run --root .. --coverage server/test",
+    "db:migrate": "tsx src/scripts/migrate.ts",
+    "bootstrap:admin": "tsx src/scripts/bootstrap.ts"
   },
   "dependencies": {
     "axios": "^1.13.1",
@@ -17,33 +21,34 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.22.1",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.2",
-    "mirth-connect-monolith": "file:..",
-    "mssql": "^9.3.2",
-    "simple-hl7": "^3.3.0",
-    "socket.io": "^4.7.5",
-    "vm2": "^3.10.0",
-    "xml2js": "^0.6.2"
+    "multer": "^2.4.0",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
+    "quickjs-emscripten": "^0.32.0",
+    "xml2js": "^0.6.2",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.6",
-    "@types/mssql": "^9.1.6",
+    "@types/multer": "^2.3.0",
     "@types/node": "^20.12.12",
+    "@types/pg": "^8.23.1",
     "@types/xml2js": "^0.4.14",
-    "rimraf": "^5.0.5",
-    "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.5"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.18.0"
   },
   "keywords": [
     "express",
     "typescript",
     "monolith",
-    "mssql",
+    "postgresql",
     "jwt",
     "mirth-connect"
   ],

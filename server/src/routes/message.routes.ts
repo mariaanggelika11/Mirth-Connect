@@ -1,33 +1,19 @@
-import express from "express";
-import bodyParser from "body-parser";
-import * as messageService from "../services/message.services.js";
-
-const router = express.Router();
-
-// ============================================================
-// INBOUND MESSAGE (HL7 / JSON / XML / TEXT)
-// ============================================================
+import { Router, text } from 'express';
+import * as service from '../services/message.services.js';
+import { requirePermission } from '../middleware/auth.js';
+import { validateId } from '../utils/validator.js';
+import { config } from '../config/env.js';
+const router = Router();
+// Backward-compatible management-JWT source endpoint; external sources use /api/inbound.
 router.post(
-  "/inbound/:channelId",
-  bodyParser.text({
-    type: ["text/*", "application/hl7-v2", "x-application/hl7-v2", "application/octet-stream", "*/*"],
-  }),
-  messageService.handleInboundMessage
+  '/inbound/:channelId',
+  requirePermission('inbound:send'),
+  validateId,
+  text({ type: '*/*', limit: config.server.payloadLimit }),
+  service.handleInboundMessage,
 );
-
-// ============================================================
-// GET MESSAGES
-// ============================================================
-router.get("/", messageService.getMessages);
-
-// ============================================================
-// GET MESSAGE STATS
-// ============================================================
-router.get("/stats", messageService.getMessageStats);
-
-// ============================================================
-// RESEND MESSAGE
-// ============================================================
-router.post("/resend/:id", messageService.resendMessage);
-
+router.get('/', requirePermission('message:read'), service.getMessages);
+router.get('/stats', requirePermission('message:read'), service.getMessageStats);
+router.get('/:id', requirePermission('message:read'), validateId, service.getMessageDetail);
+router.post('/resend/:id', requirePermission('message:resend'), validateId, service.resendMessage);
 export default router;

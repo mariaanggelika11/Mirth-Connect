@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { fetchMonitorStats } from "../../services/monitor.api";
-import { MonitorStats } from "../../types";
+import React, { useState, useEffect } from 'react';
+import { fetchMonitorStats } from '../../services/monitor.api';
+import { MonitorStats } from '../../types';
 
 /* ============================
    METRIC CARD
@@ -26,9 +26,9 @@ const MonitorMetrics: React.FC = () => {
       setError(null);
       const data = await fetchMonitorStats();
       setStats(data);
-    } catch (err) {
-      console.error("Failed to load monitor stats:", err);
-      setError("Failed to fetch metrics");
+    } catch {
+      setStats(null);
+      setError('Failed to fetch metrics');
     } finally {
       setLoading(false);
     }
@@ -48,8 +48,18 @@ const MonitorMetrics: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {Array.from({ length: 6 }).map((_, i) => (
           <div key={i} className="card-bw p-4 animate-pulse">
-            <div style={{ height: 16, background: "var(--bg-soft)", borderRadius: 6, width: "70%", marginBottom: 10 }} />
-            <div style={{ height: 28, background: "var(--bg-soft)", borderRadius: 6, width: "40%" }} />
+            <div
+              style={{
+                height: 16,
+                background: 'var(--bg-soft)',
+                borderRadius: 6,
+                width: '70%',
+                marginBottom: 10,
+              }}
+            />
+            <div
+              style={{ height: 28, background: 'var(--bg-soft)', borderRadius: 6, width: '40%' }}
+            />
           </div>
         ))}
       </div>
@@ -61,7 +71,7 @@ const MonitorMetrics: React.FC = () => {
   ============================ */
   if (error) {
     return (
-      <div className="card-bw p-4" style={{ color: "var(--danger)" }}>
+      <div className="card-bw p-4" style={{ color: 'var(--danger)' }}>
         ⚠️ {error}
       </div>
     );

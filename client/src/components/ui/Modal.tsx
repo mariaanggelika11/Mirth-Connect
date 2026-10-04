@@ -1,82 +1,85 @@
-import React, { useEffect, useRef } from "react";
-
+import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { X } from 'lucide-react';
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
-  children: React.ReactNode;
+  children: ReactNode;
   keepMounted?: boolean;
+  variant?: 'dialog' | 'drawer';
 }
-
-export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
-  const overlayRef = useRef<HTMLDivElement>(null);
-
+export function Modal({ isOpen, onClose, title, children, variant = 'dialog' }: ModalProps) {
+  const ref = useRef<HTMLDivElement>(null),
+    titleId = useId();
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+    if (!isOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const focusable = () =>
+      Array.from(
+        ref.current?.querySelectorAll<HTMLElement>(
+          'summary,button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex="0"]',
+        ) || [],
+      ).filter((el) => el.offsetParent !== null);
+    focusable()[0]?.focus();
+    const keydown = (e: KeyboardEvent) => {
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      if (dialogs[dialogs.length - 1] !== ref.current) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        closeRef.current();
+      }
+      if (e.key === 'Tab') {
+        const elements = focusable();
+        const first = elements[0],
+          last = elements[elements.length - 1];
+        if (!first) {
+          e.preventDefault();
+          return;
+        }
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
-    if (isOpen) document.addEventListener("keydown", handleEsc);
-    return () => document.removeEventListener("keydown", handleEsc);
-  }, [isOpen, onClose]);
-
+    document.addEventListener('keydown', keydown);
+    return () => {
+      document.removeEventListener('keydown', keydown);
+      document.body.style.overflow = previousOverflow;
+      if (previous?.isConnected) previous.focus();
+    };
+  }, [isOpen]);
+  if (!isOpen) return null;
   return (
     <div
-      className={`${isOpen ? "visible opacity-100" : "invisible opacity-0"}`}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 50,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        transition: "opacity 0.2s",
+      className={`modal-overlay ${variant === 'drawer' ? 'drawer-overlay' : ''}`}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
       }}
-      aria-modal="true"
-      role="dialog"
     >
       <div
-        ref={overlayRef}
-        onClick={(e) => {
-          if (e.target === overlayRef.current) onClose();
-        }}
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: "rgba(0,0,0,0.4)",
-        }}
-      />
-
-      <div
-        className="card-bw"
-        style={{
-          position: "relative",
-          width: "100%",
-          maxWidth: 800,
-          maxHeight: "90vh",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          transform: isOpen ? "translateY(0)" : "translateY(-6px)",
-          transition: "transform 0.2s",
-        }}
+        ref={ref}
+        className={`modal-window ${variant === 'drawer' ? 'drawer-window' : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
       >
-        <div
-          style={{
-            padding: 16,
-            borderBottom: "1px solid var(--border-main)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <h3 style={{ fontSize: 18, fontWeight: 600 }}>{title}</h3>
-          <button onClick={onClose} className="icon-btn">
-            ✕
+        <div className="modal-heading">
+          <h2 id={titleId}>{title}</h2>
+          <button type="button" className="icon-btn" aria-label="Close dialog" onClick={onClose}>
+            <X size={20} />
           </button>
         </div>
-
-        <div style={{ overflowY: "auto" }}>{children}</div>
+        <div className="modal-body">{children}</div>
       </div>
     </div>
   );
-};
+}

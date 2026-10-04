@@ -1,35 +1,4 @@
-import net from "net";
-
-// MLLP framing constants
-const START_BLOCK = "\x0b";
-const END_BLOCK = "\x1c";
-const CARRIAGE_RETURN = "\x0d";
-
-// Valid HL7 message
-const HL7_MESSAGE = "MSH|^~\\&|TEST|LAB|HOSP|HIS|202402021200||ADT^A01|MSG00001|P|2.3\r" + "PID|1||12345||DOE^JOHN\r";
-
-// Frame with MLLP
-const framed = START_BLOCK + HL7_MESSAGE + END_BLOCK + CARRIAGE_RETURN;
-
-// Create TCP socket
-const client = new net.Socket();
-
-client.connect(2575, "localhost", () => {
-  console.log("Connected to MLLP listener");
-  console.log("Sending HL7 Message:\n", HL7_MESSAGE);
-  client.write(framed);
-});
-
-client.on("data", (data) => {
-  console.log("\nACK received:");
-  console.log(data.toString());
-  client.destroy(); // Close connection after ACK
-});
-
-client.on("close", () => {
-  console.log("Connection closed");
-});
-
-client.on("error", (err) => {
-  console.error("Socket error:", err);
-});
+// Send an HL7 file to a local test destination: node server/send-hl7.js path/to/message.hl7
+import { readFile } from 'node:fs/promises';
+import { sendTcp } from './dist/utils/transport.js';
+try {if(!process.argv[2])throw new Error();const payload=await readFile(process.argv[2],'utf8');await sendTcp(process.env.TEST_RECEIVER_ENDPOINT||'127.0.0.1:2576',payload);console.info('ACK_ACCEPTED');}catch{console.error('TEST_DELIVERY_FAILED');process.exitCode=1;}

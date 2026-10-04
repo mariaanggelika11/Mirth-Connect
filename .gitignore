@@ -1,7 +1,9 @@
 # ==========================================
 # Root
 # ==========================================
-# .env
+.env
+.env.*
+!.env.example
 *.log
 *.tmp
 *.bak
@@ -41,8 +43,8 @@ reports/
 # ==========================================
 # Environment & Lock files
 # ==========================================
-# client/.env
-# server/.env
+client/.env
+server/.env
 client/package-lock.json
 server/package-lock.json
 
@@ -95,4 +97,7 @@ temp/
 # ==========================================
 # Optional Docs
 # ==========================================
-README.md
+server/public/
+
+playwright-report/
+test-results/

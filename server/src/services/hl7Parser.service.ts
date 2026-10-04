@@ -1,5 +1,5 @@
-// server/src/services/hl7Parser.ts
-
+import { parseSegments } from '../utils/hl7Converer.js';
+import { parseField, FieldValue } from '../utils/hl7Fields.js';
 export interface HL7Node {
   id: string;
   name: string;
@@ -7,56 +7,45 @@ export interface HL7Node {
   path: string;
   children?: HL7Node[];
 }
-
+function fieldTree(value: FieldValue, id: string, name: string, path: string): HL7Node {
+  if (typeof value === 'string') return { id, name, path, value };
+  return {
+    id,
+    name,
+    path,
+    children: Object.entries(value).map(([key, v]) =>
+      fieldTree(
+        v,
+        id + '.' + key,
+        name + '.' + (Array.isArray(value) ? 'rep' + (Number(key) + 1) : key),
+        path + (Array.isArray(value) ? `[${key}]` : `['${key}']`),
+      ),
+    ),
+  };
+}
 export function parseHL7ToTree(message: string): HL7Node[] {
-  if (!message) return [];
-
-  const segments = message.split(/\r?\n/).filter((line) => line.trim() !== "");
-
-  const tree: HL7Node[] = [];
-
-  for (const seg of segments) {
-    const fields = seg.split("|");
-    const segName = fields[0];
-
-    const segmentNode: HL7Node = {
-      id: segName,
-      name: segName,
-      path: `msg['${segName}']`,
-      children: [],
+  const { delimiters: d, segments } = parseSegments(message);
+  const counts: Record<string, number> = {};
+  const totals: Record<string, number> = {};
+  for (const s of segments) totals[s.name] = (totals[s.name] || 0) + 1;
+  return segments.map((s) => {
+    const occurrence = counts[s.name] || 0;
+    counts[s.name] = occurrence + 1;
+    const base = `msg['${s.name}']${totals[s.name] > 1 ? `[${occurrence}]` : ''}`;
+    return {
+      id: `${s.name}-${occurrence}`,
+      name: s.name,
+      path: base,
+      children: s.fields
+        .slice(1)
+        .map((v, i) =>
+          fieldTree(
+            s.name === 'MSH' && i < 2 ? v : parseField(v, d),
+            `${s.name}-${occurrence}.${i + 1}`,
+            `${s.name}.${i + 1}`,
+            base + `['${i + 1}']`,
+          ),
+        ),
     };
-
-    for (let i = 1; i < fields.length; i++) {
-      const fieldValue = fields[i];
-
-      const fieldNode: HL7Node = {
-        id: `${segName}.${i}`,
-        name: `${segName}.${i}`,
-        value: fieldValue.includes("^") ? undefined : fieldValue,
-        path: `msg['${segName}']['${segName}.${i}']`,
-        children: [],
-      };
-
-      if (fieldValue.includes("^")) {
-        const components = fieldValue.split("^");
-
-        components.forEach((comp, cIndex) => {
-          const compNode: HL7Node = {
-            id: `${segName}.${i}.${cIndex + 1}`,
-            name: `${segName}.${i}.${cIndex + 1}`,
-            value: comp,
-            path: `msg['${segName}']['${segName}.${i}']['${segName}.${i}.${cIndex + 1}']`,
-          };
-
-          fieldNode.children!.push(compNode);
-        });
-      }
-
-      segmentNode.children!.push(fieldNode);
-    }
-
-    tree.push(segmentNode);
-  }
-
-  return tree;
+  });
 }

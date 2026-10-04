@@ -1,0 +1,23 @@
+# Development only. PostgreSQL stays external; do not run migrations against a live hospital DB.
+services:
+  engine:
+    build: .
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      HL7_HOST: 0.0.0.0
+    env_file: .env
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:2575:2575"
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    stop_grace_period: 40s

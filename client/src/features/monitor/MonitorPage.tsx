@@ -1,139 +1,421 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { fetchChannels } from "../../services/channel.api";
-import { fetchLogs } from "../../services/message.api";
-import { LogEntry, Channel, LogLevel } from "../../types";
-import { RefreshIcon } from "../../components/icons/Icon";
-import { Button } from "../../components/ui/Button";
-import LogDetailModal from "./LogDetailModal";
-
-const LogLevelIndicator: React.FC<{ level: LogLevel }> = ({ level }) => {
-  const map: Record<LogLevel, string> = {
-    INFO: "status-pill status-running",
-    DEBUG: "status-pill status-stopped",
-    WARN: "status-pill status-stopped",
-    ERROR: "status-pill status-error",
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Search, SlidersHorizontal, X, ArrowRight } from 'lucide-react';
+import { fetchChannels } from '../../services/channel.api';
+import { fetchLogPage, fetchLogDetail } from '../../services/message.api';
+import { LogEntry, Channel } from '../../types';
+import { Button } from '../../components/ui/Button';
+import {
+  EmptyState,
+  PageHeading,
+  RefreshButton,
+  StatusBadge,
+  formatTime,
+} from '../../components/ui/OperationalUI';
+import LogDetailModal from './LogDetailModal';
+interface Props {
+  initialFilters?: {
+    channelId?: string;
+    status?: string;
+    statusGroup?: 'errors' | 'pending';
+    direction?: string;
+    messageId?: number;
   };
-
-  return <span className={map[level]}>{level}</span>;
-};
-
-const StatusTag: React.FC<{ log: LogEntry }> = ({ log }) => {
-  const inbound = log.status ?? "UNKNOWN";
-  const dests = log.destinationLogs ?? [];
-
-  const total = dests.length;
-  const sent = dests.filter((d) => d.status === "OUT-SENT").length;
-  const fails = dests.filter((d) => d.status === "OUT-ERROR").length;
-
-  let label = inbound;
-
-  if (inbound === "IN-ERROR") label = "INBOUND ERROR";
-  else if (total === 0) label = "RECEIVED";
-  else if (sent === total) label = "SUCCESS";
-  else if (sent > 0 && fails > 0) label = "PARTIAL";
-  else if (fails === total) label = "FAILED";
-
-  return <span className="status-pill">{label}</span>;
-};
-
-const MonitorView: React.FC = () => {
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedChannel, setSelectedChannel] = useState<string>("ALL");
-  const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
-
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const chanId = selectedChannel === "ALL" ? undefined : parseInt(selectedChannel, 10);
-      const [logData, chanData] = await Promise.all([fetchLogs(chanId), fetchChannels()]);
-      setLogs(logData);
-      setChannels(chanData);
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedChannel]);
-
+}
+const statuses = [
+  'RECEIVED',
+  'SUCCESS',
+  'PARTIAL',
+  'FAILED',
+  'IN-ERROR',
+  'IN-PROCESS',
+  'PROCESSING',
+  'OUT-SENT',
+  'OUT-ERROR',
+  'QUEUED',
+  'RETRYING',
+  'DEAD_LETTER',
+  'FILTERED',
+];
+export default function MonitorView({ initialFilters = {} }: Props) {
+  const version = useRef(0),
+    detailVersion = useRef(0);
+  const [logs, setLogs] = useState<LogEntry[]>([]),
+    [channels, setChannels] = useState<Channel[]>([]),
+    [loading, setLoading] = useState(true),
+    [selectedChannel, setSelectedChannel] = useState(initialFilters.channelId || 'ALL'),
+    [page, setPage] = useState(1),
+    [total, setTotal] = useState(0),
+    [status, setStatus] = useState(initialFilters.status || ''),
+    [group, setGroup] = useState<'errors' | 'pending' | undefined>(initialFilters.statusGroup),
+    [direction, setDirection] = useState(initialFilters.direction || 'IN'),
+    [search, setSearch] = useState(''),
+    [appliedSearch, setAppliedSearch] = useState(''),
+    [dateFrom, setDateFrom] = useState(''),
+    [dateTo, setDateTo] = useState(''),
+    [error, setError] = useState(''),
+    [selectedLog, setSelectedLog] = useState<LogEntry | null>(null),
+    [openingId, setOpeningId] = useState<number | null>(null);
   useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const inboundLogs = logs.filter((l) => l.direction === "IN");
-
+    const timer = setTimeout(() => {
+      setAppliedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const load = useCallback(async () => {
+    const current = ++version.current;
+    setLoading(true);
+    setError('');
+    try {
+      if (dateFrom && dateTo && new Date(dateFrom) > new Date(dateTo))
+        throw new Error('Start date must be before end date.');
+      const [result, c] = await Promise.all([
+        fetchLogPage({
+          channelId: selectedChannel === 'ALL' ? undefined : Number(selectedChannel),
+          page,
+          direction,
+          status: status || undefined,
+          statusGroup: group,
+          search: appliedSearch || undefined,
+          dateFrom: dateFrom ? new Date(dateFrom).toISOString() : undefined,
+          dateTo: dateTo ? new Date(dateTo).toISOString() : undefined,
+        }),
+        fetchChannels(),
+      ]);
+      if (current !== version.current) return;
+      setLogs(result.data);
+      setTotal(result.pagination.total);
+      setChannels(c);
+    } catch (e) {
+      if (current === version.current)
+        setError(e instanceof Error ? e.message : 'Unable to load messages');
+    } finally {
+      if (current === version.current) setLoading(false);
+    }
+  }, [selectedChannel, page, direction, status, group, appliedSearch, dateFrom, dateTo]);
+  useEffect(() => {
+    void load();
+    return () => {
+      version.current++;
+    };
+  }, [load]);
+  const view = useCallback(async (id: number) => {
+    const current = ++detailVersion.current;
+    setOpeningId(id);
+    setError('');
+    try {
+      const result = await fetchLogDetail(id);
+      if (current === detailVersion.current) setSelectedLog(result);
+    } catch (e) {
+      if (current === detailVersion.current)
+        setError(e instanceof Error ? e.message : 'Unable to open message');
+    } finally {
+      if (current === detailVersion.current) setOpeningId(null);
+    }
+  }, []);
+  useEffect(() => {
+    if (initialFilters.messageId) void view(initialFilters.messageId);
+    return () => {
+      detailVersion.current++;
+    };
+  }, [initialFilters.messageId, view]);
+  const filtered =
+    group ||
+    selectedChannel !== 'ALL' ||
+    status ||
+    search ||
+    dateFrom ||
+    dateTo ||
+    direction !== 'IN';
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      <div className="card-bw" style={{ padding: 16, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <h2 style={{ fontSize: 22, fontWeight: 700 }}>Message Monitor</h2>
-          <p style={{ color: "var(--text-soft)", fontSize: 14 }}>Real-time summary of channel message flows</p>
-        </div>
-
-        <div style={{ display: "flex", gap: 8 }}>
-          <select value={selectedChannel} onChange={(e) => setSelectedChannel(e.target.value)} className="input-bw" style={{ minWidth: 200 }}>
-            <option value="ALL">All Channels</option>
+    <div className="page-stack">
+      <PageHeading
+        title="Messages"
+        description="Trace each message, review delivery results, and resolve failures."
+        actions={<RefreshButton onClick={() => void load()} loading={loading} />}
+      />
+      <div className="message-presets">
+        <button
+          className={!status && !group ? 'active' : ''}
+          onClick={() => {
+            setStatus('');
+            setGroup(undefined);
+            setPage(1);
+          }}
+        >
+          All messages
+        </button>
+        <button
+          className={group === 'errors' ? 'active' : ''}
+          onClick={() => {
+            setDirection('ALL');
+            setGroup('errors');
+            setStatus('');
+            setPage(1);
+          }}
+        >
+          Errors
+        </button>
+        <button
+          className={group === 'pending' ? 'active' : ''}
+          onClick={() => {
+            setDirection('OUT');
+            setStatus('');
+            setGroup('pending');
+            setPage(1);
+          }}
+        >
+          Waiting for retry
+        </button>
+        <button
+          className={status === 'DEAD_LETTER' ? 'active' : ''}
+          onClick={() => {
+            setDirection('OUT');
+            setStatus('DEAD_LETTER');
+            setGroup(undefined);
+            setPage(1);
+          }}
+        >
+          Dead letters
+        </button>
+      </div>
+      <section className="card-bw">
+        <div className="filter-toolbar message-filters">
+          <label className="search-field">
+            <Search size={17} />
+            <input
+              aria-label="Search message ID or channel"
+              placeholder="Search message ID or channel…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </label>
+          <select
+            className="input-bw"
+            aria-label="Channel"
+            value={selectedChannel}
+            onChange={(e) => {
+              setSelectedChannel(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="ALL">All channels</option>
             {channels.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
               </option>
             ))}
           </select>
-
-          <Button variant="secondary" onClick={loadData} disabled={loading}>
-            <RefreshIcon className={loading ? "animate-spin" : ""} />
-          </Button>
+          <select
+            aria-label="Direction"
+            className="input-bw"
+            value={direction}
+            onChange={(e) => {
+              setDirection(e.target.value);
+              setStatus('');
+              setPage(1);
+            }}
+          >
+            <option value="ALL">All directions</option>
+            <option value="IN">Inbound</option>
+            <option value="OUT">Outbound</option>
+          </select>
+          <details className="filter-details">
+            <summary>
+              <SlidersHorizontal size={15} />
+              More filters
+            </summary>
+            <div>
+              <label className="field">
+                <span>Status</span>
+                <select
+                  aria-label="Status"
+                  value={status}
+                  onChange={(e) => {
+                    setStatus(e.target.value);
+                    setGroup(undefined);
+                    setPage(1);
+                  }}
+                >
+                  <option value="">All statuses</option>
+                  {statuses.map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>From date</span>
+                <input
+                  aria-label="From date"
+                  type="datetime-local"
+                  value={dateFrom}
+                  onChange={(e) => {
+                    setDateFrom(e.target.value);
+                    setPage(1);
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span>To date</span>
+                <input
+                  aria-label="To date"
+                  type="datetime-local"
+                  value={dateTo}
+                  onChange={(e) => {
+                    setDateTo(e.target.value);
+                    setPage(1);
+                  }}
+                />
+              </label>
+            </div>
+          </details>
+          {filtered && (
+            <button
+              className="text-button"
+              onClick={() => {
+                setSelectedChannel('ALL');
+                setStatus('');
+                setGroup(undefined);
+                setSearch('');
+                setAppliedSearch('');
+                setDateFrom('');
+                setDateTo('');
+                setDirection('IN');
+                setPage(1);
+              }}
+            >
+              <X size={14} />
+              Clear filters
+            </button>
+          )}
         </div>
-      </div>
-
-      <div className="card-bw">
-        <table className="table">
-          <thead>
-            <tr>
-              <th></th>
-              <th>Timestamp</th>
-              <th>Channel</th>
-              <th>Status</th>
-              <th>Info</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {inboundLogs.map((log) => (
-              <tr key={log.id} className="table-row" onClick={() => setSelectedLog(log)} style={{ cursor: "pointer" }}>
-                <td>
-                  <LogLevelIndicator level={log.level} />
-                </td>
-
-                <td style={{ fontFamily: "monospace", fontSize: 13 }}>{new Date(log.timestamp).toLocaleString()}</td>
-
-                <td style={{ fontWeight: 600 }}>{log.channelName}</td>
-
-                <td>
-                  <StatusTag log={log} />
-                </td>
-
-                <td style={{ color: "var(--text-soft)", fontStyle: "italic" }}>
-                  {(() => {
-                    const dests = log.destinationLogs ?? [];
-                    const total = dests.length;
-                    const ok = dests.filter((d) => d.status === "OUT-SENT").length;
-                    const fail = dests.filter((d) => d.status === "OUT-ERROR").length;
-
-                    if (total === 0) return "Inbound only";
-                    if (ok === total) return `${ok}/${total} OK`;
-                    if (fail === total) return `${fail}/${total} FAILED`;
-                    return `${ok} OK / ${fail} FAIL`;
-                  })()}
-                </td>
+        {error && (
+          <div className="alert error table-alert" role="alert">
+            {error}
+          </div>
+        )}
+        <div className="table-scroll">
+          <table className="table message-table">
+            <thead>
+              <tr>
+                <th>Message</th>
+                <th>Received</th>
+                <th>Channel</th>
+                <th>Status</th>
+                <th>Delivery</th>
+                <th>Retries</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {selectedLog && <LogDetailModal log={selectedLog} onClose={() => setSelectedLog(null)} />}
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="loading-state">
+                    Loading messages…
+                  </td>
+                </tr>
+              ) : (
+                logs.map((log) => {
+                  const deliveries = log.destinationLogs || [],
+                    sent = deliveries.filter((d) => d.status === 'OUT-SENT').length;
+                  return (
+                    <tr key={log.id} className="table-row">
+                      <td>
+                        <button
+                          className="message-id"
+                          onClick={() => void view(log.id)}
+                          aria-label={`Open message ${log.id}`}
+                          disabled={openingId !== null}
+                        >
+                          #{log.id}
+                          <small>{log.direction || direction}</small>
+                        </button>
+                      </td>
+                      <td className="nowrap">{formatTime(log.timestamp)}</td>
+                      <td>
+                        <strong>{log.channelName}</strong>
+                      </td>
+                      <td>
+                        <StatusBadge status={log.status} />
+                      </td>
+                      <td className="muted">
+                        {deliveries.length
+                          ? `${sent} / ${deliveries.length} delivered`
+                          : log.direction === 'OUT'
+                            ? 'Outbound delivery'
+                            : 'Inbound only'}
+                      </td>
+                      <td>
+                        {log.retryCount ?? 0}
+                        {log.nextRetryAt && (
+                          <small className="table-subtext">
+                            Next: {formatTime(log.nextRetryAt)}
+                          </small>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          className="icon-btn"
+                          aria-label={`View message ${log.id} details`}
+                          disabled={openingId !== null}
+                          onClick={() => void view(log.id)}
+                        >
+                          {openingId === log.id ? '…' : <ArrowRight size={17} />}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+        {!loading && !logs.length && (
+          <EmptyState
+            title={error ? 'Messages unavailable' : 'No messages found'}
+            description={
+              error
+                ? 'Try refreshing once the connection is available.'
+                : filtered
+                  ? 'Adjust your filters to see more messages.'
+                  : 'Start a channel and send a message to see its journey here.'
+            }
+          />
+        )}
+        <div className="pagination">
+          <span>
+            {total.toLocaleString()} messages{' '}
+            <span className="muted">
+              · Page {page} of {Math.max(1, Math.ceil(total / 50))}
+            </span>
+          </span>
+          <div className="heading-actions">
+            <Button
+              variant="secondary"
+              disabled={loading || page === 1}
+              onClick={() => setPage((p) => p - 1)}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={loading || page * 50 >= total}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      </section>
+      {selectedLog && (
+        <LogDetailModal
+          log={selectedLog}
+          onClose={() => {
+            setSelectedLog(null);
+            void load();
+          }}
+        />
+      )}
     </div>
   );
-};
-
-export default MonitorView;
+}

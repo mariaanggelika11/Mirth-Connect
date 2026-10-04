@@ -1,12 +1,13 @@
-import React, { useState } from "react";
-import { useAuth } from "../../contexts/AuthContext";
-import { EyeIcon, EyeOffIcon } from "lucide-react";
+import axios from 'axios';
+import React, { useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { EyeIcon, EyeOffIcon, Workflow, ArrowRight } from 'lucide-react';
 
 const LoginPage: React.FC = () => {
   const { login, isLoggingIn } = useAuth();
 
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,33 +20,37 @@ const LoginPage: React.FC = () => {
     setError(null);
 
     if (!username.trim()) {
-      setError("Username is required");
+      setError('Username is required');
       return;
     }
 
     if (!password) {
-      setError("Password is required");
+      setError('Password is required');
       return;
     }
 
     try {
       await login(username.trim(), password);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError(
-        err?.response?.data?.message ||
-          "Invalid username or password"
+        (axios.isAxiosError(err) ? err.response?.data?.message : undefined) ||
+          'Invalid username or password',
       );
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[var(--bg-soft)]">
-      <div className="card-bw w-full max-w-md p-8">
-        <h1 className="text-2xl font-extrabold text-center mb-2">
-          Sign in to your account
-        </h1>
+    <div className="login-page">
+      <div className="login-card">
+        <div className="login-brand">
+          <span className="brand-mark">
+            <Workflow size={23} />
+          </span>
+          <strong>Mini Mirth</strong>
+        </div>
+        <h1 className="text-2xl font-extrabold text-center mb-2">Sign in to your account</h1>
         <p className="text-center text-sm text-[var(--text-soft)] mb-6">
-          Access the Channel Dashboard
+          One workspace for channels, messages and delivery insights.
         </p>
 
         {error && (
@@ -56,10 +61,11 @@ const LoginPage: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1">
+            <label htmlFor="login-username" className="block text-sm font-medium mb-1">
               Username
             </label>
             <input
+              id="login-username"
               type="text"
               className="input-bw w-full px-3 py-2"
               value={username}
@@ -73,46 +79,36 @@ const LoginPage: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">
+            <label htmlFor="login-password" className="block text-sm font-medium mb-1">
               Password
             </label>
             <div className="relative">
               <input
-                type={showPassword ? "text" : "password"}
+                id="login-password"
+                type={showPassword ? 'text' : 'password'}
                 className="input-bw w-full px-3 py-2 pr-10"
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
                   setError(null);
                 }}
-                onKeyUp={(e) =>
-                  setCapsLock(e.getModifierState("CapsLock"))
-                }
+                onKeyUp={(e) => setCapsLock(e.getModifierState('CapsLock'))}
                 autoComplete="current-password"
                 required
               />
               <button
                 type="button"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
                 onClick={() => setShowPassword((v) => !v)}
                 className={`absolute right-2 top-1/2 -translate-y-1/2 transition-transform duration-200 ${
-                  showPassword
-                    ? "rotate-180 scale-110"
-                    : "scale-100"
+                  showPassword ? 'rotate-180 scale-110' : 'scale-100'
                 }`}
               >
-                {showPassword ? (
-                  <EyeOffIcon size={18} />
-                ) : (
-                  <EyeIcon size={18} />
-                )}
+                {showPassword ? <EyeOffIcon size={18} /> : <EyeIcon size={18} />}
               </button>
             </div>
 
-            {capsLock && (
-              <div className="text-xs text-orange-600 mt-1">
-                Caps Lock is ON
-              </div>
-            )}
+            {capsLock && <div className="text-xs text-orange-600 mt-1">Caps Lock is ON</div>}
           </div>
 
           <button
@@ -120,7 +116,13 @@ const LoginPage: React.FC = () => {
             disabled={isLoggingIn}
             className="btn-primary w-full py-2 mt-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {isLoggingIn ? "Signing in..." : "Sign in"}
+            {isLoggingIn ? (
+              'Signing in...'
+            ) : (
+              <>
+                Sign in <ArrowRight size={15} />
+              </>
+            )}
           </button>
         </form>
       </div>

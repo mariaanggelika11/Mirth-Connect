@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { ChevronRightIcon, ChevronDownIcon } from "../icons/Icon";
-import { fetchHL7Tree } from "../../services/hl7.api";
+import React, { useState, useEffect } from 'react';
+import { ChevronRightIcon, ChevronDownIcon } from '../icons/Icon';
+import { fetchHL7Tree } from '../../services/hl7.api';
 
 export interface HL7Node {
   id: string;
@@ -15,7 +15,10 @@ interface HL7TreeProps {
   onNodeClick?: (path: string, value?: string) => void;
 }
 
-const TreeNode: React.FC<{ node: HL7Node; onNodeClick?: (path: string, val?: string) => void }> = ({ node, onNodeClick }) => {
+const TreeNode: React.FC<{ node: HL7Node; onNodeClick?: (path: string, val?: string) => void }> = ({
+  node,
+  onNodeClick,
+}) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const hasChildren = node.children && node.children.length > 0;
 
@@ -26,15 +29,32 @@ const TreeNode: React.FC<{ node: HL7Node; onNodeClick?: (path: string, val?: str
 
   return (
     <div style={{ marginLeft: 16 }}>
-      <div onClick={handleClick} style={{ display: "flex", gap: 6, cursor: "pointer", fontFamily: "monospace", fontSize: 12 }}>
-        {hasChildren ? isExpanded ? <ChevronDownIcon className="w-3 h-3" /> : <ChevronRightIcon className="w-3 h-3" /> : <span className="w-3 h-3 inline-block" />}
+      <div
+        onClick={handleClick}
+        style={{
+          display: 'flex',
+          gap: 6,
+          cursor: 'pointer',
+          fontFamily: 'monospace',
+          fontSize: 12,
+        }}
+      >
+        {hasChildren ? (
+          isExpanded ? (
+            <ChevronDownIcon className="w-3 h-3" />
+          ) : (
+            <ChevronRightIcon className="w-3 h-3" />
+          )
+        ) : (
+          <span className="w-3 h-3 inline-block" />
+        )}
 
         <span style={{ fontWeight: 600 }}>{node.name}</span>
-        {node.value && <span style={{ color: "var(--text-soft)" }}>: {node.value}</span>}
+        {node.value && <span style={{ color: 'var(--text-soft)' }}>: {node.value}</span>}
       </div>
 
       {hasChildren && isExpanded && (
-        <div style={{ borderLeft: "1px solid var(--border-main)", marginLeft: 6, paddingLeft: 6 }}>
+        <div style={{ borderLeft: '1px solid var(--border-main)', marginLeft: 6, paddingLeft: 6 }}>
           {node.children!.map((child) => (
             <TreeNode key={child.id} node={child} onNodeClick={onNodeClick} />
           ))}
@@ -49,19 +69,29 @@ export const HL7Tree: React.FC<HL7TreeProps> = ({ hl7, onNodeClick }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!hl7) return;
-
+    let active = true;
+    if (!hl7) {
+      setTreeData([]);
+      setLoading(false);
+      return;
+    }
+    setTreeData([]);
     setLoading(true);
 
     fetchHL7Tree(hl7)
       .then((tree) => {
+        if (!active) return;
         setTreeData(tree || []);
         setLoading(false);
       })
       .catch(() => {
+        if (!active) return;
         setTreeData([]);
         setLoading(false);
       });
+    return () => {
+      active = false;
+    };
   }, [hl7]);
 
   if (!hl7) return <div className="code-box">No HL7 data provided.</div>;

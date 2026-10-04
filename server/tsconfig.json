@@ -11,18 +11,37 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
-    "noImplicitAny": false,
+    "noImplicitAny": true,
     "baseUrl": "./src",
     "paths": {
-      "@config/*": ["config/*"],
-      "@routes/*": ["routes/*"],
-      "@services/*": ["services/*"],
-      "@middleware/*": ["middleware/*"],
-      "@utils/*": ["utils/*"]
+      "@config/*": [
+        "config/*"
+      ],
+      "@routes/*": [
+        "routes/*"
+      ],
+      "@services/*": [
+        "services/*"
+      ],
+      "@middleware/*": [
+        "middleware/*"
+      ],
+      "@utils/*": [
+        "utils/*"
+      ]
     },
-    "typeRoots": ["./node_modules/@types", "./src/types"],
+    "typeRoots": [
+      "../node_modules/@types",
+      "./src/types"
+    ],
     "sourceMap": true
   },
-  "include": ["src/**/*", "dummy-receiver.js"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "src/**/*",
+    "dummy-receiver.js"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }

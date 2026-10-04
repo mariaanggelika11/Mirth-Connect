@@ -2,24 +2,25 @@
 // ENUMS
 // ================================
 export enum ChannelStatus {
-  RUNNING = "RUNNING",
-  STOPPED = "STOPPED",
-  ERROR = "ERROR",
+  RUNNING = 'RUNNING',
+  STOPPED = 'STOPPED',
+  ERROR = 'ERROR',
+  PAUSED = 'PAUSED',
 }
 
 export enum DestinationType {
-  HL7 = "HL7",
-  MLLP = "MLLP",
-  REST = "REST",
-  TCP = "TCP",
-  RAW = "RAW",
+  HL7 = 'HL7',
+  MLLP = 'MLLP',
+  REST = 'REST',
+  TCP = 'TCP',
+  RAW = 'RAW',
 }
 
 export enum DataType {
-  HL7V2 = "HL7V2",
-  XML = "XML",
-  JSON = "JSON",
-  TEXT = "TEXT",
+  HL7V2 = 'HL7V2',
+  XML = 'XML',
+  JSON = 'JSON',
+  TEXT = 'TEXT',
 }
 
 // ================================
@@ -41,6 +42,13 @@ export interface Destination {
   processingScript?: string;
   responseScript?: string;
   templateScript?: string;
+  filterScript?: string;
+  isEnabled?: boolean;
+  retryEnabled?: boolean;
+  maxRetries?: number;
+  retryIntervalSeconds?: number;
+  timeoutMs?: number;
+  credentialConfigured?: boolean;
   sent?: number;
   errors?: number;
 }
@@ -56,6 +64,7 @@ export interface Channel {
   destinations: Destination[];
   processingScript?: string;
   responseScript?: string;
+  filterScript?: string;
   created_at?: string;
   updated_at?: string;
   received?: number;
@@ -72,6 +81,7 @@ export interface ChannelFormData {
   destinations: Destination[];
   processingScript?: string;
   responseScript?: string;
+  filterScript?: string;
 }
 
 // ================================
@@ -84,12 +94,14 @@ export interface MonitorStats {
   channelsRunning: number;
   channelsStopped: number;
   channelsError: number;
+  messagesToday?: number;
+  queuedMessages?: number;
+  deadLetterMessages?: number;
 }
 
 export interface User {
   id: number;
   username: string;
-  password_hash: string;
   name: string;
   role: string;
 }
@@ -98,22 +110,26 @@ export interface User {
 // LOG SYSTEM
 // ================================
 export enum LogLevel {
-  INFO = "INFO",
-  WARN = "WARN",
-  ERROR = "ERROR",
-  DEBUG = "DEBUG",
+  INFO = 'INFO',
+  WARN = 'WARN',
+  ERROR = 'ERROR',
+  DEBUG = 'DEBUG',
 }
 
 // ================================
 // DESTINATION LOG (FINAL CORRECT)
 // ================================
 export interface DestinationLog {
+  messageId?: number;
+  canResend?: boolean;
+  destinationId?: number;
+  ackCode?: string;
   destinationName: string;
   status: string;
   responseText: string;
   sentAt: string;
-  requestData?: any;
-  outboundData?: any;
+  requestData?: unknown;
+  outboundData?: unknown;
 }
 
 // ================================
@@ -121,6 +137,11 @@ export interface DestinationLog {
 // ================================
 export interface LogEntry {
   id: number;
+  payloadAllowed?: boolean;
+  retryCount?: number;
+  nextRetryAt?: string;
+  correlationId?: string;
+  destinationPagination?: { page: number; pageSize: number; hasNext: boolean };
   timestamp: string;
   channelId: number;
   channelName: string;
@@ -129,12 +150,13 @@ export interface LogEntry {
 
   content?: string;
   error?: string;
+  errorCode?: string;
 
-  originalPayload?: any;
-  transformedPayload?: any;
+  originalPayload?: unknown;
+  transformedPayload?: unknown;
 
   status?: string;
-  direction?: "IN" | "OUT";
+  direction?: 'IN' | 'OUT';
 
   destinationLogs?: DestinationLog[];
 }

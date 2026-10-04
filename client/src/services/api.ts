@@ -1,12 +1,12 @@
-import axios from "axios";
+import axios from 'axios';
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:9000";
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 export const api = axios.create({
   baseURL: `${API_BASE_URL}/api`,
+  timeout: 15000,
   headers: {
-    "Content-Type": "application/json",
+    'Content-Type': 'application/json',
   },
 });
 
@@ -16,7 +16,7 @@ export const api = axios.create({
  */
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("authToken");
+    const token = localStorage.getItem('authToken');
 
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -24,26 +24,24 @@ api.interceptors.request.use(
 
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) => Promise.reject(error),
 );
 
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    const isLoginRequest =
-      error.config?.url?.includes("/auth/login");
+    if (typeof error.response?.data?.message === 'string')
+      error.message = error.response.data.message;
+    const isLoginRequest = error.config?.url?.includes('/auth/login');
     if (isLoginRequest) {
       return Promise.reject(error);
     }
 
-    if (
-      error.response?.status === 401 &&
-      error.response?.data?.code === "TOKEN_EXPIRED"
-    ) {
-      localStorage.removeItem("authToken");
-      window.location.href = "/login";
+    if (error.response?.status === 401 || error.response?.data?.code === 'TOKEN_INVALID') {
+      localStorage.removeItem('authToken');
+      window.dispatchEvent(new Event('auth:expired'));
     }
 
     return Promise.reject(error);
-  }
+  },
 );

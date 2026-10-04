@@ -1,148 +1,108 @@
-import net from "net";
-import { getConnection } from "../config/db.js";
-import { hl7ToJson } from "../utils/hl7Converer.js";
-import { processInboundMessage } from "./messageProcessor.services.js";
-import { VM } from "vm2";
-
-console.log("[HL7] hl7Listener.services loaded...");
-
-export const startHl7Listener = async () => {
-  console.log("[HL7] Initializing Dynamic HL7 TCP Listener...");
-
-  let channelList: { id: number; filter_script?: string | null }[] = [];
-
-  // ============================================================
-  // REFRESH CHANNEL LIST
-  // ============================================================
-  async function refreshChannelList() {
-    try {
-      const pool = await getConnection();
-      const result = await pool.request().query(`
-        SELECT id, filter_script
-        FROM Channels
-        WHERE status = 'RUNNING'
-          AND source_type = 'HL7'
-      `);
-
-      channelList = result.recordset || [];
-      console.log(
-        "[HL7] Active channels:",
-        channelList.map((x) => x.id)
-      );
-    } catch (err) {
-      console.error("[HL7] Failed to refresh channel list:", err);
-    }
-  }
-
-  await refreshChannelList();
-  setInterval(refreshChannelList, 60000);
-
-  // ============================================================
-  // TCP SERVER (MLLP)
-  // ============================================================
-  const PORT = Number(process.env.HL7_PORT || 2575);
-
+import net from 'node:net';
+import { getConnection } from '../config/db.js';
+import { config } from '../config/env.js';
+import { buildAck, hl7ToJson, parseSegments } from '../utils/hl7Converer.js';
+import { frame, MllpDecoder } from '../utils/mllp.js';
+import { processInboundMessage } from './messageProcessor.services.js';
+import { executeScript } from './script.services.js';
+import { logger } from '../utils/logger.js';
+import { safeError } from '../utils/errors.js';
+const sockets = new Set<net.Socket>();
+const active = new Set<Promise<void>>();
+export async function startHl7Listener(): Promise<net.Server> {
   const server = net.createServer((socket) => {
-    console.log(`[HL7] Client connected on port ${PORT}`);
-
-    let buffer = "";
-
-    socket.on("data", async (chunk) => {
-      buffer += chunk.toString("utf8");
-
-      if (buffer.includes("\x1c\r")) {
-        const rawMessage = buffer
-          .replace(/\x0b/, "") // MLLP start
-          .replace(/\x1c\r/, "") // MLLP end
-          .trim();
-
-        buffer = "";
-
-        console.log("────────────────────────────────────");
-        console.log("[HL7] Incoming HL7 Message:");
-        console.log(rawMessage);
-        console.log("────────────────────────────────────");
-
-        let json;
-        try {
-          json = hl7ToJson(rawMessage);
-          console.log("[HL7] Parsed → JSON OK");
-        } catch (err) {
-          console.error("[HL7] Parse error → sending NACK");
-          const nackMsg = buildNack(rawMessage, "HL7 parse error");
-          socket.write(`\x0b${nackMsg}\x1c\r`);
+    const ip = socket.remoteAddress?.replace(/^::ffff:/, '') || '';
+    if (!config.hl7.allowedIps.includes(ip)) {
+      socket.destroy();
+      return;
+    }
+    sockets.add(socket);
+    socket.setTimeout(config.transport.timeout);
+    socket.on('timeout', () => socket.destroy());
+    socket.on('error', () => logger.warn({ code: 'MLLP_SOCKET_ERROR' }, 'MLLP connection failed'));
+    socket.on('close', () => sockets.delete(socket));
+    const decoder = new MllpDecoder(config.server.payloadLimit);
+    let queue = Promise.resolve();
+    let count = 0;
+    socket.on('data', (chunk) => {
+      try {
+        const messages = decoder.push(typeof chunk==='string'?Buffer.from(chunk):chunk);
+        if (count + messages.length > 100) {
+          socket.destroy();
           return;
         }
-
-        // ============================================================
-        // FILTER SCRIPT ROUTING (Mirth-style)
-        // ============================================================
-        let routed = false;
-
-        for (const ch of channelList) {
-          if (!ch.filter_script?.trim()) continue;
-
-          try {
-            const vm = new VM({
-              sandbox: { msg: json },
-              timeout: 2000,
-            });
-
-            const pass = vm.run(`
-              (function () {
-                ${ch.filter_script}
-              })();
-            `);
-
-            if (pass) {
-              console.log(`[HL7] Routed → Channel ${ch.id}`);
-              await processInboundMessage(ch.id, rawMessage);
-              routed = true;
+        count += messages.length;
+        for (const raw of messages) {
+          queue = queue.then(async () => {
+            socket.pause();
+            socket.setTimeout(0);
+            let code: 'AA' | 'AE' | 'AR' = 'AA',
+              reason = '';
+            try {
+              parseSegments(raw);
+              // Query current status on every frame, so stop takes effect without cached channel lists.
+              const pool = await getConnection();
+              const channels = (
+                await pool
+                  .request()
+                  .query(
+                    "SELECT id,filter_script FROM \"Channels\" WHERE status='RUNNING' AND source_type='HL7' ORDER BY id",
+                  )
+              ).recordset;
+              const selected = [];
+              for (const c of channels)
+                if (
+                  !c.filter_script?.trim() ||
+                  (await executeScript(c.filter_script, { msg: hl7ToJson(raw) }, 'true'))
+                )
+                  selected.push(c);
+              // Reject ambiguous routing rather than silently duplicating patient messages.
+              if (selected.length !== 1) {
+                code = 'AR';
+                reason = selected.length
+                  ? 'Ambiguous channel routing'
+                  : 'No matching running channel';
+              } else {
+                const result = await processInboundMessage(selected[0].id, raw);
+                if (!result.success) {
+                  code = 'AE';
+                  reason = 'Processing failed';
+                }
+              }
+            } catch (error) {
+              code = safeError(error).startsWith('INVALID_HL7') ? 'AR' : 'AE';
+              reason = safeError(error);
+              logger.warn({ code: reason }, 'MLLP processing failed');
             }
-          } catch (err) {
-            console.error(`[HL7] Filter script error for Channel ${ch.id}:`, err);
-          }
+            if (!socket.destroyed) socket.write(frame(buildAck(raw, code, reason)));
+            count--;
+            socket.setTimeout(config.transport.timeout);
+            socket.resume();
+          });
+          const work = queue;
+          active.add(work);
+          void work.finally(() => active.delete(work));
         }
-
-        if (!routed) {
-          console.warn("[HL7] No channel accepted this message");
-          const nackMsg = buildNack(rawMessage, "No matching channel");
-          socket.write(`\x0b${nackMsg}\x1c\r`);
-          return;
-        }
-
-        // ============================================================
-        // SEND ACK (normal flow)
-        // ============================================================
-        const ack = buildAck(rawMessage);
-        socket.write(`\x0b${ack}\x1c\r`);
-        console.log("[HL7] ACK sent ✓");
+      } catch {
+        logger.warn({ code: 'INVALID_MLLP_FRAME' }, 'MLLP frame rejected');
+        socket.destroy();
       }
     });
-
-    socket.on("close", () => console.log("[HL7] Client disconnected"));
-    socket.on("error", (err) => console.error("[HL7] Socket error:", err));
   });
-
-  server.listen(PORT, "0.0.0.0", () => {
-    console.log(`[HL7] HL7 Listener running on port ${PORT}`);
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(config.hl7.port, config.hl7.host, () => {
+      server.removeListener('error', reject);
+      resolve();
+    });
   });
-};
-
-function buildAck(raw: string): string {
-  const msh = raw.split("\r")[0] || "";
-  const p = msh.split("|");
-  const msgId = p[9] || "0000";
-  const timestamp = new Date().toISOString();
-
-  return `MSH|^~\\&|MiniMirth|Listener|Sender|Source|${timestamp}||ACK^A01|${msgId}|P|2.3\r` + `MSA|AA|${msgId}\r`;
+  server.on('error', () => logger.error({ code: 'MLLP_LISTENER_ERROR' }, 'MLLP listener failed'));
+  return server;
 }
-
-function buildNack(raw: string, reason: string): string {
-  const msh = raw.split("\r")[0] || "";
-  const p = msh.split("|");
-  const msgId = p[9] || "0000";
-  const timestamp = new Date().toISOString();
-
-  return `MSH|^~\\&|MiniMirth|Listener|Sender|Source|${timestamp}||ACK^A01|${msgId}|P|2.3\r` + `MSA|AE|${msgId}|${reason}\r`;
+export async function stopHl7Listener(server: net.Server) {
+  const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+  for (const socket of sockets) socket.pause();
+  await Promise.allSettled([...active]);
+  for (const socket of sockets) socket.end();
+  await closed;
 }

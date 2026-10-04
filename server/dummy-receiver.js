@@ -1,20 +1,10 @@
 import express from "express";
-import sql from "mssql";
+import { getConnection } from "./dist/config/db.js";
 
 // =============================
-//  SQL SERVER CONFIG
+//  POSTGRESQL CONFIG
 // =============================
-const dbConfig = {
-  user: "sa",
-  password: "PasswordBaru123",
-  database: "EksternalDatabase",
-  server: "localhost",
-  port: 1433,
-  options: {
-    encrypt: false,
-    trustServerCertificate: true,
-  },
-};
+
 
 let pool;
 
@@ -23,10 +13,10 @@ let pool;
 // =============================
 async function connectDB() {
   try {
-    pool = await sql.connect(dbConfig);
-    console.log("✅ SQL Server Connected");
+    pool = await getConnection();
+    console.log("✅ PostgreSQL Connected");
   } catch (err) {
-    console.error("❌ SQL Connection Error:", err);
+    console.error("SQL_CONNECTION_FAILED");
     process.exit(1);
   }
 }
@@ -58,13 +48,13 @@ app.post("/api/inbound/1", async (req, res) => {
     console.log("📥 INBOUND RECEIVED");
     console.log("Channel ID     :", channelId);
     console.log("Destination ID :", destinationId);
-    console.log("Payload        :", req.body);
+
 
     await pool.request().input("channel_id", channelId).input("destination_id", destinationId).input("payload_raw", JSON.stringify(req.body)).query(`
-        INSERT INTO InboundMessages
+        INSERT INTO "InboundMessages"
           (channel_id, destination_id, payload_raw, received_at)
         VALUES
-          (@channel_id, @destination_id, @payload_raw, GETDATE())
+          (@channel_id, @destination_id, @payload_raw, CURRENT_TIMESTAMP)
       `);
 
     res.json({
@@ -72,11 +62,11 @@ app.post("/api/inbound/1", async (req, res) => {
       saved: true,
     });
   } catch (err) {
-    console.error("❌ DB INSERT ERROR:", err);
+    console.error("DB_INSERT_FAILED");
 
     res.status(500).json({
       status: "ERROR",
-      message: err.message,
+      message: "Failed to store message",
     });
   }
 });
@@ -84,4 +74,4 @@ app.post("/api/inbound/1", async (req, res) => {
 // =============================
 //  RUN SERVER
 // =============================
-app.listen(9100, () => console.log("🚀 Dummy REST Receiver running on port 9100"));
+app.listen(Number(process.env.TEST_RECEIVER_PORT || 9100), "127.0.0.1", () => console.log("🚀 Dummy REST Receiver running on port 9100"));

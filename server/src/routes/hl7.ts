@@ -1,21 +1,19 @@
-import express from "express";
-import { parseHL7ToTree } from "../services/hl7Parser.service.js";
-
-const router = express.Router();
-
-router.post("/parse", (req, res) => {
-  const { message } = req.body;
-
-  if (!message) {
-    return res.status(400).json({ error: "HL7 message required" });
-  }
-
-  try {
-    const tree = parseHL7ToTree(message);
-    return res.json(tree);
-  } catch (err) {
-    return res.status(500).json({ error: "Parsing failed" });
-  }
-});
-
+import { Router } from 'express';
+import { z } from 'zod';
+import { parseHL7ToTree } from '../services/hl7Parser.service.js';
+import { requirePermission } from '../middleware/auth.js';
+import { validate } from '../utils/validator.js';
+const router = Router();
+router.post(
+  '/parse',
+  requirePermission('message:payload'),
+  validate(z.object({ message: z.string().min(1).max(1048576) })),
+  (req, res, next) => {
+    try {
+      res.json(parseHL7ToTree(req.body.message));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 export default router;
