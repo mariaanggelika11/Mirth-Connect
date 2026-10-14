@@ -19,6 +19,9 @@ export async function importChannelXml(xml: string) {
     throw new AppError(400, 'INVALID_CHANNEL_XML', 'Expected one Mini Mirth channel document');
   const input = root as Record<string, unknown>;
   const allowed = [
+    'validationProfile',
+    'formatVersion',
+    'idempotencyMode',
     'name',
     'source',
     'destinations',
@@ -32,6 +35,15 @@ export async function importChannelXml(xml: string) {
       'UNSUPPORTED_CHANNEL_XML',
       'This export contains unsupported fields; use the documented Mini Mirth XML format',
     );
+  if (input.formatVersion !== undefined && !['1', '2'].includes(String(input.formatVersion)))
+    throw new AppError(400, 'UNSUPPORTED_FORMAT_VERSION', 'Unsupported channel format version');
+  if (typeof input.validationProfile === 'string') {
+    try {
+      input.validationProfile = JSON.parse(input.validationProfile);
+    } catch {
+      throw new AppError(400, 'INVALID_VALIDATION_PROFILE', 'Invalid validation profile');
+    }
+  }
   const source = input.source as Record<string, unknown>;
   const container = input.destinations as Record<string, unknown>;
   const items = container?.destination

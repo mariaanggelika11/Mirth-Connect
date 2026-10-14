@@ -1,3 +1,4 @@
+import { alertTick } from './alert.services.js';
 import { getConnection, withTransaction } from '../config/db.js';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
@@ -31,7 +32,7 @@ export async function retryTick() {
           AND EXISTS(SELECT 1 FROM "Channels" c WHERE c.id=m.channel_id AND c.status='RUNNING')
           AND EXISTS(SELECT 1 FROM "Destinations" d WHERE d.id=m.destination_id AND d.is_enabled=true AND d.is_deleted=false)
           ORDER BY m.next_retry_at,m.id LIMIT 1 FOR UPDATE OF m SKIP LOCKED
-        ) UPDATE "Messages" m SET status='RETRYING',lease_until=CURRENT_TIMESTAMP + INTERVAL '300 seconds'
+        ) UPDATE "Messages" m SET status='RETRYING',lease_owner=gen_random_uuid()::text,lease_until=CURRENT_TIMESTAMP + INTERVAL '300 seconds'
           FROM candidate c WHERE m.id=c.id RETURNING m.*`,
     )
   ).recordset[0] as StoredMessage | undefined;
@@ -49,16 +50,34 @@ export async function retentionTick() {
       ORDER BY m.id LIMIT 100 FOR UPDATE OF m SKIP LOCKED
     `)
     ).recordset.map((r) => Number(r.id));
+    await tx.request().query('DELETE FROM "DeliverySlots" WHERE expires_at<CURRENT_TIMESTAMP');
     if (ids.length) {
+      await tx
+        .request()
+        .input('ids', ids.join(','))
+        .query(
+          `DELETE FROM "DeliverySlots" WHERE message_id IN (SELECT id FROM "Messages" WHERE id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[])) OR inbound_message_id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[])))`,
+        );
       // IDs originate from SQL, never from a client. Lock parents until all child deletes commit.
       const selected = ids.join(',');
       await tx
         .request()
+        .input('ids', selected)
         .query(
-          `DELETE FROM "MessageDestinationLog" WHERE message_id IN (SELECT id FROM "Messages" WHERE id IN (${selected}) OR inbound_message_id IN (${selected}))`,
+          `DELETE FROM "MessageDestinationLog" WHERE message_id IN (SELECT id FROM "Messages" WHERE id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[])) OR inbound_message_id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[])))`,
         );
-      await tx.request().query(`DELETE FROM "Messages" WHERE inbound_message_id IN (${selected})`);
-      await tx.request().query(`DELETE FROM "Messages" WHERE id IN (${selected})`);
+      await tx
+        .request()
+        .input('ids', selected)
+        .query(
+          `DELETE FROM "Messages" WHERE inbound_message_id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[]))`,
+        );
+      await tx
+        .request()
+        .input('ids', selected)
+        .query(
+          `DELETE FROM "Messages" WHERE id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[]))`,
+        );
     }
     await tx
       .request()
@@ -81,7 +100,8 @@ export function startWorkers() {
     running = (async () => {
       try {
         await retryTick();
-        if (Date.now() - lastMaintenance > 3600000) {
+        await alertTick();
+        if (config.retention.enabled && Date.now() - lastMaintenance > 3600000) {
           await retentionTick();
           lastMaintenance = Date.now();
         }

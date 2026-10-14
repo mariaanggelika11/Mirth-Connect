@@ -19,9 +19,11 @@ export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
           ? 'INVALID_BODY'
           : 'INTERNAL_ERROR';
   logger.error({ requestId: req.requestId, code }, 'Request failed');
+  if (status === 503 && code === 'INBOUND_CAPACITY') res.set('Retry-After', '5');
   if (!res.headersSent)
     res.status(status).json({
       success: false,
+      details: [],
       code,
       message:
         error instanceof AppError

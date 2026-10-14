@@ -1,3 +1,4 @@
+import { AppError } from '../../utils/errors.js';
 import { getConnection, withTransaction } from '../../config/db.js';
 import { parseSegments } from '../../utils/hl7Converer.js';
 import { logger } from '../../utils/logger.js';
@@ -14,15 +15,22 @@ export async function recordAttempt(
   retryCount: number,
 ) {
   await withTransaction(async (tx) => {
-    await tx
+    const written = await tx
       .request()
       .input('id', message.id)
+      .input('owner', message.lease_owner || null)
       .input('status', status)
       .input('error', error)
       .input('delay', delay)
       .input('count', retryCount)
       .query(
-        `UPDATE "Messages" SET status=@status,last_error=@error,retry_count=@count,last_retry_at=CASE WHEN @count>0 THEN CURRENT_TIMESTAMP ELSE last_retry_at END,next_retry_at=CASE WHEN @delay::double precision IS NULL THEN NULL ELSE (CURRENT_TIMESTAMP + (@delay)::double precision * INTERVAL \'1 second\') END,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=@id`,
+        `UPDATE "Messages" SET status=@status,last_error=@error,retry_count=@count,last_retry_at=CASE WHEN @count>0 THEN CURRENT_TIMESTAMP ELSE last_retry_at END,next_retry_at=CASE WHEN @delay::double precision IS NULL THEN NULL ELSE (CURRENT_TIMESTAMP + (@delay)::double precision * INTERVAL \'1 second\') END,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=@id AND lease_owner=@owner AND status IN ('PROCESSING','RETRYING')`,
+      );
+    if (written.rowsAffected && written.rowsAffected[0] !== 1)
+      throw new AppError(
+        409,
+        'DELIVERY_LEASE_LOST',
+        'Delivery lease changed; reconcile the receiving system before resending',
       );
     const ackCode = error?.startsWith('HL7_NACK_')
       ? error.slice(-2)

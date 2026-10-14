@@ -18,7 +18,7 @@ async function run() {
       .map(([k, v]) => `var ${k}=JSON.parse(${JSON.stringify(JSON.stringify(v ?? null))});`)
       .join('\n');
     const evaluated = vm.evalCode(
-      `${helpers}\n${vars}\nJSON.stringify((function(){${script}\nreturn ${resultVariable};})());`,
+      `${helpers}\n${vars}\n(function(){const value=(function(){${script}\nreturn ${resultVariable};})(); if(value && typeof value.then === 'function') throw new Error('SCRIPT_ASYNC_UNSUPPORTED'); return JSON.stringify(value);})();`,
     );
     if (evaluated.error) {
       evaluated.error.dispose();

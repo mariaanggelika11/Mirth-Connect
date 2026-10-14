@@ -8,14 +8,19 @@ import { config } from '../config/env.js';
 import { normalizeRole } from '../middleware/auth.js';
 import { AppError } from '../utils/errors.js';
 import { registration, credentials } from '../utils/validator.js';
-export function signToken(user: { id: number; name: string; role: string }) {
+export function signToken(user: { id: number; name: string; role: string }, sessionId?: string) {
   return jwt.sign(
-    { id: user.id, name: user.name, role: normalizeRole(user.role) },
+    {
+      id: user.id,
+      name: user.name,
+      role: normalizeRole(user.role),
+      ...(sessionId ? { sid: sessionId } : {}),
+    },
     config.auth.jwtSecret,
     {
       algorithm: 'HS256',
       jwtid: randomUUID(),
-      expiresIn: config.auth.expiration,
+      expiresIn: sessionId ? config.auth.uiExpiration : config.auth.expiration,
       issuer: config.auth.issuer,
       audience: config.auth.audience,
     },

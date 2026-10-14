@@ -16,6 +16,7 @@
     "bootstrap:admin": "tsx src/scripts/bootstrap.ts"
   },
   "dependencies": {
+    "ajv": "^8.20.0",
     "axios": "^1.13.1",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",

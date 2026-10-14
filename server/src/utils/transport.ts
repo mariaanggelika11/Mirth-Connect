@@ -1,5 +1,7 @@
 import axios from 'axios';
 import net from 'node:net';
+import tls from 'node:tls';
+import { readFileSync } from 'node:fs';
 import { lookup } from 'node:dns/promises';
 import http from 'node:http';
 import https from 'node:https';
@@ -15,7 +17,10 @@ export function validateEndpoint(endpoint: string, type: string) {
   } catch {
     throw new AppError(400, 'INVALID_ENDPOINT', 'Invalid destination endpoint');
   }
-  const protocols = type === 'REST' ? ['http:', 'https:'] : ['tcp:', 'mllp:'];
+  const protocols =
+    type === 'REST'
+      ? ['http:', 'https:']
+      : ['tcp:', 'mllp:', ...(type === 'MLLP' || type === 'HL7' ? ['mllps:'] : [])];
   if (
     !protocols.includes(url.protocol) ||
     !url.hostname ||
@@ -116,11 +121,30 @@ export async function sendTcp(
 ): Promise<string> {
   const url = validateEndpoint(decrypt(endpoint), mllp ? 'MLLP' : 'TCP');
   const addresses = await resolveHost(url.hostname, timeout);
+  const address = addresses.find((a) => a.family === 4)?.address || addresses[0].address;
   const controlId = mllp ? parseSegments(payload).segments[0].fields[10] : '';
   return new Promise((resolve, reject) => {
-    const socket = new net.Socket(),
+    const secure = url.protocol === 'mllps:';
+    const socket = secure
+        ? tls.connect({
+            host: address,
+            port: Number(url.port),
+            servername: net.isIP(url.hostname.replace(/^\[|\]$/g, '')) ? undefined : url.hostname,
+            rejectUnauthorized: true,
+            checkServerIdentity: (_hostname, cert) =>
+              tls.checkServerIdentity(url.hostname.replace(/^\[|\]$/g, ''), cert),
+            ...(config.hl7.tls.caFile ? { ca: readFileSync(config.hl7.tls.caFile) } : {}),
+            ...(config.hl7.tls.certFile && config.hl7.tls.keyFile
+              ? {
+                  cert: readFileSync(config.hl7.tls.certFile),
+                  key: readFileSync(config.hl7.tls.keyFile),
+                }
+              : {}),
+          })
+        : new net.Socket(),
       decoder = new MllpDecoder(config.server.payloadLimit);
-    let settled = false;
+    let settled = false,
+      submitted = false;
     const finish = (error?: Error, result = '') => {
       if (settled) return;
       settled = true;
@@ -134,7 +158,13 @@ export async function sendTcp(
       timeout,
     );
     socket.on('error', () =>
-      finish(new AppError(502, 'TCP_CONNECTION_ERROR', 'Destination connection failed')),
+      finish(
+        new AppError(
+          502,
+          submitted ? 'DELIVERY_OUTCOME_UNKNOWN' : 'TCP_CONNECTION_ERROR',
+          submitted ? 'Delivery outcome is unknown' : 'Destination connection failed',
+        ),
+      ),
     );
     socket.on('close', () => {
       if (!settled) finish(new AppError(502, 'ACK_MISSING', 'Connection closed before ACK'));
@@ -150,11 +180,15 @@ export async function sendTcp(
         finish(error instanceof Error ? error : new Error('Invalid ACK'));
       }
     });
-    socket.connect(Number(url.port), addresses[0].address, () => {
+    const writePayload = () => {
+      submitted = true;
       socket.write(mllp ? frame(payload) : Buffer.from(payload), (error) => {
-        if (error) finish(error);
+        if (error)
+          finish(new AppError(502, 'DELIVERY_OUTCOME_UNKNOWN', 'Delivery outcome is unknown'));
         else if (!mllp) finish(undefined, 'TCP_WRITE_COMPLETE');
       });
-    });
+    };
+    if (secure) socket.once('secureConnect', writePayload);
+    else socket.connect(Number(url.port), address, writePayload);
   });
 }

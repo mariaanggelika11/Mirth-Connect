@@ -1,3 +1,4 @@
+import { validateProfileConfiguration } from './profileValidation.services.js';
 import type { Request, Response, NextFunction } from 'express';
 import { randomBytes } from 'node:crypto';
 import { encrypt } from '../utils/secrets.js';
@@ -13,6 +14,7 @@ import type { Destination } from '../models/Destination.js';
 import { finalStatus } from './messageProcessor.services.js';
 import { hasPermission } from '../middleware/auth.js';
 import { audit } from './audit.services.js';
+import { createDraft, insertRevision, readRuntimeConfiguration } from './revision.services.js';
 type ChannelInput = z.infer<typeof channelSchema>;
 interface ChannelRow {
   id: number;
@@ -49,7 +51,7 @@ export const getAllChannels = async (req: Request, res: Response, next: NextFunc
     const result = await pool.request().query(`
       SELECT c.*,COALESCE(x.received,0) received,COALESCE(x.sent,0) sent,COALESCE(x.errors,0) errors FROM "Channels" c
       LEFT JOIN (SELECT channel_id,SUM(CASE WHEN direction='IN' THEN 1 ELSE 0 END) received,SUM(CASE WHEN direction='OUT' AND status='OUT-SENT' THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status IN ('IN-ERROR','OUT-ERROR','DEAD_LETTER') THEN 1 ELSE 0 END) errors FROM "Messages" GROUP BY channel_id) x ON x.channel_id=c.id ORDER BY c.created_at DESC;
-      SELECT d.*,COALESCE(x.sent,0) sent,COALESCE(x.errors,0) errors FROM "Destinations" d
+      SELECT d.*,r.failure_count,CASE WHEN r.open_until>CURRENT_TIMESTAMP THEN 'OPEN' WHEN r.probe_until>CURRENT_TIMESTAMP THEN 'HALF_OPEN' ELSE 'CLOSED' END circuit_state,COALESCE(x.sent,0) sent,COALESCE(x.errors,0) errors FROM "Destinations" d LEFT JOIN "DestinationRuntime" r ON r.destination_id=d.id
       LEFT JOIN (SELECT destination_id,SUM(CASE WHEN status='OUT-SENT' THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status='OUT-ERROR' THEN 1 ELSE 0 END) errors FROM "MessageDestinationLog" GROUP BY destination_id) x ON x.destination_id=d.id WHERE d.is_deleted=false ORDER BY d.id;
     `);
     const sets = result.recordsets as unknown as [ChannelRow[], DestinationRow[]];
@@ -72,6 +74,8 @@ export const getAllChannels = async (req: Request, res: Response, next: NextFunc
         maxRetries: d.max_retries,
         retryIntervalSeconds: d.retry_interval_seconds,
         timeoutMs: d.timeout_ms,
+        circuitState: (d as DestinationRow & { circuit_state?: string }).circuit_state || 'CLOSED',
+        circuitFailures: (d as DestinationRow & { failure_count?: number }).failure_count || 0,
         sent: d.sent,
         errors: d.errors,
       });
@@ -82,6 +86,14 @@ export const getAllChannels = async (req: Request, res: Response, next: NextFunc
         id: c.id,
         name: c.name,
         status: c.status,
+        activeRevision: (c as ChannelRow & { active_revision?: number }).active_revision || 0,
+        validationProfile: mayConfigure
+          ? JSON.parse(
+              (c as ChannelRow & { validation_profile?: string }).validation_profile || '{}',
+            )
+          : {},
+        idempotencyMode:
+          (c as ChannelRow & { idempotency_mode?: string }).idempotency_mode || 'OPTIONAL',
         apiKeyConfigured: !!c.source_api_key,
         source: {
           type: c.source_type,
@@ -103,7 +115,7 @@ export const getAllChannels = async (req: Request, res: Response, next: NextFunc
     next(error);
   }
 };
-async function saveDestinations(
+export async function saveDestinations(
   tx: DatabaseTransaction,
   channelId: number,
   items: ChannelInput['destinations'],
@@ -172,9 +184,31 @@ async function saveDestinations(
     }
   }
 }
+export async function applyChannelConfiguration(
+  tx: DatabaseTransaction,
+  id: number,
+  data: ChannelInput,
+) {
+  await tx
+    .request()
+    .input('id', id)
+    .input('name', data.name)
+    .input('type', data.source.type)
+    .input('endpoint', endpoint(data.source.type, id))
+    .input('dataType', data.source.inboundDataType)
+    .input('processing', data.processingScript)
+    .input('response', data.responseScript)
+    .input('filter', data.filterScript)
+    .input('mode', data.idempotencyMode)
+    .input('profile', JSON.stringify(data.validationProfile))
+    .query(
+      `UPDATE "Channels" SET name=@name,source_type=@type,source_endpoint=@endpoint,inbound_data_type=@dataType,processing_script=@processing,response_script=@response,filter_script=@filter,idempotency_mode=@mode,validation_profile=@profile,updated_at=CURRENT_TIMESTAMP WHERE id=@id`,
+    );
+}
 async function saveChannel(req: Request, res: Response, next: NextFunction, create: boolean) {
   try {
     const data: ChannelInput = req.body;
+    validateProfileConfiguration(data.validationProfile);
     const id = await withTransaction(async (tx) => {
       let id = Number(req.params.id);
       if (create) {
@@ -200,28 +234,30 @@ async function saveChannel(req: Request, res: Response, next: NextFunction, crea
         ).recordset[0];
         if (!found) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
       }
-      await tx
-        .request()
-        .input('id', id)
-        .input('name', data.name)
-        .input('type', data.source.type)
-        .input('endpoint', endpoint(data.source.type, id))
-        .input('dataType', data.source.inboundDataType)
-        .input('processing', data.processingScript)
-        .input('response', data.responseScript)
-        .input('filter', data.filterScript)
-        .query(
-          `UPDATE "Channels" SET name=@name,source_type=@type,source_endpoint=@endpoint,inbound_data_type=@dataType,processing_script=@processing,response_script=@response,filter_script=@filter,updated_at=CURRENT_TIMESTAMP WHERE id=@id`,
-        );
+      if (!create) {
+        const revision = await createDraft(tx, id, data, req);
+        return { id, revision, draft: true };
+      }
+      await applyChannelConfiguration(tx, id, data);
       await saveDestinations(tx, id, data.destinations);
+      const revision = await insertRevision(
+        tx,
+        id,
+        await readRuntimeConfiguration(tx, id),
+        'PUBLISHED',
+        data.changeSummary || 'Initial channel configuration',
+        req.user?.id,
+      );
       await audit(create ? 'CREATE_CHANNEL' : 'UPDATE_CHANNEL', req, 'channel', id, tx);
-      return id;
+      return { id, revision, draft: false };
     });
     res.status(create ? 201 : 200).json({
       success: true,
-      message: 'Channel saved successfully',
-      channelId: id,
-      endpoint: endpoint(data.source.type, id),
+      message: id.draft ? 'Draft saved; publish to activate' : 'Channel saved successfully',
+      channelId: id.id,
+      revision: id.revision,
+      draft: id.draft,
+      endpoint: endpoint(data.source.type, id.id),
     });
   } catch (error) {
     next(error);
@@ -243,6 +279,18 @@ export const deleteChannel = async (req: Request, res: Response, next: NextFunct
       if (!found) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
       if (found.status === 'RUNNING')
         throw new AppError(409, 'CHANNEL_RUNNING', 'Stop the channel before deleting');
+      const revisions = (
+        await tx
+          .request()
+          .input('id', found.id)
+          .query('SELECT revision FROM "ChannelRevisions" WHERE channel_id=@id LIMIT 1')
+      ).recordset;
+      if (revisions.length)
+        throw new AppError(
+          409,
+          'CHANNEL_HAS_REVISIONS',
+          'Channel has revision history; stop the channel to retire it',
+        );
       const messages = (
         await tx
           .request()

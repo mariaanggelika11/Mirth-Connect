@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { config } from '../config/env.js';
 import type { RequestHandler } from 'express';
 import { AppError } from './errors.js';
 const script = z.string().max(65536).default('');
@@ -43,6 +44,26 @@ export const destinationSchema = z.object({
   timeoutMs: z.number().int().min(100).max(120000).default(10000),
 });
 export const channelSchema = z.object({
+  validationProfile: z
+    .object({
+      jsonSchema: z.record(z.string(), z.unknown()).optional(),
+      hl7: z
+        .object({
+          messageTypes: z.array(z.string().max(50)).max(50).optional(),
+          versions: z.array(z.string().max(20)).max(20).optional(),
+          requiredFields: z
+            .array(z.string().regex(/^[A-Z0-9]{3}\.[1-9][0-9]{0,2}$/))
+            .max(50)
+            .optional(),
+        })
+        .optional(),
+      script: z.string().max(65536).optional(),
+    })
+    .default({}),
+  idempotencyMode: z
+    .enum(['OPTIONAL', 'REQUIRED', 'DISABLED'])
+    .default(config.inbound.idempotencyMode),
+  changeSummary: z.string().trim().min(1).max(500).optional(),
   name: z.string().trim().min(1).max(150),
   source: z.object({
     type: z.enum(['HTTP', 'HL7']),

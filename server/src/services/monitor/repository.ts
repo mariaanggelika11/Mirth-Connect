@@ -26,8 +26,9 @@ export async function listMessages(q: MonitorQuery) {
     ? (
         await pool
           .request()
+          .input('ids', ids.join(','))
           .query<DestinationLogRow>(
-            `WITH latest AS (SELECT l.id,l.message_id,l.destination_id,l.status,l.sent_at,ROW_NUMBER() OVER(PARTITION BY l.message_id ORDER BY l.id DESC) rn FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id WHERE o.inbound_message_id IN (${ids.join(',')}) OR o.id IN (${ids.join(',')})) SELECT l.*,d.name destination_name,o.inbound_message_id,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING') retry_eligible FROM latest l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE l.rn=1 ORDER BY l.id DESC`,
+            `WITH latest AS (SELECT l.id,l.message_id,l.destination_id,l.status,l.sent_at,ROW_NUMBER() OVER(PARTITION BY l.message_id ORDER BY l.id DESC) rn FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id WHERE o.inbound_message_id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[])) OR o.id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[]))) SELECT l.*,d.name destination_name,o.inbound_message_id,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING' AND d.is_enabled=true AND d.is_deleted=false) retry_eligible FROM latest l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE l.rn=1 ORDER BY l.id DESC`,
           )
       ).recordset
     : [];
@@ -40,7 +41,7 @@ export async function findMessage(id: number) {
       .request()
       .input('id', id)
       .query<MonitorRow>(
-        'SELECT m.*,c.name channel_name FROM "Messages" m JOIN "Channels" c ON c.id=m.channel_id WHERE m.id=@id',
+        'SELECT m.*,c.name channel_name,(SELECT row_to_json(dl) FROM "DeadLetterCases" dl WHERE dl.message_id=m.id) reconciliation FROM "Messages" m JOIN "Channels" c ON c.id=m.channel_id WHERE m.id=@id',
       )
   ).recordset[0];
   if (!m) throw new AppError(404, 'MESSAGE_NOT_FOUND', 'Message not found');
@@ -55,7 +56,7 @@ export async function listDeliveryLogs(id: number, logPage: number, logPageSize:
       .input('offset', (logPage - 1) * logPageSize)
       .input('limit', logPageSize + 1)
       .query<DestinationLogRow>(
-        `SELECT l.*,d.name destination_name,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING') retry_eligible FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE o.inbound_message_id=@id OR o.id=@id ORDER BY l.id DESC LIMIT @limit OFFSET @offset`,
+        `SELECT l.*,d.name destination_name,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING' AND d.is_enabled=true AND d.is_deleted=false) retry_eligible FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE o.inbound_message_id=@id OR o.id=@id ORDER BY l.id DESC LIMIT @limit OFFSET @offset`,
       )
   ).recordset;
   return logs;

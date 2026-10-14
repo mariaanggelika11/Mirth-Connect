@@ -4,6 +4,7 @@ export type OutboundStatus =
   'PROCESSING' | 'OUT-SENT' | 'OUT-ERROR' | 'QUEUED' | 'RETRYING' | 'DEAD_LETTER' | 'FILTERED';
 export type Direction = 'IN' | 'OUT';
 export interface StoredMessage {
+  lease_owner?: string;
   id: number;
   channel_id: number;
   destination_id: number;

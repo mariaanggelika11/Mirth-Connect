@@ -1,3 +1,5 @@
+import { observe } from '../../utils/runtimeMetrics.js';
+import { acquireDelivery, releaseDelivery } from '../circuitBreaker.services.js';
 import { executeScript } from '../script.services.js';
 import { sendRest, sendTcp } from '../../utils/transport.js';
 import { safeError } from '../../utils/errors.js';
@@ -33,11 +35,20 @@ async function deliver(
           dest.timeout_ms,
         )
       : await sendTcp(dest.endpoint, body, ['HL7', 'MLLP'].includes(dest.type), dest.timeout_ms);
-  return dest.response_script?.trim()
-    ? String(await executeScript(dest.response_script, { msg: payload, response }, 'response'))
-    : response;
+  return response;
 }
 export async function attempt(message: StoredMessage, dest: Destination, retryCount: number) {
+  const started = performance.now();
+  const slot = await acquireDelivery(message.id, dest.id);
+  if (!slot.acquired) {
+    await recordAttempt(message, dest, 'QUEUED', slot.reason, slot.reason, 30, message.retry_count);
+    return {
+      destinationId: dest.id,
+      destinationName: dest.name,
+      outboundMessageId: message.id,
+      status: 'QUEUED' as const,
+    };
+  }
   let response = '',
     status: OutboundStatus = 'OUT-SENT',
     error: string | null = null,
@@ -49,15 +60,44 @@ export async function attempt(message: StoredMessage, dest: Destination, retryCo
       message.channel_id,
       message.correlation_id,
     );
+    if (dest.response_script?.trim()) {
+      try {
+        response = String(
+          await executeScript(
+            dest.response_script,
+            { msg: JSON.parse(message.transformed_payload), response },
+            'response',
+          ),
+        );
+      } catch {
+        error = 'RESPONSE_SCRIPT_FAILED_AFTER_DELIVERY';
+      }
+    }
   } catch (e) {
     error = safeError(e);
     response = error;
     const decision = retryDecision(dest, retryCount);
-    status = decision.status;
-    delay = decision.delay;
+    const ambiguous = [
+      'DESTINATION_TIMEOUT',
+      'ACK_MISSING',
+      'INVALID_ACK',
+      'DELIVERY_OUTCOME_UNKNOWN',
+      'ERR_BAD_RESPONSE',
+      'ETIMEDOUT',
+      'EPIPE',
+      'ECONNABORTED',
+      'ECONNRESET',
+    ].includes(error);
+    status = ambiguous ? 'DEAD_LETTER' : decision.status;
+    delay = ambiguous ? null : decision.delay;
   }
   // Persisting the delivery result is mandatory: DB failure propagates instead of emitting a false ACK.
-  await recordAttempt(message, dest, status, response, error, delay, retryCount);
+  try {
+    await recordAttempt(message, dest, status, response, error, delay, retryCount);
+  } finally {
+    await releaseDelivery(message.id, dest.id, slot.owner, status === 'OUT-SENT');
+    observe('destination_request_seconds', (performance.now() - started) / 1000);
+  }
   return {
     destinationId: dest.id,
     destinationName: dest.name,

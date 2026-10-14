@@ -1,4 +1,5 @@
 import { serialize, convertPayload } from './engine/conversion.js';
+import { validatePayload } from './profileValidation.services.js';
 import { attempt } from './engine/delivery.js';
 import { recordAttempt, updateAggregate } from './engine/repository.js';
 export { finalStatus, retryDecision } from './engine/policy.js';
@@ -9,24 +10,94 @@ import { executeScript } from './script.services.js';
 import { hl7ToJson, parseSegments } from '../utils/hl7Converer.js';
 import { AppError, safeError } from '../utils/errors.js';
 import { encrypt, decrypt } from '../utils/secrets.js';
+import { increment, observe } from '../utils/runtimeMetrics.js';
+import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import type { Destination } from '../models/Destination.js';
 import type { Channel } from '../models/Channel.js';
 import type { StoredMessage } from '../models/Message.js';
+let activeInbound = 0;
 export async function processInboundMessage(
   channelId: number,
   payload: unknown,
   correlationId: string = randomUUID(),
+  idempotencyKey?: string,
+  expectedSource?: string,
+  expectedRevision?: number,
 ) {
+  if (activeInbound >= config.server.maxActiveInbound)
+    throw new AppError(503, 'INBOUND_CAPACITY', 'Inbound processing capacity exceeded');
+  activeInbound++;
+  try {
+    return await processInboundCore(
+      channelId,
+      payload,
+      correlationId,
+      idempotencyKey,
+      expectedSource,
+      expectedRevision,
+    );
+  } finally {
+    activeInbound--;
+  }
+}
+async function processInboundCore(
+  channelId: number,
+  payload: unknown,
+  correlationId: string = randomUUID(),
+  idempotencyKey?: string,
+  expectedSource?: string,
+  expectedRevision?: number,
+) {
+  const started = performance.now();
+  increment('inbound_attempts_total');
   const pool = await getConnection();
-  const channel = (
-    await pool.request().input('id', channelId).query('SELECT * FROM "Channels" WHERE id=@id')
-  ).recordset[0] as Channel | undefined;
+  const snapshot = await withTransaction(async (tx) => {
+    const channel = (
+      await tx
+        .request()
+        .input('id', channelId)
+        .query('SELECT * FROM "Channels" WHERE id=@id FOR SHARE')
+    ).recordset[0] as Channel | undefined;
+    const destinations = (
+      await tx
+        .request()
+        .input('id', channelId)
+        .query(
+          'SELECT * FROM "Destinations" WHERE channel_id=@id AND is_enabled=true AND is_deleted=false ORDER BY id',
+        )
+    ).recordset as Destination[];
+    return { channel, destinations };
+  });
+  const channel = snapshot.channel;
   if (!channel) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
+  if (expectedSource && channel.source_type !== expectedSource)
+    throw new AppError(
+      409,
+      'SOURCE_TYPE_MISMATCH',
+      'Channel source changed; retry after reviewing configuration',
+    );
+  if (expectedRevision !== undefined && channel.active_revision !== expectedRevision)
+    throw new AppError(
+      409,
+      'CHANNEL_REVISION_CHANGED',
+      'Channel revision changed before acceptance; retry with the current configuration',
+    );
   if (channel.status !== 'RUNNING')
     throw new AppError(409, 'CHANNEL_STOPPED', 'Channel is not running');
-  let dedupe: string | null = null;
-  if (channel.inbound_data_type === 'HL7V2') {
+  const mode = channel.idempotency_mode || config.inbound.idempotencyMode;
+  if (mode === 'REQUIRED' && !idempotencyKey && channel.source_type !== 'HL7')
+    throw new AppError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key is required');
+  if (idempotencyKey && !/^[\x21-\x7e]{1,200}$/.test(idempotencyKey))
+    throw new AppError(400, 'INVALID_IDEMPOTENCY_KEY', 'Invalid Idempotency-Key');
+  const requestHash = createHash('sha256').update(serialize(payload)).digest('hex');
+  let dedupe: string | null =
+    idempotencyKey && mode !== 'DISABLED'
+      ? createHash('sha256')
+          .update('http:' + idempotencyKey)
+          .digest('hex')
+      : null;
+  if (!dedupe && channel.inbound_data_type === 'HL7V2') {
     try {
       const msh = parseSegments(String(payload)).segments[0].fields;
       dedupe = createHash('sha256')
@@ -48,12 +119,29 @@ export async function processInboundMessage(
           .input('channel', channelId)
           .input('dedupe', dedupe)
           .query(
-            'SELECT id,status FROM "Messages" WHERE channel_id=@channel AND dedupe_key=@dedupe FOR UPDATE',
+            'SELECT id,status,request_hash FROM "Messages" WHERE channel_id=@channel AND dedupe_key=@dedupe FOR UPDATE',
           )
       ).recordset[0];
+      if (existing && existing.request_hash && existing.request_hash !== requestHash)
+        throw new AppError(
+          409,
+          'IDEMPOTENCY_CONFLICT',
+          'Idempotency key was already used for a different payload',
+        );
       if (existing)
         return { id: existing.id as number, status: String(existing.status), duplicate: true };
     }
+    await tx.request().query('SELECT pg_advisory_xact_lock(741203,4)');
+    const pending =
+      (
+        await tx
+          .request()
+          .query(
+            `SELECT COUNT(*) total FROM "Messages" WHERE status IN ('IN-PROCESS','PROCESSING','QUEUED','RETRYING')`,
+          )
+      ).recordset[0]?.total || 0;
+    if (pending >= config.server.maxPendingMessages)
+      throw new AppError(503, 'INBOUND_CAPACITY', 'Pending message capacity exceeded');
     const row = (
       await tx
         .request()
@@ -62,14 +150,17 @@ export async function processInboundMessage(
         .input('payload', serialize(payload))
         .input('correlation', correlationId)
         .input('dedupe', dedupe)
+        .input('hash', requestHash)
+        .input('revision', channel.active_revision || null)
         .query(
-          `INSERT INTO "Messages"(channel_id,direction,message_type,original_payload,status,correlation_id,dedupe_key,lease_until,created_at) VALUES(@channel,'IN',@type,@payload,'IN-PROCESS',@correlation,@dedupe,(CURRENT_TIMESTAMP + (300)::double precision * INTERVAL \'1 second\'),CURRENT_TIMESTAMP) RETURNING id`,
+          `INSERT INTO "Messages"(channel_id,direction,message_type,original_payload,status,correlation_id,dedupe_key,request_hash,channel_revision,lease_until,created_at) VALUES(@channel,'IN',@type,@payload,'IN-PROCESS',@correlation,@dedupe,@hash,@revision,(CURRENT_TIMESTAMP + (300)::double precision * INTERVAL \'1 second\'),CURRENT_TIMESTAMP) RETURNING id`,
         )
     ).recordset[0];
     return { id: row.id as number, status: 'IN-PROCESS', duplicate: false };
   });
   const inboundMessageId = reserved.id;
   if (reserved.duplicate) {
+    increment('idempotency_hits_total');
     if (reserved.status === 'IN-PROCESS')
       throw new AppError(
         409,
@@ -100,7 +191,11 @@ export async function processInboundMessage(
       );
   }, 30000);
   try {
-    if (channel.inbound_data_type === 'HL7V2') parseSegments(String(payload));
+    await validatePayload(
+      payload,
+      channel.inbound_data_type,
+      JSON.parse(channel.validation_profile || '{}'),
+    );
     if (
       channel.filter_script?.trim() &&
       !(await executeScript(
@@ -126,14 +221,7 @@ export async function processInboundMessage(
       .query(
         'UPDATE "Messages" SET transformed_payload=@payload,updated_at=CURRENT_TIMESTAMP WHERE id=@id',
       );
-    const destinations = (
-      await pool
-        .request()
-        .input('id', channelId)
-        .query(
-          'SELECT * FROM "Destinations" WHERE channel_id=@id AND is_enabled=true AND is_deleted=false ORDER BY id',
-        )
-    ).recordset as Destination[];
+    const destinations = snapshot.destinations;
     // Reserve ALL outbound records before any side effects. A crash leaves explicit PROCESSING states.
     const jobs = await withTransaction(async (tx) => {
       const jobs: { message: StoredMessage; dest: Destination }[] = [];
@@ -148,8 +236,9 @@ export async function processInboundMessage(
             .input('payload', serialize(transformed))
             .input('correlation', correlationId)
             .input('snapshot', encrypt(serialize(dest)))
+            .input('revision', channel.active_revision || null)
             .query(
-              `INSERT INTO "Messages"(channel_id,destination_id,inbound_message_id,direction,message_type,original_payload,transformed_payload,status,correlation_id,transport_config,lease_until,created_at) VALUES(@channel,@dest,@parent,'OUT',@type,@payload,@payload,'PROCESSING',@correlation,@snapshot,(CURRENT_TIMESTAMP + (300)::double precision * INTERVAL \'1 second\'),CURRENT_TIMESTAMP) RETURNING *`,
+              `INSERT INTO "Messages"(channel_id,destination_id,inbound_message_id,direction,message_type,original_payload,transformed_payload,status,correlation_id,transport_config,channel_revision,lease_until,created_at) VALUES(@channel,@dest,@parent,'OUT',@type,@payload,@payload,'PROCESSING',@correlation,@snapshot,@revision,(CURRENT_TIMESTAMP + (300)::double precision * INTERVAL \'1 second\'),CURRENT_TIMESTAMP) RETURNING *`,
             )
         ).recordset[0] as StoredMessage;
         jobs.push({ message: row, dest });
@@ -236,6 +325,7 @@ export async function processInboundMessage(
     throw error;
   } finally {
     clearInterval(heartbeat);
+    observe('processing_seconds', (performance.now() - started) / 1000);
   }
 }
 export async function processRetry(message: StoredMessage) {
@@ -251,7 +341,7 @@ export async function resendMessage(id: number) {
       .request()
       .input('id', id)
       .query(
-        `UPDATE "Messages" SET status='RETRYING',lease_until=(CURRENT_TIMESTAMP + (300)::double precision * INTERVAL \'1 second\') WHERE id=@id AND direction='OUT' AND status IN ('OUT-ERROR','DEAD_LETTER') AND destination_id IS NOT NULL AND transport_config IS NOT NULL AND EXISTS(SELECT 1 FROM "Channels" c WHERE c.id="Messages".channel_id AND c.status='RUNNING') RETURNING *`,
+        `UPDATE "Messages" SET status='RETRYING',lease_owner=gen_random_uuid()::text,lease_until=(CURRENT_TIMESTAMP + (300)::double precision * INTERVAL \'1 second\') WHERE id=@id AND direction='OUT' AND status IN ('OUT-ERROR','DEAD_LETTER') AND destination_id IS NOT NULL AND transport_config IS NOT NULL AND EXISTS(SELECT 1 FROM "Destinations" d WHERE d.id="Messages".destination_id AND d.is_enabled=true AND d.is_deleted=false) AND EXISTS(SELECT 1 FROM "Channels" c WHERE c.id="Messages".channel_id AND c.status='RUNNING') RETURNING *`,
       )
   ).recordset[0] as StoredMessage | undefined;
   if (!row)

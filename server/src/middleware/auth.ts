@@ -11,6 +11,7 @@ export type Permission =
   | 'channel:operate'
   | 'message:read'
   | 'message:payload'
+  | 'message:raw'
   | 'message:resend'
   | 'audit:read'
   | 'user:manage'
@@ -25,6 +26,7 @@ const permissions: Record<UserRole, readonly Permission[]> = {
     'message:payload',
     'message:resend',
     'audit:read',
+    'message:raw',
     'user:manage',
     'inbound:send',
   ],
@@ -57,6 +59,7 @@ export const authenticate: RequestHandler = async (req, res, next) => {
   if (!token) {
     res.status(401).json({
       success: false,
+      details: [],
       code: 'NO_TOKEN',
       message: 'Unauthorized',
       requestId: req.requestId,
@@ -76,6 +79,7 @@ export const authenticate: RequestHandler = async (req, res, next) => {
   } catch (error) {
     res.status(401).json({
       success: false,
+      details: [],
       code: error instanceof jwt.TokenExpiredError ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID',
       message: 'Session invalid or expired',
       requestId: req.requestId,
@@ -90,13 +94,15 @@ export const authenticate: RequestHandler = async (req, res, next) => {
         .request()
         .input('id', decoded.id)
         .input('token', decoded.jti)
+        .input('session', typeof decoded.sid === 'string' ? decoded.sid : null)
         .query(
-          'SELECT id,name,role FROM "Users" WHERE id=@id AND NOT EXISTS(SELECT 1 FROM "RevokedTokens" WHERE token_id=@token)',
+          'SELECT id,name,role FROM "Users" WHERE id=@id AND NOT EXISTS(SELECT 1 FROM "RevokedTokens" WHERE token_id=@token) AND (@session::text IS NULL OR EXISTS(SELECT 1 FROM "BrowserSessions" WHERE family_id=@session AND user_id=@id AND revoked_at IS NULL AND expires_at>CURRENT_TIMESTAMP))',
         )
     ).recordset[0];
     if (!user) {
       res.status(401).json({
         success: false,
+        details: [],
         code: 'TOKEN_INVALID',
         message: 'Session invalid',
         requestId: req.requestId,
@@ -120,6 +126,7 @@ export function requirePermission(permission: Permission): RequestHandler {
     if (!req.user || !hasPermission(req.user.role, permission)) {
       res.status(403).json({
         success: false,
+        details: [],
         code: 'FORBIDDEN',
         message: 'Permission denied',
         requestId: req.requestId,

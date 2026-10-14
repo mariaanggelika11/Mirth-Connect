@@ -7,6 +7,14 @@ import { AppError } from '../utils/errors.js';
 import { withTransaction } from '../config/db.js';
 import { audit } from '../services/audit.services.js';
 import { authenticate } from '../middleware/auth.js';
+import {
+  browserLogin,
+  browserRefresh,
+  browserLogout,
+  csrfGuard,
+  listSessions,
+  revokeSession,
+} from '../services/session.services.js';
 const router = Router();
 router.use(
   rateLimit({
@@ -17,6 +25,11 @@ router.use(
     message: { success: false, code: 'RATE_LIMITED', message: 'Too many authentication attempts' },
   }),
 );
+router.post('/browser/login', validate(credentials), browserLogin);
+router.post('/browser/refresh', csrfGuard, browserRefresh);
+router.post('/browser/logout', csrfGuard, browserLogout);
+router.get('/sessions', authenticate, listSessions);
+router.post('/sessions/:sessionId/revoke', authenticate, revokeSession);
 router.post(
   '/register',
   (_req, _res, next) =>

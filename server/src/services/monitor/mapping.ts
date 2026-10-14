@@ -1,4 +1,7 @@
 export interface MonitorRow {
+  channel_revision?: number;
+  dedupe_key?: string;
+  reconciliation?: unknown;
   id: number;
   channel_id: number;
   direction: string;
@@ -45,7 +48,7 @@ export function logRow(row: DestinationLogRow, payload: boolean) {
     status: row.status,
     sentAt: row.sent_at,
     ackCode: row.ack_code,
-    messageControlId: row.message_control_id,
+    messageControlId: payload && row.message_control_id ? '[REDACTED]' : undefined,
     canResend: row.retry_eligible === true,
     ...(payload
       ? {

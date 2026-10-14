@@ -1,4 +1,7 @@
+import { increment } from '../utils/runtimeMetrics.js';
 import net from 'node:net';
+import tls from 'node:tls';
+import { readFileSync } from 'node:fs';
 import { getConnection } from '../config/db.js';
 import { config } from '../config/env.js';
 import { buildAck, hl7ToJson, parseSegments } from '../utils/hl7Converer.js';
@@ -10,17 +13,25 @@ import { safeError } from '../utils/errors.js';
 const sockets = new Set<net.Socket>();
 const active = new Set<Promise<void>>();
 export async function startHl7Listener(): Promise<net.Server> {
-  const server = net.createServer((socket) => {
+  const accept = (socket: net.Socket) => {
+    if (sockets.size >= config.hl7.maxConnections) {
+      socket.destroy();
+      return;
+    }
     const ip = socket.remoteAddress?.replace(/^::ffff:/, '') || '';
     if (!config.hl7.allowedIps.includes(ip)) {
       socket.destroy();
       return;
     }
     sockets.add(socket);
+    increment('mllp_active_connections', 1);
     socket.setTimeout(config.transport.timeout);
     socket.on('timeout', () => socket.destroy());
     socket.on('error', () => logger.warn({ code: 'MLLP_SOCKET_ERROR' }, 'MLLP connection failed'));
-    socket.on('close', () => sockets.delete(socket));
+    socket.on('close', () => {
+      sockets.delete(socket);
+      increment('mllp_active_connections', -1);
+    });
     const decoder = new MllpDecoder(config.server.payloadLimit);
     let queue = Promise.resolve();
     let count = 0;
@@ -46,7 +57,7 @@ export async function startHl7Listener(): Promise<net.Server> {
                 await pool
                   .request()
                   .query(
-                    "SELECT id,filter_script FROM \"Channels\" WHERE status='RUNNING' AND source_type='HL7' ORDER BY id",
+                    "SELECT id,filter_script,active_revision FROM \"Channels\" WHERE status='RUNNING' AND source_type='HL7' ORDER BY id",
                   )
               ).recordset;
               const selected = [];
@@ -63,7 +74,14 @@ export async function startHl7Listener(): Promise<net.Server> {
                   ? 'Ambiguous channel routing'
                   : 'No matching running channel';
               } else {
-                const result = await processInboundMessage(selected[0].id, raw);
+                const result = await processInboundMessage(
+                  selected[0].id,
+                  raw,
+                  undefined,
+                  undefined,
+                  'HL7',
+                  selected[0].active_revision,
+                );
                 if (!result.success) {
                   code = 'AE';
                   reason = 'Processing failed';
@@ -74,6 +92,7 @@ export async function startHl7Listener(): Promise<net.Server> {
               reason = safeError(error);
               logger.warn({ code: reason }, 'MLLP processing failed');
             }
+            increment('mllp_ack_' + code.toLowerCase() + '_total');
             if (!socket.destroyed) socket.write(frame(buildAck(raw, code, reason)));
             count--;
             socket.setTimeout(config.transport.timeout);
@@ -88,7 +107,27 @@ export async function startHl7Listener(): Promise<net.Server> {
         socket.destroy();
       }
     });
-  });
+  };
+  const server = config.hl7.tls.enabled
+    ? tls.createServer(
+        {
+          cert: readFileSync(config.hl7.tls.certFile!),
+          key: readFileSync(config.hl7.tls.keyFile!),
+          ca: readFileSync(config.hl7.tls.caFile!),
+          requestCert: config.hl7.tls.requireClientCert,
+          rejectUnauthorized: config.hl7.tls.requireClientCert,
+          minVersion: 'TLSv1.2',
+          handshakeTimeout: 10000,
+        },
+        accept,
+      )
+    : net.createServer(accept);
+  if (!config.hl7.tls.enabled)
+    logger.warn(
+      { code: 'MLLP_PLAINTEXT_ENABLED' },
+      'MLLP listener requires a trusted isolated network',
+    );
+  server.maxConnections = config.hl7.maxConnections;
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(config.hl7.port, config.hl7.host, () => {

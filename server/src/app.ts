@@ -12,6 +12,7 @@ import { authenticate, requirePermission } from './middleware/auth.js';
 import { validateId } from './utils/validator.js';
 import { AppError } from './utils/errors.js';
 import { logger } from './utils/logger.js';
+import alertRoutes from './routes/alert.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import channelRoutes from './routes/channel.routes.js';
 import destinationRoutes from './routes/destination.routes.js';
@@ -21,8 +22,11 @@ import usersRoutes from './routes/users.routes.js';
 import { decrypt } from './utils/secrets.js';
 import hl7Routes from './routes/hl7.js';
 import { handleInboundMessage } from './services/message.services.js';
+import { increment } from './utils/runtimeMetrics.js';
+import { metrics } from './services/metrics.services.js';
 export const app = express();
 app.disable('x-powered-by');
+if (config.server.trustProxy.length) app.set('trust proxy', config.server.trustProxy);
 app.use('/api', (_req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   next();
@@ -30,12 +34,13 @@ app.use('/api', (_req, res, next) => {
 app.use((req, res, next) => {
   req.requestId = randomUUID();
   res.setHeader('X-Request-Id', req.requestId);
-  res.on('finish', () =>
+  res.on('finish', () => {
+    increment('http_status_' + res.statusCode);
     logger.info(
       { requestId: req.requestId, status: res.statusCode, method: req.method },
       'HTTP request completed',
-    ),
-  );
+    );
+  });
   next();
 });
 app.use(
@@ -61,13 +66,21 @@ app.use(
       else done(new AppError(403, 'CORS_DENIED', 'Origin not allowed'));
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+    credentials: true,
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-API-Key',
+      'Idempotency-Key',
+      'X-CSRF-Token',
+    ],
     exposedHeaders: ['X-Request-Id'],
   }),
 );
 app.get(['/health', '/api/status'], (_req, res) =>
   res.json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() }),
 );
+app.get('/metrics', authenticate, requirePermission('audit:read'), metrics);
 app.get('/ready', async (_req, res) => {
   try {
     const pool = await getConnection();
@@ -77,6 +90,7 @@ app.get('/ready', async (_req, res) => {
     res.status(503).json({ status: 'not_ready' });
   }
 });
+let activeInbound = 0;
 app.post(
   config.inbound.path + '/:channelId',
   validateId,
@@ -104,6 +118,23 @@ app.post(
       next(error);
     }
   },
+  (_req, res, next) => {
+    if (activeInbound >= config.server.maxActiveInbound) {
+      res.set('Retry-After', '5');
+      return next(new AppError(503, 'INBOUND_CAPACITY', 'Inbound processing capacity exceeded'));
+    }
+    activeInbound++;
+    let released = false;
+    const release = () => {
+      if (!released) {
+        released = true;
+        activeInbound--;
+      }
+    };
+    res.once('finish', release);
+    res.once('close', release);
+    next();
+  },
   express.text({ type: '*/*', limit: config.server.payloadLimit }),
   handleInboundMessage,
 );
@@ -115,6 +146,7 @@ const managementLimit = rateLimit({
   legacyHeaders: false,
   message: { success: false, code: 'RATE_LIMITED', message: 'Too many management requests' },
 });
+app.use('/api/alerts', managementLimit, alertRoutes);
 app.use('/api/upload', managementLimit, authenticate, uploadRoutes);
 app.use(
   '/api/users',

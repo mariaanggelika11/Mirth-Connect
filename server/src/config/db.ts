@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import pg, { type PoolClient, type QueryResultRow } from 'pg';
 import { config } from './env.js';
 import { logger } from '../utils/logger.js';
@@ -87,7 +88,10 @@ export function getConnection(): Promise<DatabaseSession> {
   if (!connection) {
     const candidate = new pg.Pool({
       connectionString: config.database.connectionString,
-      ssl: config.database.ssl,
+      ssl: config.database.ssl && {
+        ...config.database.ssl,
+        ...(config.database.caFile ? { ca: readFileSync(config.database.caFile, 'utf8') } : {}),
+      },
       max: 20,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,

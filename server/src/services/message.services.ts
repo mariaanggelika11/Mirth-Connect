@@ -1,3 +1,5 @@
+import { increment } from '../utils/runtimeMetrics.js';
+import { maskPayload } from '../utils/masking.js';
 import { querySchema } from './monitor/query.js';
 import { parsed, logRow } from './monitor/mapping.js';
 import { listMessages, findMessage, listDeliveryLogs, messageStats } from './monitor/repository.js';
@@ -17,7 +19,7 @@ export const handleInboundMessage = async (req: Request, res: Response, next: Ne
       await pool
         .request()
         .input('id', Number(req.params.channelId))
-        .query('SELECT source_type,inbound_data_type FROM "Channels" WHERE id=@id')
+        .query('SELECT source_type,inbound_data_type,active_revision FROM "Channels" WHERE id=@id')
     ).recordset[0];
     if (!channel) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
     if (channel.source_type !== 'HTTP')
@@ -34,11 +36,22 @@ export const handleInboundMessage = async (req: Request, res: Response, next: Ne
       Number(req.params.channelId),
       payload,
       req.requestId,
+      req.get('Idempotency-Key'),
+      'HTTP',
+      channel.active_revision,
     );
     res
       .status(result.success ? (result.inboundStatus === 'QUEUED' ? 202 : 200) : 502)
       .json({ success: result.success, result });
   } catch (error) {
+    if (error instanceof AppError && error.code === 'IDEMPOTENCY_CONFLICT') {
+      increment('idempotency_conflicts_total');
+      try {
+        await audit('IDEMPOTENCY_CONFLICT', req, 'channel', Number(req.params.channelId));
+      } catch (auditError) {
+        return next(auditError);
+      }
+    }
     next(error);
   }
 };
@@ -82,8 +95,16 @@ export const getMessageDetail = async (req: Request, res: Response, next: NextFu
     if (!Number.isSafeInteger(logPage) || logPage < 1 || logPage > 1000000)
       throw new AppError(400, 'INVALID_QUERY', 'Invalid destination log page');
     const payload = !!req.user && hasPermission(req.user.role, 'message:payload');
+    const raw = req.query.raw === 'true';
+    if (raw && (!req.user || !hasPermission(req.user.role, 'message:raw')))
+      throw new AppError(
+        403,
+        'RAW_PAYLOAD_DENIED',
+        'Raw payload requires administrator permission',
+      );
+    const visible = (value: unknown) => (raw ? value : maskPayload(value));
     const logs = await listDeliveryLogs(id, logPage, logPageSize);
-    if (payload) await audit('VIEW_MESSAGE_PAYLOAD', req, 'message', id);
+    if (payload) await audit(raw ? 'VIEW_MESSAGE_RAW' : 'VIEW_MESSAGE_PAYLOAD', req, 'message', id);
     res.json({
       success: true,
       data: {
@@ -99,14 +120,34 @@ export const getMessageDetail = async (req: Request, res: Response, next: NextFu
         nextRetryAt: m.next_retry_at,
         correlationId: m.correlation_id,
         errorCode: m.last_error,
+        channelRevision: m.channel_revision,
+        idempotencyApplied: !!m.dedupe_key,
+        reconciliation:
+          m.reconciliation && typeof m.reconciliation === 'object'
+            ? {
+                ...m.reconciliation,
+                note: payload ? visible((m.reconciliation as { note?: string }).note) : undefined,
+              }
+            : undefined,
         payloadAllowed: payload,
+        rawPayload: raw,
         ...(payload
           ? {
-              originalPayload: parsed(m.original_payload),
-              transformedPayload: parsed(m.transformed_payload),
+              originalPayload: visible(parsed(m.original_payload)),
+              transformedPayload: visible(parsed(m.transformed_payload)),
             }
           : {}),
-        destinationLogs: logs.slice(0, logPageSize).map((l) => logRow(l, payload)),
+        destinationLogs: logs.slice(0, logPageSize).map((l) => {
+          const row = logRow(l, payload);
+          return payload
+            ? {
+                ...row,
+                requestData: visible(row.requestData),
+                outboundData: visible(row.outboundData),
+                responseText: visible(row.responseText),
+              }
+            : row;
+        }),
         destinationPagination: {
           page: logPage,
           pageSize: logPageSize,

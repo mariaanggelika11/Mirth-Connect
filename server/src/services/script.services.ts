@@ -1,3 +1,4 @@
+import { increment } from '../utils/runtimeMetrics.js';
 import { Worker } from 'node:worker_threads';
 import { config } from '../config/env.js';
 import { AppError } from '../utils/errors.js';
@@ -53,8 +54,10 @@ export async function executeScript(
         done = true;
         clearTimeout(timer);
         void worker.terminate();
-        if (error) reject(error);
-        else resolve(value);
+        if (error) {
+          increment('script_failures_total');
+          reject(error);
+        } else resolve(value);
       };
       const timer = setTimeout(
         () => finish(new AppError(422, 'SCRIPT_TIMEOUT', 'Script execution timed out')),

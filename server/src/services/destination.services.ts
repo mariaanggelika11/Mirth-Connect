@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { getConnection } from '../config/db.js';
 import { AppError } from '../utils/errors.js';
+import { maskPayload } from '../utils/masking.js';
 import { audit } from './audit.services.js';
 export const getDestinationLog = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -25,7 +26,14 @@ export const getDestinationLog = async (req: Request, res: Response, next: NextF
         'SELECT l.*,d.name destination_name FROM "MessageDestinationLog" l LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE l.message_id=@id ORDER BY l.sent_at DESC,l.id DESC LIMIT @size OFFSET @offset',
       );
     await audit('VIEW_DESTINATION_PAYLOAD', req, 'message', Number(req.params.messageId));
-    res.json(result.recordset);
+    res.json(
+      result.recordset.map((row) => ({
+        ...row,
+        request_data: maskPayload(row.request_data),
+        outbound_data: maskPayload(row.outbound_data),
+        response_text: maskPayload(row.response_text),
+      })),
+    );
   } catch (error) {
     next(error);
   }
