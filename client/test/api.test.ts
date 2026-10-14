@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import axios, { AxiosError } from 'axios';
-import { api } from '../src/services/api';
+import { api, setAccessToken, getAccessToken, refreshSession } from '../src/services/api';
 const storage = new Map<string, string>();
 const dispatch = vi.fn();
 vi.stubGlobal('localStorage', {
@@ -9,13 +9,40 @@ vi.stubGlobal('localStorage', {
   removeItem: (k: string) => storage.delete(k),
 });
 vi.stubGlobal('window', { dispatchEvent: dispatch });
+vi.stubGlobal('document', { cookie: 'mirth_csrf=synthetic-csrf' });
 beforeEach(() => {
   storage.clear();
+  setAccessToken(null);
   dispatch.mockClear();
 });
 describe('Browser API session handling', () => {
-  it('attaches stored token to requests', async () => {
-    storage.set('authToken', 'token');
+  it('refresh is serialized and updates memory token without persistent storage', async () => {
+    const adapter = api.defaults.adapter;
+    let refreshCalls = 0;
+    api.defaults.adapter = async (config) => {
+      refreshCalls++;
+      expect(config.headers['X-CSRF-Token']).toBe('synthetic-csrf');
+      return {
+        data: { token: 'refreshed-synthetic-token' },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      };
+    };
+    try {
+      const result = await Promise.all([refreshSession(), refreshSession()]);
+      expect(result).toEqual(['refreshed-synthetic-token', 'refreshed-synthetic-token']);
+      expect(refreshCalls).toBe(1);
+      expect(getAccessToken()).toBe('refreshed-synthetic-token');
+      expect(storage.has('authToken')).toBe(false);
+    } finally {
+      api.defaults.adapter = adapter;
+    }
+  });
+  it('attaches memory token and ignores persistent legacy token', async () => {
+    storage.set('authToken', 'legacy-token');
+    setAccessToken('token');
     let header = '';
     await api.get('/channel', {
       adapter: async (config) => {

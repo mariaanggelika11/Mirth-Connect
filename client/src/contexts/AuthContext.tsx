@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, setAccessToken, refreshSession, csrfToken } from '../services/api';
 import { login as apiLogin } from '../services/auth.api';
 
 interface AuthContextType {
@@ -28,15 +28,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let mounted = true;
     const expire = () => {
       localStorage.removeItem('authToken');
+      setAccessToken(null);
       setToken(null);
       setRole('VIEWER');
     };
     window.addEventListener('auth:expired', expire);
-    const saved = localStorage.getItem('authToken');
-    if (saved)
-      api
-        .get('/auth/me')
-        .then(({ data }) => {
+    localStorage.removeItem('authToken');
+    const refreshed = (event: Event) => {
+      if (mounted) setToken((event as CustomEvent<string>).detail);
+    };
+    window.addEventListener('auth:refreshed', refreshed);
+    if (csrfToken())
+      refreshSession()
+        .then(async (saved) => {
+          const { data } = await api.get('/auth/me');
           if (mounted) {
             setRole(data.data.role);
             setName(data.data.name || 'User');
@@ -53,6 +58,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => {
       mounted = false;
       window.removeEventListener('auth:expired', expire);
+      window.removeEventListener('auth:refreshed', refreshed);
     };
   }, []);
   useEffect(() => {
@@ -61,12 +67,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const claims = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
       if (!Number.isFinite(claims.exp)) throw new Error();
       const timer = setTimeout(
-        () => window.dispatchEvent(new Event('auth:expired')),
+        () => {
+          void refreshSession().catch(() => window.dispatchEvent(new Event('auth:expired')));
+        },
         Math.max(0, claims.exp * 1000 - Date.now()),
       );
       return () => clearTimeout(timer);
     } catch {
       localStorage.removeItem('authToken');
+      setAccessToken(null);
       setToken(null);
     }
   }, [token]);
@@ -75,13 +84,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setIsLoggingIn(true);
     try {
       const { token } = await apiLogin(username, password);
-      localStorage.setItem('authToken', token);
+      setAccessToken(token);
       const { data } = await api.get('/auth/me');
       setRole(data.data.role);
       setName(data.data.name || 'User');
       setToken(token);
     } catch (error) {
       localStorage.removeItem('authToken');
+      setAccessToken(null);
       setToken(null);
       setRole('VIEWER');
       throw error;
@@ -92,9 +102,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = () => {
     void api
-      .post('/auth/logout', {}, { headers: { Authorization: `Bearer ${token}` } })
+      .post('/auth/browser/logout', {}, { headers: { 'X-CSRF-Token': csrfToken() } })
       .catch(() => {});
     localStorage.removeItem('authToken');
+    setAccessToken(null);
     setRole('VIEWER');
     setToken(null);
   };

@@ -18,8 +18,8 @@ export async function fetchLogPage(params: MessageFilters = {}) {
     pagination: { page: number; pageSize: number; total: number };
   };
 }
-export async function fetchLogDetail(id: number, logPage = 1): Promise<LogEntry> {
-  const { data } = await api.get(`/message/${id}`, { params: { logPage } });
+export async function fetchLogDetail(id: number, logPage = 1, raw = false): Promise<LogEntry> {
+  const { data } = await api.get(`/message/${id}`, { params: { logPage, raw } });
   return data.data;
 }
 export const resendMessage = async (id: number) => {

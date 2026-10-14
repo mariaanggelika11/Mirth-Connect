@@ -1,3 +1,5 @@
+import { AlertPanel } from './AlertPanel';
+import { SessionPanel } from './SessionPanel';
 import { useCallback, useEffect, useState } from 'react';
 import { ShieldCheck, Users, History, UserRound } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -131,6 +133,8 @@ export default function SettingsPage() {
       )}
       {tab === 'account' ? (
         <div className="settings-grid">
+          <SessionPanel />
+          {can('audit:read') && <AlertPanel />}
           <section className="card-bw settings-panel">
             <ShieldCheck size={25} className="accent" />
             <h2>Your account</h2>

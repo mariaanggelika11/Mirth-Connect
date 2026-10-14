@@ -3,6 +3,8 @@ import { DataType } from '../types';
 export function channelConfiguration(channel: Channel): ChannelFormData {
   return {
     name: channel.name,
+    validationProfile: channel.validationProfile || {},
+    idempotencyMode: channel.idempotencyMode || 'OPTIONAL',
     source: {
       type: channel.source.type,
       inboundDataType: channel.source.inboundDataType || DataType.HL7V2,
@@ -38,7 +40,9 @@ export function exportChannelXml(channel: Channel): string {
       .replaceAll("'", '&apos;');
   const tag = (key: string, value: unknown) => `<${key}>${escape(value)}</${key}>`;
   return (
-    '<?xml version="1.0" encoding="UTF-8"?>\n<channel>\n' +
+    '<?xml version="1.0" encoding="UTF-8"?>\n<channel>\n<formatVersion>2</formatVersion>\n' +
+    tag('validationProfile', JSON.stringify(data.validationProfile || {})) +
+    tag('idempotencyMode', data.idempotencyMode || 'OPTIONAL') +
     tag('name', data.name) +
     '\n<source>' +
     tag('type', data.source.type) +

@@ -1,3 +1,4 @@
+import { api } from '../../services/api';
 import { useState } from 'react';
 import { ChevronDown, RotateCcw } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -20,13 +21,16 @@ export default function LogDetailModal({
     [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
     [confirm, setConfirm] = useState<DestinationLog | null>(null),
-    [resending, setResending] = useState(false);
+    [resending, setResending] = useState(false),
+    [resolution, setResolution] = useState('IN_REVIEW'),
+    [resolutionNote, setResolutionNote] = useState(''),
+    [category, setCategory] = useState('UNKNOWN');
   const { can } = useAuth();
   async function loadPage(page: number) {
     setLoading(true);
     setError('');
     try {
-      setLog(await fetchLogDetail(log.id, page));
+      setLog(await fetchLogDetail(log.id, page, !!log.rawPayload));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load delivery history');
     } finally {
@@ -81,6 +85,59 @@ export default function LogDetailModal({
           {tab === 'summary' && (
             <div className="form-section">
               <h3>Message overview</h3>
+              <p>
+                Revision {log.channelRevision || 'legacy'} · Idempotency{' '}
+                {log.idempotencyApplied ? 'applied' : 'not applied'}
+              </p>
+              {log.status === 'DEAD_LETTER' && can('message:resend') && (
+                <section className="form-section">
+                  <h3>Dead-letter reconciliation</h3>
+                  <p>Current state: {log.reconciliation?.state || 'OPEN'}</p>
+                  <label className="field">
+                    <span>Resolution state</span>
+                    <select value={resolution} onChange={(e) => setResolution(e.target.value)}>
+                      {['OPEN', 'ACKNOWLEDGED', 'IN_REVIEW', 'RESOLVED', 'IGNORED'].map((v) => (
+                        <option key={v}>{v}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Root cause category</span>
+                    <select value={category} onChange={(e) => setCategory(e.target.value)}>
+                      {['TRANSPORT', 'ACK', 'SCRIPT', 'CONFIGURATION', 'CAPACITY', 'UNKNOWN'].map(
+                        (c) => (
+                          <option key={c}>{c}</option>
+                        ),
+                      )}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Operator note (no patient data)</span>
+                    <textarea
+                      maxLength={1000}
+                      value={resolutionNote}
+                      onChange={(e) => setResolutionNote(e.target.value)}
+                    />
+                  </label>
+                  <Button
+                    disabled={loading || !resolutionNote.trim() || !category.trim()}
+                    onClick={() => {
+                      setLoading(true);
+                      void api
+                        .put(`/message/${log.id}/reconciliation`, {
+                          state: resolution,
+                          note: resolutionNote,
+                          category,
+                        })
+                        .then(() => loadPage(1))
+                        .catch((e) => setError(e.message))
+                        .finally(() => setLoading(false));
+                    }}
+                  >
+                    Save reconciliation
+                  </Button>
+                </section>
+              )}
               <dl className="definition-list">
                 <div>
                   <dt>Message ID</dt>
@@ -152,6 +209,26 @@ export default function LogDetailModal({
           )}
           {tab === 'payload' && log.payloadAllowed && (
             <div className="form-section">
+              {can('message:raw') && (
+                <Button
+                  variant="secondary"
+                  disabled={loading}
+                  onClick={() => {
+                    setLoading(true);
+                    void fetchLogDetail(log.id, 1, !log.rawPayload)
+                      .then(setLog)
+                      .catch((e) => setError(e.message))
+                      .finally(() => setLoading(false));
+                  }}
+                >
+                  {log.rawPayload ? 'Show redacted' : 'View raw (audited)'}
+                </Button>
+              )}
+              <p className="muted">
+                {log.rawPayload
+                  ? 'Raw payload access is audited.'
+                  : 'Redacted view. Copies use the displayed content.'}
+              </p>
               <PayloadViewer title="Original payload" value={log.originalPayload} />
               <PayloadViewer title="Transformed payload" value={log.transformedPayload} />
             </div>

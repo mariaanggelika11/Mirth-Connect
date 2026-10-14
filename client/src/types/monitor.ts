@@ -34,6 +34,10 @@ export interface DestinationLog {
 
 // LOG ENTRY
 export interface LogEntry {
+  rawPayload?: boolean;
+  channelRevision?: number;
+  idempotencyApplied?: boolean;
+  reconciliation?: { state: string; note: string; category: string };
   id: number;
   payloadAllowed?: boolean;
   retryCount?: number;

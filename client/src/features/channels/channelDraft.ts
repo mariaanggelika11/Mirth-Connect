@@ -18,6 +18,9 @@ export const newDestination = (): Destination => ({
 export function initialDraft(channel?: Channel | null): ChannelFormData {
   return {
     name: channel?.name || '',
+    validationProfile: channel?.validationProfile || {},
+    idempotencyMode: channel?.idempotencyMode || 'OPTIONAL',
+    changeSummary: '',
     source: {
       type: channel?.source.type === 'HL7' ? 'HL7' : 'HTTP',
       inboundDataType: channel?.source.inboundDataType || DataType.HL7V2,

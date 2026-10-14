@@ -3,6 +3,7 @@ import type { ChannelScriptEditor } from './channelDraft';
 import { newDestination, initialDraft } from './channelDraft';
 import { useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Code2, Plus, KeyRound } from 'lucide-react';
+import { api } from '../../services/api';
 import { rotateSourceCredential } from '../../services/channel.api';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
@@ -28,12 +29,17 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     [discard, setDiscard] = useState(false),
     [key, setKey] = useState(''),
     [rotating, setRotating] = useState(false),
-    [confirmKey, setConfirmKey] = useState(false);
+    [confirmKey, setConfirmKey] = useState(false),
+    [sample, setSample] = useState('{}'),
+    [testResult, setTestResult] = useState(''),
+    [testing, setTesting] = useState(false),
+    [profileText, setProfileText] = useState('{}');
   const [editor, setEditor] = useState<ChannelScriptEditor | null>(null);
   useEffect(() => {
     if (isOpen) {
       const value = seedData || initialDraft(initialData);
       setDraft(value);
+      setProfileText(JSON.stringify(value.validationProfile || {}, null, 2));
       setBaseline(JSON.stringify(value));
       setStep(0);
       setError('');
@@ -91,10 +97,21 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       setError('Each destination needs a name and endpoint.');
       return;
     }
+    if (!draft.changeSummary?.trim()) {
+      setError('Describe the configuration change before saving.');
+      return;
+    }
+    let validationProfile: Record<string, unknown>;
+    try {
+      validationProfile = JSON.parse(profileText);
+    } catch {
+      setError('Invalid validation profile JSON');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
-      await onSubmit(draft);
+      await onSubmit({ ...draft, validationProfile });
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to save channel');
@@ -197,6 +214,37 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                     </select>
                   </label>
                 </div>
+                <label className="field">
+                  <span>Validation profile (JSON)</span>
+                  <textarea
+                    rows={4}
+                    value={profileText}
+                    onChange={(e) => {
+                      setProfileText(e.target.value);
+                      try {
+                        setDraft((d) => ({ ...d, validationProfile: JSON.parse(e.target.value) }));
+                      } catch {
+                        /* Show validation error on save. */
+                      }
+                    }}
+                  />
+                </label>
+                <label className="field">
+                  <span>Inbound idempotency</span>
+                  <select
+                    value={draft.idempotencyMode || 'OPTIONAL'}
+                    onChange={(e) =>
+                      setDraft((d) => ({
+                        ...d,
+                        idempotencyMode: e.target.value as ChannelFormData['idempotencyMode'],
+                      }))
+                    }
+                  >
+                    <option value="OPTIONAL">Optional</option>
+                    <option value="REQUIRED">Required</option>
+                    <option value="DISABLED">Disabled</option>
+                  </select>
+                </label>
                 {draft.source.type === 'HTTP' && (
                   <div className="credential-panel">
                     <KeyRound size={19} />
@@ -373,9 +421,54 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                     </div>
                   </div>
                 ))}
+                <details className="advanced-section">
+                  <summary>Validate / dry-run synthetic message</summary>
+                  <label className="field">
+                    <span>Synthetic payload</span>
+                    <textarea rows={4} value={sample} onChange={(e) => setSample(e.target.value)} />
+                  </label>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={testing}
+                    onClick={() => {
+                      setTesting(true);
+                      setTestResult('');
+                      let payload: unknown = sample;
+                      try {
+                        if (draft.source.inboundDataType === 'JSON') payload = JSON.parse(sample);
+                      } catch {
+                        setError('Invalid synthetic JSON');
+                        setTesting(false);
+                        return;
+                      }
+                      void api
+                        .post('/channel/dry-run', { configuration: draft, payload })
+                        .then(({ data }) => setTestResult(JSON.stringify(data, null, 2)))
+                        .catch((e) => setError(e.message))
+                        .finally(() => setTesting(false));
+                    }}
+                  >
+                    Validate / dry-run
+                  </Button>
+                  {testResult && (
+                    <pre className="code-box" role="status">
+                      {testResult}
+                    </pre>
+                  )}
+                </details>
+                <label className="field">
+                  <span>Change summary *</span>
+                  <input
+                    required
+                    maxLength={500}
+                    value={draft.changeSummary || ''}
+                    onChange={(e) => setDraft((d) => ({ ...d, changeSummary: e.target.value }))}
+                  />
+                </label>
                 <p className="muted">
                   {initialData
-                    ? 'The channel keeps its current running state.'
+                    ? 'Changes are saved as a draft. Open Revisions to review and publish them.'
                     : 'New channels are saved as Stopped. Start the channel when its destination is ready.'}
                 </p>
               </div>

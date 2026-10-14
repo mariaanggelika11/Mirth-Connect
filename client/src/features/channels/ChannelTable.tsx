@@ -23,6 +23,7 @@ interface Props {
   onEdit: (channel: Channel) => void;
   onDelete: (channel: Channel) => void;
   onViewMessages?: (id: number) => void;
+  onRevisions?: (channel: Channel) => void;
   onDuplicate?: (channel: Channel) => void;
 }
 function ChannelRow({
@@ -32,6 +33,7 @@ function ChannelRow({
   onDelete,
   onViewMessages,
   onDuplicate,
+  onRevisions,
 }: Omit<Props, 'channels'> & { channel: Channel }) {
   const { can } = useAuth();
   const menuRef = useRef<HTMLDetailsElement>(null);
@@ -92,7 +94,9 @@ function ChannelRow({
             </span>
             <span>
               <strong>{channel.name}</strong>
-              <small>Channel #{channel.id}</small>
+              <small>
+                Channel #{channel.id} · Revision {channel.activeRevision || 0}
+              </small>
             </span>
             <ChevronDown size={15} className={expanded ? 'rotate-180' : ''} />
           </button>
@@ -172,6 +176,7 @@ function ChannelRow({
                 )}
                 {can('channel:write') && (
                   <>
+                    <button onClick={() => onRevisions?.(channel)}>Revisions</button>
                     <button onClick={() => onDuplicate?.(channel)}>
                       <Copy size={15} />
                       Duplicate channel
@@ -235,7 +240,9 @@ function ChannelRow({
                         <strong>{d.name}</strong>
                         <small className="break-anywhere">{d.endpoint}</small>
                       </div>
-                      <span className="role-badge">{d.type}</span>
+                      <span className="role-badge">
+                        {d.type} · Circuit {d.circuitState || 'CLOSED'}
+                      </span>
                       <span className="muted">
                         {d.isEnabled === false
                           ? 'Disabled'
@@ -294,6 +301,7 @@ export default function ChannelTable(props: Props) {
                 onDelete={props.onDelete}
                 onViewMessages={props.onViewMessages}
                 onDuplicate={props.onDuplicate}
+                onRevisions={props.onRevisions}
               />
             ))}
           </tbody>

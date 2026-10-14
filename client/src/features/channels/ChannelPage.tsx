@@ -9,6 +9,7 @@ import {
 import { uploadXmlConfig } from '../../services/upload.api';
 import type { Channel, ChannelFormData } from '../../types';
 
+import { RevisionPanel } from './RevisionPanel';
 import ChannelTable from './ChannelTable';
 import { channelConfiguration } from '../../services/channel.config';
 import { PageHeading, RefreshButton } from '../../components/ui/OperationalUI';
@@ -25,6 +26,7 @@ const ChannelDashboard: React.FC<{
   initialChannelId?: string;
   onViewMessages?: (id: number) => void;
 }> = ({ initialChannelId = '', onViewMessages }) => {
+  const [revisionChannel, setRevisionChannel] = useState<Channel | null>(null);
   const [search, setSearch] = useState(initialChannelId ? '#' + initialChannelId : '');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const { can } = useAuth();
@@ -148,6 +150,7 @@ const ChannelDashboard: React.FC<{
                     .includes(search.toLowerCase()),
                 )),
         )}
+        onRevisions={setRevisionChannel}
         onViewMessages={onViewMessages}
         onDuplicate={(channel) => {
           setEditingChannel(null);
@@ -212,6 +215,13 @@ const ChannelDashboard: React.FC<{
       {/* TABLE */}
       {renderContent()}
 
+      {revisionChannel && (
+        <RevisionPanel
+          channel={revisionChannel}
+          onClose={() => setRevisionChannel(null)}
+          onChanged={() => void loadChannels()}
+        />
+      )}
       {/* FORM MODAL */}
       <ChannelForm
         isOpen={isFormOpen}

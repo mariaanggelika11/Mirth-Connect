@@ -28,6 +28,8 @@ export interface Source {
 }
 
 export interface Destination {
+  circuitState?: string;
+  circuitFailures?: number;
   id?: number;
   channel_id?: number;
   name: string;
@@ -50,6 +52,9 @@ export interface Destination {
 
 // CHANNEL ENTITY
 export interface Channel {
+  validationProfile?: Record<string, unknown>;
+  activeRevision?: number;
+  idempotencyMode?: 'OPTIONAL' | 'REQUIRED' | 'DISABLED';
   id: number;
   name: string;
   status: ChannelStatus;
@@ -67,6 +72,9 @@ export interface Channel {
 
 // CHANNEL FORM
 export interface ChannelFormData {
+  validationProfile?: Record<string, unknown>;
+  changeSummary?: string;
+  idempotencyMode?: 'OPTIONAL' | 'REQUIRED' | 'DISABLED';
   name: string;
   source: Source;
   destinations: Destination[];

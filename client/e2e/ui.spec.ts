@@ -3,14 +3,71 @@ import { test, expect } from '@playwright/test';
 // Synthetic browser fixtures. No writes to the real workspace database.
 const channel = {
   id: 1,
+  activeRevision: 1,
   name: 'Test Channel',
   status: 'STOPPED',
   source: { type: 'HTTP', endpoint: '/api/inbound/1' },
   destinations: [],
   received: 0,
 };
+test('revision review, compare and publish are permission-aware and functional', async ({
+  page,
+}) => {
+  await session(page, 'DEVELOPER');
+  await page.route('**/api/channel/1/revisions', (route) =>
+    route.fulfill({
+      json: {
+        success: true,
+        data: [
+          {
+            revision: 2,
+            state: 'DRAFT',
+            change_summary: 'Synthetic draft',
+            checksum: 'synthetic-new',
+          },
+          {
+            revision: 1,
+            state: 'PUBLISHED',
+            change_summary: 'Initial synthetic configuration',
+            checksum: 'synthetic-old',
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/channel/1/revisions/1', (route) =>
+    route.fulfill({
+      json: { success: true, data: { name: 'Before synthetic', destinations: [] } },
+    }),
+  );
+  await page.route('**/api/channel/1/revisions/2', (route) =>
+    route.fulfill({ json: { success: true, data: { name: 'After synthetic', destinations: [] } } }),
+  );
+  let publishBody: unknown;
+  await page.route('**/api/channel/1/revisions/2/publish', (route) => {
+    publishBody = route.request().postDataJSON();
+    return route.fulfill({ json: { success: true, activeRevision: 3 } });
+  });
+  await page.getByLabel('More actions for Test Channel').click();
+  await page.getByRole('button', { name: 'Revisions', exact: true }).click();
+  await expect(page.getByText('Active revision: 1.', { exact: false })).toBeVisible();
+  await page.getByLabel('Compare revision 2').check();
+  await page.getByLabel('Compare revision 1').check();
+  await page.getByRole('button', { name: 'Compare selected revisions' }).click();
+  await expect(page.locator('pre').filter({ hasText: 'Before synthetic' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeDisabled();
+  await page.getByLabel('Publish / rollback summary').fill('Synthetic reviewed activation');
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(publishBody).toEqual({
+    changeSummary: 'Synthetic reviewed activation',
+    expectedActiveRevision: 1,
+  });
+  expect(await page.evaluate(() => localStorage.getItem('authToken'))).toBeNull();
+});
 const token =
-  'eyJhbGciOiJIUzI1NiJ9.' +
+  Buffer.from(JSON.stringify({ alg: 'HS256' })).toString('base64url') +
+  '.' +
   Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url') +
   '.test-signature';
 async function session(page: Page, role: string, view: 'overview' | 'channels' = 'channels') {
@@ -18,7 +75,7 @@ async function session(page: Page, role: string, view: 'overview' | 'channels' =
   await page.route('**/ready', (r) => r.fulfill({ json: { status: 'ready' } }));
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
-    if (url.pathname === '/api/auth/login') return route.fulfill({ json: { token } });
+    if (url.pathname === '/api/auth/browser/login') return route.fulfill({ json: { token } });
     if (url.pathname === '/api/auth/me')
       return route.fulfill({ json: { success: true, data: { id: 1, name: 'Test', role } } });
     if (url.pathname === '/api/channel') return route.fulfill({ json: [channel] });
@@ -224,6 +281,7 @@ test('channel wizard prevents accidental loss and requires review before saving'
     .getByRole('button', { name: 'Cancel' })
     .click();
   await expect(page.getByText('Review your connection')).toBeVisible();
+  await page.getByLabel('Change summary').fill('Synthetic configuration review');
   await page.getByRole('button', { name: 'Save Channel' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(saves).toBe(1);
