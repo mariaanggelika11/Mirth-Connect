@@ -30,3 +30,12 @@ Navigasi memakai accessible labels/current state, skip-to-content, visible focus
 PostgreSQL tests menggunakan schema sementara `mirth_test_*` yang dibuat dan dihapus runner. Test mencakup stats/date boundary, group filters, log detail, auth/channel/delivery/logout, rollback, dedupe/concurrent retry, migration ulang dan retention. Tidak ada perubahan channel/pesan existing untuk test UI ini. Profil HL7 rumah sakit, container, load/HA dan disaster recovery tetap memerlukan qualification terpisah.
 
 Buka hasil build di `http://localhost:9000`, atau development frontend di `http://localhost:5173`. Setelah build baru, reload browser dengan Cmd+Shift+R jika halaman lama masih tersimpan.
+
+
+## V2 operator changes
+
+Edit Channel saves a draft and requires a change summary in the UI. Revisions in the channel menu opens authenticated history, sanitized configuration review, chronological compare, publish and rollback. A summary is required for activation; stale expected revision returns an actionable conflict. Source settings expose Optional/Required/Disabled idempotency and per-channel profile JSON. Review includes synthetic validation/dry-run; it never sends a network payload.
+
+Message details display accepted revision and idempotency indicator. Payload defaults to redacted; ADMIN raw toggle is audited and copy uses visible content. OUT dead-letter detail offers state/category/reason reconciliation; transport resend still has its separate confirmation. Settings lists/revokes own browser sessions and ADMIN acknowledges persistent operational alerts. Deployment-owned secret/TLS/masking/alert configuration is not exposed through dummy controls.
+
+Existing dialog focus trapping, Escape handling, focus restore, labels and screen-reader statuses are retained. Browser tests cover role visibility, unsaved edits, comparison/publish, mobile layout and text-safe payload/resend. A full automated accessibility audit and every new workflow's keyboard/mobile matrix remain NOT TESTED.

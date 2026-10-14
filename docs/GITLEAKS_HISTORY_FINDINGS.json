@@ -1,0 +1,11 @@
+{
+  "scanner": "gitleaks-8.30.1",
+  "findings": [
+    {
+      "type": "generic-api-key",
+      "file": "client/e2e/ui.spec.ts",
+      "commit": "59490b53f5cd532789b7c6832ae8f0b44844ab46",
+      "rotation": "NOT APPLICABLE \u2014 verified synthetic unsigned JWT header fixture, changed to computed header"
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+# Security policy
+
+Report vulnerabilities privately through the repository owner's approved channel or GitHub private vulnerability reporting if enabled. No contact is invented here; the owner must configure one. Do not include patient payloads, credentials, private keys or raw database dumps in public issues. Provide affected commit, synthetic reproduction and safe diagnostic codes. Rotate exposed credentials before considering historical cleanup. This custom engine has no formal HIPAA/ISO/SATUSEHAT certification claim. Production deployment requires hospital UAT, independent review and the readiness matrix.

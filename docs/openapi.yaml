@@ -1,0 +1,2440 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Mini Mirth Connect",
+    "version": "2.0.0-draft",
+    "description": "Static documentation of implemented routes. Synthetic examples only. No production readiness claim. Existing success envelopes vary by endpoint."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Liveness or database readiness",
+        "operationId": "get__health",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "security": []
+      }
+    },
+    "/api/status": {
+      "get": {
+        "summary": "Liveness or database readiness",
+        "operationId": "get__api_status",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "security": []
+      }
+    },
+    "/ready": {
+      "get": {
+        "summary": "Liveness or database readiness",
+        "operationId": "get__ready",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "security": []
+      }
+    },
+    "/metrics": {
+      "get": {
+        "summary": "Private Prometheus text exposition",
+        "operationId": "get__metrics",
+        "responses": {
+          "200": {
+            "description": "Retained SQL gauges and process counters/histograms",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "x-required-permission": "audit:read"
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "Legacy Bearer login",
+        "operationId": "post__api_auth_login",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Credentials"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "summary": "Legacy Bearer register",
+        "operationId": "post__api_auth_register",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Registration"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "summary": "Current database-backed role and account",
+        "operationId": "get__api_auth_me",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": []
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "summary": "Revoke automation Bearer token",
+        "operationId": "post__api_auth_logout",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": []
+      }
+    },
+    "/api/auth/browser/login": {
+      "post": {
+        "summary": "Short access token and HttpOnly refresh cookie",
+        "operationId": "post__api_auth_browser_login",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Credentials"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/browser/refresh": {
+      "post": {
+        "summary": "Cookie session refresh",
+        "operationId": "post__api_auth_browser_refresh",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Double-submit value from mirth_csrf cookie. Exact allowed Origin required when supplied."
+          }
+        ],
+        "security": [
+          {
+            "refreshCookie": []
+          }
+        ]
+      }
+    },
+    "/api/auth/browser/logout": {
+      "post": {
+        "summary": "Cookie session logout",
+        "operationId": "post__api_auth_browser_logout",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Double-submit value from mirth_csrf cookie. Exact allowed Origin required when supplied."
+          }
+        ],
+        "security": [
+          {
+            "refreshCookie": []
+          }
+        ]
+      }
+    },
+    "/api/auth/sessions": {
+      "get": {
+        "summary": "Own session family metadata; no token/hash values",
+        "operationId": "get__api_auth_sessions",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": []
+      }
+    },
+    "/api/channel": {
+      "get": {
+        "summary": "Published runtime channels and sanitized endpoints",
+        "operationId": "get__api_channel",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "x-required-permission": "channel:read"
+      },
+      "post": {
+        "summary": "Create stopped channel and initial published snapshot",
+        "operationId": "post__api_channel",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          },
+          "201": {
+            "description": "Created stopped channel"
+          }
+        },
+        "parameters": [],
+        "x-required-permission": "channel:write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Channel"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channel/{id}": {
+      "put": {
+        "summary": "Save encrypted draft; runtime configuration is unchanged until publish",
+        "operationId": "put__api_channel__id_",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "x-required-permission": "channel:write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Channel"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete only evidence-free legacy channel; revision history causes conflict",
+        "operationId": "delete__api_channel__id_",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "x-required-permission": "channel:delete"
+      }
+    },
+    "/api/channel/{id}/status": {
+      "put": {
+        "summary": "Start/stop/pause/error with audit",
+        "operationId": "put__api_channel__id__status",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "x-required-permission": "channel:operate",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "RUNNING",
+                      "STOPPED",
+                      "PAUSED",
+                      "ERROR"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channel/{id}/credential": {
+      "put": {
+        "summary": "Rotate per-channel source credential; plaintext shown once",
+        "operationId": "put__api_channel__id__credential",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "x-required-permission": "channel:write"
+      }
+    },
+    "/api/channel/{id}/revisions": {
+      "get": {
+        "summary": "List bounded revision metadata",
+        "operationId": "get__api_channel__id__revisions",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "x-required-permission": "channel:write"
+      }
+    },
+    "/api/channel/{id}/revisions/{revision}": {
+      "get": {
+        "summary": "Sanitized configuration for review/diff; scripts omitted",
+        "operationId": "get__api_channel__id__revisions__revision_",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "x-required-permission": "channel:write"
+      }
+    },
+    "/api/channel/{id}/revisions/{revision}/publish": {
+      "post": {
+        "summary": "Atomic publish with new activation snapshot and audit",
+        "operationId": "post__api_channel__id__revisions__revision__publish",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "x-required-permission": "channel:write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Publish"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channel/{id}/revisions/{revision}/rollback": {
+      "post": {
+        "summary": "Atomic rollback with new activation snapshot and audit",
+        "operationId": "post__api_channel__id__revisions__revision__rollback",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "x-required-permission": "channel:write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Publish"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channel/{id}/revisions/{revision}/archive": {
+      "post": {
+        "summary": "Archive an unactivated draft",
+        "operationId": "post__api_channel__id__revisions__revision__archive",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "x-required-permission": "channel:write"
+      }
+    },
+    "/api/channel/dry-run": {
+      "post": {
+        "summary": "Validate and execute source/destination scripts using synthetic payload; no network",
+        "operationId": "post__api_channel_dry_run",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "x-required-permission": "channel:write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "configuration",
+                  "payload"
+                ],
+                "properties": {
+                  "configuration": {
+                    "$ref": "#/components/schemas/Channel"
+                  },
+                  "payload": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/inbound/{channelId}": {
+      "post": {
+        "summary": "Persist source message with correlation and optional/required hashed idempotency",
+        "operationId": "post__api_inbound__channelId_",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          },
+          "202": {
+            "description": "Durably queued; delivery/retry pending"
+          },
+          "502": {
+            "description": "Persisted delivery failed/partial"
+          }
+        },
+        "parameters": [
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "Printable non-space ASCII. Scoped per channel; stored hash only. Same key with different serialized payload returns 409. During processing duplicate returns 409; completed duplicate returns existing ID/status."
+          }
+        ],
+        "security": [
+          {
+            "connectorKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            },
+            "application/hl7-v2": {
+              "schema": {
+                "type": "string"
+              }
+            },
+            "application/xml": {
+              "schema": {
+                "type": "string"
+              }
+            },
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/message/inbound/{channelId}": {
+      "post": {
+        "summary": "Persist source message with correlation and optional/required hashed idempotency",
+        "operationId": "post__api_message_inbound__channelId_",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          },
+          "202": {
+            "description": "Durably queued; delivery/retry pending"
+          },
+          "502": {
+            "description": "Persisted delivery failed/partial"
+          }
+        },
+        "parameters": [
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "Printable non-space ASCII. Scoped per channel; stored hash only. Same key with different serialized payload returns 409. During processing duplicate returns 409; completed duplicate returns existing ID/status."
+          }
+        ],
+        "x-required-permission": "inbound:send",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            },
+            "application/hl7-v2": {
+              "schema": {
+                "type": "string"
+              }
+            },
+            "application/xml": {
+              "schema": {
+                "type": "string"
+              }
+            },
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/message": {
+      "get": {
+        "summary": "Metadata-only monitor page, no payload",
+        "operationId": "get__api_message",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "IN",
+                "OUT",
+                "ALL"
+              ]
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "statusGroup",
+            "in": "query",
+            "schema": {
+              "enum": [
+                "errors",
+                "pending"
+              ]
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "dateFrom",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "dateTo",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "x-required-permission": "message:read"
+      }
+    },
+    "/api/message/stats": {
+      "get": {
+        "summary": "SQL overview counts; optional dateFrom day boundary",
+        "operationId": "get__api_message_stats",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "x-required-permission": "message:read"
+      }
+    },
+    "/api/message/{id}": {
+      "get": {
+        "summary": "Message detail; redacted payload permission and audited admin raw view",
+        "operationId": "get__api_message__id_",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "logPage",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "raw",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "true requires message:raw (ADMIN) and is audited"
+          }
+        ],
+        "x-required-permission": "message:read"
+      }
+    },
+    "/api/message/resend/{id}": {
+      "post": {
+        "summary": "Controlled resend of saved final payload/snapshot; reconcile receiver first",
+        "operationId": "post__api_message_resend__id_",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "x-required-permission": "message:resend"
+      }
+    },
+    "/api/message/{id}/reconciliation": {
+      "put": {
+        "summary": "Update dead-letter state; required note/category and audit",
+        "operationId": "put__api_message__id__reconciliation",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "x-required-permission": "message:resend",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "state",
+                  "note",
+                  "category"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "state": {
+                    "enum": [
+                      "OPEN",
+                      "ACKNOWLEDGED",
+                      "IN_REVIEW",
+                      "RESOLVED",
+                      "IGNORED"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  },
+                  "category": {
+                    "enum": [
+                      "TRANSPORT",
+                      "ACK",
+                      "SCRIPT",
+                      "CONFIGURATION",
+                      "CAPACITY",
+                      "UNKNOWN"
+                    ]
+                  },
+                  "assignedTo": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/destination/log/{messageId}": {
+      "get": {
+        "summary": "Bounded sanitized delivery history",
+        "operationId": "get__api_destination_log__messageId_",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "x-required-permission": "message:payload"
+      }
+    },
+    "/api/hl7/parse": {
+      "post": {
+        "summary": "Parse synthetic HL7 to tree",
+        "operationId": "post__api_hl7_parse",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "x-required-permission": "message:payload",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "message"
+                ],
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "maxLength": 1048576
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/upload/xml": {
+      "post": {
+        "summary": "Import legacy or formatVersion=2 channel; no entity declarations",
+        "operationId": "post__api_upload_xml",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "x-required-permission": "channel:write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users": {
+      "get": {
+        "summary": "Bounded users without password/hash",
+        "operationId": "get__api_users",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "x-required-permission": "user:manage"
+      },
+      "post": {
+        "summary": "Create role-assigned user with hashed password",
+        "operationId": "post__api_users",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "x-required-permission": "user:manage",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Registration"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "role"
+                    ],
+                    "properties": {
+                      "role": {
+                        "enum": [
+                          "ADMIN",
+                          "DEVELOPER",
+                          "OPERATOR",
+                          "VIEWER"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{id}/role": {
+      "put": {
+        "summary": "Role update with last-admin protection and audit",
+        "operationId": "put__api_users__id__role",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "x-required-permission": "user:manage",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "role": {
+                    "enum": [
+                      "ADMIN",
+                      "DEVELOPER",
+                      "OPERATOR",
+                      "VIEWER"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/audit": {
+      "get": {
+        "summary": "Metadata audit page (50 rows, page bounded)",
+        "operationId": "get__api_audit",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [],
+        "x-required-permission": "audit:read"
+      }
+    },
+    "/api/auth/sessions/{sessionId}/revoke": {
+      "post": {
+        "summary": "Revoke own session family with audit",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked"
+          },
+          "401": {
+            "description": "Bearer required"
+          },
+          "404": {
+            "description": "Family does not belong to caller"
+          }
+        }
+      }
+    },
+    "/api/alerts": {
+      "get": {
+        "summary": "ADMIN operational alert inbox, metadata only",
+        "x-required-permission": "audit:read",
+        "responses": {
+          "200": {
+            "description": "Persistent active/recovered/acknowledged alert metadata"
+          },
+          "401": {
+            "description": "Bearer required"
+          },
+          "403": {
+            "description": "ADMIN permission required"
+          }
+        }
+      }
+    },
+    "/api/alerts/{code}/acknowledge": {
+      "post": {
+        "summary": "Audited acknowledgement of active alert",
+        "x-required-permission": "audit:read",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "DEAD_LETTER",
+                "QUEUE_AGE",
+                "CHANNEL_ERROR",
+                "DATABASE_UNAVAILABLE"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Acknowledged"
+          },
+          "403": {
+            "description": "Permission required"
+          },
+          "409": {
+            "description": "Alert not active"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      },
+      "connectorKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      },
+      "refreshCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "mirth_refresh"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message"
+        ],
+        "properties": {
+          "success": {
+            "const": false
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "details": {
+            "type": "array",
+            "items": {}
+          }
+        }
+      },
+      "Credentials": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 100
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 72
+          }
+        }
+      },
+      "Publish": {
+        "type": "object",
+        "required": [
+          "expectedActiveRevision",
+          "changeSummary"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "expectedActiveRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "changeSummary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "Channel": {
+        "type": "object",
+        "required": [
+          "name",
+          "source",
+          "destinations"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 150
+          },
+          "source": {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "HTTP",
+                  "HL7"
+                ]
+              },
+              "inboundDataType": {
+                "enum": [
+                  "HL7V2",
+                  "JSON",
+                  "XML",
+                  "TEXT"
+                ]
+              }
+            }
+          },
+          "destinations": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/Destination"
+            }
+          },
+          "processingScript": {
+            "type": "string",
+            "maxLength": 65536
+          },
+          "filterScript": {
+            "type": "string",
+            "maxLength": 65536
+          },
+          "responseScript": {
+            "type": "string",
+            "maxLength": 65536
+          },
+          "idempotencyMode": {
+            "enum": [
+              "OPTIONAL",
+              "REQUIRED",
+              "DISABLED"
+            ]
+          },
+          "changeSummary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "validationProfile": {
+            "type": "object"
+          }
+        }
+      },
+      "Destination": {
+        "type": "object",
+        "required": [
+          "name",
+          "type",
+          "endpoint"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 150
+          },
+          "type": {
+            "enum": [
+              "REST",
+              "HL7",
+              "MLLP",
+              "TCP",
+              "RAW"
+            ]
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "outboundDataType": {
+            "enum": [
+              "HL7V2",
+              "JSON",
+              "XML",
+              "TEXT"
+            ]
+          },
+          "isEnabled": {
+            "type": "boolean"
+          },
+          "retryEnabled": {
+            "type": "boolean"
+          },
+          "maxRetries": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "retryIntervalSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 120000
+          }
+        }
+      },
+      "Registration": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Credentials"
+          },
+          {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 150
+              },
+              "password": {
+                "type": "string",
+                "minLength": 12,
+                "maxLength": 72
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

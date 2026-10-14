@@ -70,3 +70,27 @@ Retention uses bounded batches of resolved messages and independent audit retent
 ## Verification boundaries
 
 Automated API/channel/worker tests mock database sessions; a separate PostgreSQL adapter test verifies binding and same-client transaction behavior. REST/MLLP tests use real loopback sockets. Browser tests use explicit synthetic fixtures. `npm run test:sql` validates native PostgreSQL on a newly created `mirth_test_*` schema which is deleted afterward. Six live PostgreSQL scenarios have passed. Docker image, hospital-specific HL7 profiles, load and disaster recovery still require deployment validation.
+
+
+## V2 runtime boundaries
+
+```mermaid
+flowchart LR
+  UI[Browser: memory access token] --> Proxy[HTTPS proxy]
+  Proxy --> API[Express: JWT / live RBAC]
+  UI --> Sessions[Rotating HttpOnly refresh / CSRF]
+  Sessions --> PG[(Verified PostgreSQL TLS)]
+  API --> PG
+  Source[HTTP key / TLS MLLP] --> Reserve[Durable scoped dedupe]
+  Reserve --> Snapshot[Published source and connector snapshot]
+  Snapshot --> Sandbox[Bounded QuickJS / profile validation]
+  Sandbox --> Slots[Delivery slots / circuit / lease owner]
+  Slots --> Remote[Allowlisted destination]
+  Slots --> Retry[SQL retry / unknown-outcome dead letter]
+  API --> Draft[Encrypted draft / atomic publish / rollback]
+  Draft --> PG
+  PG --> Metrics[Private metrics / operational alerts]
+  PG --> Backup[Encrypted backup / disposable restore verification]
+```
+
+Runtime source/destination tables remain materialized for compatibility. Revisions and keyring preserve configuration history; raw credentials never enter revision diff, logs or metrics. See ADR_CHANNEL_VERSIONING for intentional update/delete behavior changes.
