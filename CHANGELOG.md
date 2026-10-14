@@ -1,5 +1,11 @@
 # Changelog
 
+## Development source cleanup — 2026-10-14
+
+- Remove the unused Modal `keepMounted` prop and backend `Direction` type.
+- Remove 20 lines of CSS declarations superseded by later rules with the same specificity; retain the effective styles.
+- Verify source import references, HTML/package entry points, maintenance commands and the dynamically loaded script worker. No unused source file was identified; retain database backups, migrations and operational tools.
+
 ## Unreleased — production hardening V2
 
 Memory-only UI access tokens and rotating HttpOnly refresh sessions; CSRF and family revocation; keyed encryption and controlled rotation; safe metadata logs and redacted/raw permission; optional scoped HTTP idempotency; encrypted channel draft/publish/rollback; channel profile/dry-run; dead-letter reconciliation; lease owner fencing; persisted circuit/concurrency controls; protected metrics and initial webhook alert; safe encrypted disposable restore tooling; CI/security/container configuration and runbooks.

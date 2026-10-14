@@ -5,7 +5,6 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: ReactNode;
-  keepMounted?: boolean;
   variant?: 'dialog' | 'drawer';
 }
 export function Modal({ isOpen, onClose, title, children, variant = 'dialog' }: ModalProps) {
