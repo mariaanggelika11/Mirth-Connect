@@ -13,7 +13,8 @@ import {
   Workflow,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { Channel, ChannelStatus } from '../../types';
+import type { Channel } from '../../types';
+import { ChannelStatus } from '../../types';
 import { updateChannelStatus } from '../../services/channel.api';
 import { StatusBadge, FlowLabel, EmptyState } from '../../components/ui/OperationalUI';
 interface Props {

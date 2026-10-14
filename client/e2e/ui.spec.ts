@@ -1,4 +1,5 @@
-import { test, expect, Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 // Synthetic browser fixtures. No writes to the real workspace database.
 const channel = {
   id: 1,

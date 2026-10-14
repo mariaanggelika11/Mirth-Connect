@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ShieldCheck, Users, History, UserRound } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { api, API_BASE_URL } from '../../services/api';
+import { API_BASE_URL } from '../../services/api';
+import {
+  fetchUsers,
+  fetchAudit,
+  createUser,
+  updateUserRole,
+  checkReadiness,
+} from '../../services/settings.api';
+import type { AuditEntry } from '../../services/settings.api';
+import type { User } from '../../types';
 import {
   PageHeading,
   EmptyState,
@@ -10,27 +19,13 @@ import {
 } from '../../components/ui/OperationalUI';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
-interface Account {
-  id: number;
-  username: string;
-  name: string;
-  role: string;
-}
-interface AuditRow {
-  id: number;
-  action: string;
-  resource_type: string;
-  resource_id: number;
-  created_at: string;
-  user_id: number | null;
-}
 const roles = ['ADMIN', 'DEVELOPER', 'OPERATOR', 'VIEWER'];
 export default function SettingsPage() {
   const { role, name, can } = useAuth();
   const [tab, setTab] = useState('account'),
     [page, setPage] = useState(1),
-    [users, setUsers] = useState<Account[]>([]),
-    [audits, setAudits] = useState<AuditRow[]>([]),
+    [users, setUsers] = useState<User[]>([]),
+    [audits, setAudits] = useState<AuditEntry[]>([]),
     [loading, setLoading] = useState(false),
     [error, setError] = useState(''),
     [ready, setReady] = useState(false);
@@ -38,19 +33,17 @@ export default function SettingsPage() {
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState('');
   const [form, setForm] = useState({ username: '', name: '', password: '', role: 'VIEWER' });
-  const [roleChange, setRoleChange] = useState<{ account: Account; role: string } | null>(null);
+  const [roleChange, setRoleChange] = useState<{ account: User; role: string } | null>(null);
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
       if (tab === 'users') {
-        const { data } = await api.get('/users', { params: { page } });
-        setUsers(data.data);
+        setUsers(await fetchUsers(page));
       } else if (tab === 'audit') {
-        const { data } = await api.get('/audit', { params: { page } });
-        setAudits(data.data);
+        setAudits(await fetchAudit(page));
       } else {
-        await api.get(API_BASE_URL + '/ready', { baseURL: '' });
+        await checkReadiness();
         setReady(true);
       }
     } catch (e) {
@@ -68,7 +61,7 @@ export default function SettingsPage() {
     setBusy(true);
     setError('');
     try {
-      await api.post('/users', form);
+      await createUser(form);
       setCreating(false);
       setForm({ username: '', name: '', password: '', role: 'VIEWER' });
       setNotice('User created successfully.');
@@ -83,7 +76,7 @@ export default function SettingsPage() {
     if (!roleChange) return;
     setBusy(true);
     try {
-      await api.put(`/users/${roleChange.account.id}/role`, { role: roleChange.role });
+      await updateUserRole(roleChange.account.id, roleChange.role);
       setRoleChange(null);
       setNotice('User role updated.');
       await load();

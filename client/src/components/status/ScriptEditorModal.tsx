@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from "react";
-import { Modal } from "../ui/Modal";
-import { Button } from "../ui/Button";
+import React, { useState, useEffect } from 'react';
+import { Modal } from '../ui/Modal';
+import { Button } from '../ui/Button';
 
-export type ScriptType = "transformer" | "template" | "response";
+export type ScriptType = 'transformer' | 'template' | 'response';
 
 interface ScriptEditorModalProps {
   isOpen: boolean;
@@ -47,7 +47,7 @@ else {
 msg = json;
 
 return msg;`,
-      info: "Convert HL7 to JSON or pass-through JSON.\nAlways return msg.",
+      info: 'Convert HL7 to JSON or pass-through JSON.\nAlways return msg.',
     },
 
     template: {
@@ -74,7 +74,7 @@ msg = {
 };
 
 return msg;`,
-      info: "Build final payload for destination.\nHL7 or JSON supported.",
+      info: 'Build final payload for destination.\nHL7 or JSON supported.',
     },
 
     response: {
@@ -90,7 +90,7 @@ if (parsed.status === "OK") {
 }
 
 return response;`,
-      info: "Handle destination response.\nNever return msg.",
+      info: 'Handle destination response.\nNever return msg.',
     },
   } as const;
 
@@ -101,8 +101,8 @@ return response;`,
       <div
         style={{
           padding: 24,
-          display: "flex",
-          flexDirection: "column",
+          display: 'flex',
+          flexDirection: 'column',
           gap: 12,
         }}
       >
@@ -116,21 +116,21 @@ return response;`,
         />
 
         <div className="card-bw" style={{ padding: 12, fontSize: 12 }}>
-          <strong style={{ display: "block", marginBottom: 4 }}>
+          <strong style={{ display: 'block', marginBottom: 4 }}>
             {scriptType.toUpperCase()} GUIDE
           </strong>
-          <pre style={{ whiteSpace: "pre-wrap" }}>{CURRENT.info}</pre>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{CURRENT.info}</pre>
         </div>
       </div>
 
       <div
         style={{
           padding: 16,
-          display: "flex",
-          justifyContent: "flex-end",
+          display: 'flex',
+          justifyContent: 'flex-end',
           gap: 12,
-          borderTop: "1px solid var(--border-main)",
-          background: "var(--bg-soft)",
+          borderTop: '1px solid var(--border-main)',
+          background: 'var(--bg-soft)',
         }}
       >
         <Button variant="secondary" onClick={onClose}>

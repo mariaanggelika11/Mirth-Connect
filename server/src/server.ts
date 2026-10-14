@@ -43,8 +43,9 @@ process.once('SIGINT', () => void shutdown());
 try {
   const pool = await getConnection();
   startupStage = 'migration';
-  const ready = (await pool.request().query('SELECT version FROM "SchemaMigrations" WHERE version=1'))
-    .recordset;
+  const ready = (
+    await pool.request().query('SELECT version FROM "SchemaMigrations" WHERE version=1')
+  ).recordset;
   if (!ready.length) throw new Error('Migration required');
   if (config.hl7.enabled) {
     startupStage = 'mllp';

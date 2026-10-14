@@ -80,7 +80,7 @@ app.get('/ready', async (_req, res) => {
 app.post(
   config.inbound.path + '/:channelId',
   validateId,
-  async (req, res, next) => {
+  async (req, _res, next) => {
     try {
       const pool = await getConnection();
       const channel = (
@@ -153,9 +153,7 @@ app.get(
       const rows = await pool
         .request()
         .input('offset', (page - 1) * 50)
-        .query(
-          'SELECT * FROM "AuditLog" ORDER BY id DESC LIMIT 50 OFFSET @offset',
-        );
+        .query('SELECT * FROM "AuditLog" ORDER BY id DESC LIMIT 50 OFFSET @offset');
       res.json({ success: true, data: rows.recordset, page });
     } catch (error) {
       next(error);

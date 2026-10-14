@@ -1,3 +1,4 @@
+import type { AddressInfo } from 'node:net';
 // Opt-in real PostgreSQL validation. Uses an isolated, newly created mirth_test_* schema.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -53,7 +54,7 @@ before(async () => {
   ).recordset[0].id;
   assert.ok(Number.isSafeInteger(userId));
   await new Promise<void>((resolve) => receiver.listen(0, '127.0.0.1', resolve));
-  port = (receiver.address() as import('node:net').AddressInfo).port;
+  port = (receiver.address() as AddressInfo).port;
 });
 let channelId: number | undefined;
 let token: string;

@@ -1,11 +1,15 @@
+import { DestinationEditor } from './DestinationEditor';
+import type { ChannelScriptEditor } from './channelDraft';
+import { newDestination, initialDraft } from './channelDraft';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, Code2, Plus, Trash2, KeyRound } from 'lucide-react';
-import { api } from '../../services/api';
+import { ArrowLeft, ArrowRight, Check, Code2, Plus, KeyRound } from 'lucide-react';
+import { rotateSourceCredential } from '../../services/channel.api';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
 import { ScriptEditorModal } from '../../components/status/ScriptEditorModal';
-import { Channel, ChannelFormData, Destination, DestinationType, DataType } from '../../types';
+import type { Channel, ChannelFormData, Destination } from '../../types';
+import { DataType } from '../../types';
 import { FlowLabel } from '../../components/ui/OperationalUI';
 interface Props {
   isOpen: boolean;
@@ -13,36 +17,6 @@ interface Props {
   onSubmit: (data: ChannelFormData) => Promise<void> | void;
   initialData?: Channel | null;
   seedData?: ChannelFormData | null;
-}
-const newDestination = (): Destination => ({
-  name: '',
-  type: DestinationType.REST,
-  endpoint: '',
-  outboundDataType: DataType.HL7V2,
-  isEnabled: true,
-  retryEnabled: false,
-  maxRetries: 3,
-  retryIntervalSeconds: 30,
-  timeoutMs: 10000,
-  processingScript: '',
-  responseScript: '',
-  templateScript: '',
-  filterScript: '',
-});
-function initialDraft(channel?: Channel | null): ChannelFormData {
-  return {
-    name: channel?.name || '',
-    source: {
-      type: channel?.source.type === 'HL7' ? 'HL7' : 'HTTP',
-      inboundDataType: channel?.source.inboundDataType || DataType.HL7V2,
-    },
-    processingScript: channel?.processingScript || '',
-    filterScript: channel?.filterScript || '',
-    responseScript: channel?.responseScript || '',
-    destinations: channel
-      ? channel.destinations.map((d) => ({ ...newDestination(), ...d }))
-      : [newDestination()],
-  };
 }
 const dataOptions = Object.values(DataType);
 export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, seedData }: Props) {
@@ -55,11 +29,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     [key, setKey] = useState(''),
     [rotating, setRotating] = useState(false),
     [confirmKey, setConfirmKey] = useState(false);
-  const [editor, setEditor] = useState<{
-    destination?: number;
-    field: 'processingScript' | 'responseScript' | 'templateScript';
-    title: string;
-  } | null>(null);
+  const [editor, setEditor] = useState<ChannelScriptEditor | null>(null);
   useEffect(() => {
     if (isOpen) {
       const value = seedData || initialDraft(initialData);
@@ -136,8 +106,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     if (!initialData) return;
     setRotating(true);
     try {
-      const { data } = await api.put(`/channel/${initialData.id}/credential`);
-      setKey(data.data.apiKey);
+      setKey(await rotateSourceCredential(initialData.id));
       setConfirmKey(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to rotate key');
@@ -331,189 +300,19 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                   <p>Destinations run in the order shown below.</p>
                 </div>
                 {draft.destinations.map((dest, index) => (
-                  <section key={dest.id ?? index} className="destination-editor">
-                    <div className="section-header">
-                      <h3>
-                        <span className="step-number">{index + 1}</span>
-                        {dest.name || 'New destination'}
-                      </h3>
-                      <button
-                        type="button"
-                        className="icon-btn danger"
-                        aria-label={`Remove destination ${index + 1}`}
-                        onClick={() =>
-                          setDraft((d) => ({
-                            ...d,
-                            destinations: d.destinations.filter((_, i) => i !== index),
-                          }))
-                        }
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                    <label className="field">
-                      <span>Destination name *</span>
-                      <input
-                        value={dest.name}
-                        maxLength={150}
-                        onChange={(e) => changeDestination(index, { name: e.target.value })}
-                      />
-                    </label>
-                    <div className="form-grid">
-                      <label className="field">
-                        <span>Connector</span>
-                        <select
-                          value={dest.type}
-                          onChange={(e) =>
-                            changeDestination(index, { type: e.target.value as DestinationType })
-                          }
-                        >
-                          {Object.values(DestinationType).map((t) => (
-                            <option key={t}>{t}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="field">
-                        <span>Outbound format</span>
-                        <select
-                          value={dest.outboundDataType}
-                          onChange={(e) =>
-                            changeDestination(index, {
-                              outboundDataType: e.target.value as DataType,
-                            })
-                          }
-                        >
-                          {dataOptions.map((t) => (
-                            <option key={t}>{t}</option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                    <label className="field">
-                      <span>Endpoint *</span>
-                      <input
-                        value={dest.endpoint}
-                        autoComplete="off"
-                        spellCheck={false}
-                        placeholder={
-                          dest.type === 'REST'
-                            ? 'https://api.example.com/messages'
-                            : 'tcp://host:2575'
-                        }
-                        onChange={(e) => changeDestination(index, { endpoint: e.target.value })}
-                      />
-                    </label>
-                    {dest.credentialConfigured && (
-                      <p className="muted">
-                        Credentials are retained for an unchanged URL. Re-enter them when changing
-                        this endpoint.
-                      </p>
-                    )}
-                    <details className="advanced-section">
-                      <summary>Advanced · scripts, retries & timeout</summary>
-                      <label className="check-field">
-                        <input
-                          type="checkbox"
-                          checked={dest.isEnabled !== false}
-                          onChange={(e) =>
-                            changeDestination(index, { isEnabled: e.target.checked })
-                          }
-                        />
-                        Destination enabled
-                      </label>
-                      <label className="check-field">
-                        <input
-                          type="checkbox"
-                          checked={!!dest.retryEnabled}
-                          onChange={(e) =>
-                            changeDestination(index, { retryEnabled: e.target.checked })
-                          }
-                        />
-                        Retry failed deliveries
-                      </label>
-                      <div className="form-grid">
-                        <label className="field">
-                          <span>Max retries</span>
-                          <input
-                            type="number"
-                            min={0}
-                            max={10}
-                            value={dest.maxRetries ?? 3}
-                            onChange={(e) =>
-                              changeDestination(index, { maxRetries: Number(e.target.value) })
-                            }
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Retry interval (seconds)</span>
-                          <input
-                            type="number"
-                            min={1}
-                            max={86400}
-                            value={dest.retryIntervalSeconds ?? 30}
-                            onChange={(e) =>
-                              changeDestination(index, {
-                                retryIntervalSeconds: Number(e.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Timeout (milliseconds)</span>
-                          <input
-                            type="number"
-                            min={100}
-                            max={120000}
-                            value={dest.timeoutMs ?? 10000}
-                            onChange={(e) =>
-                              changeDestination(index, { timeoutMs: Number(e.target.value) })
-                            }
-                          />
-                        </label>
-                      </div>
-                      <label className="field">
-                        <span>Destination filter</span>
-                        <textarea
-                          rows={4}
-                          className="code-input"
-                          value={dest.filterScript || ''}
-                          onChange={(e) =>
-                            changeDestination(index, { filterScript: e.target.value })
-                          }
-                        />
-                      </label>
-                      <div className="heading-actions">
-                        {(['processingScript', 'responseScript', 'templateScript'] as const).map(
-                          (field) => (
-                            <Button
-                              key={field}
-                              type="button"
-                              variant="secondary"
-                              onClick={() =>
-                                setEditor({
-                                  destination: index,
-                                  field,
-                                  title:
-                                    field === 'processingScript'
-                                      ? 'Destination transformer'
-                                      : field === 'responseScript'
-                                        ? 'Destination response'
-                                        : 'Destination template',
-                                })
-                              }
-                            >
-                              <Code2 size={14} />
-                              {field === 'processingScript'
-                                ? 'Transformer'
-                                : field === 'responseScript'
-                                  ? 'Response'
-                                  : 'Template'}
-                            </Button>
-                          ),
-                        )}
-                      </div>
-                    </details>
-                  </section>
+                  <DestinationEditor
+                    key={dest.id ?? index}
+                    dest={dest}
+                    index={index}
+                    onChange={(values) => changeDestination(index, values)}
+                    onRemove={() =>
+                      setDraft((d) => ({
+                        ...d,
+                        destinations: d.destinations.filter((_, i) => i !== index),
+                      }))
+                    }
+                    onEditScript={setEditor}
+                  />
                 ))}
                 {!draft.destinations.length && (
                   <p className="muted">

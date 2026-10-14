@@ -31,7 +31,7 @@ try {
         .input('name', data.name)
         .input('hash', hash)
         .query(
-          "INSERT INTO \"Users\"(username,name,password_hash,role) VALUES(@username,@name,@hash,'ADMIN') RETURNING id",
+          'INSERT INTO "Users"(username,name,password_hash,role) VALUES(@username,@name,@hash,\'ADMIN\') RETURNING id',
         )
     ).recordset[0].id;
     await tx

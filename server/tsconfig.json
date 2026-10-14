@@ -12,16 +12,10 @@
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
     "noImplicitAny": true,
-    "baseUrl": "./src",
-    "paths": {
-      "@config/*": ["config/*"],
-      "@routes/*": ["routes/*"],
-      "@services/*": ["services/*"],
-      "@middleware/*": ["middleware/*"],
-      "@utils/*": ["utils/*"]
-    },
     "typeRoots": ["../node_modules/@types", "./src/types"],
-    "sourceMap": true
+    "sourceMap": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

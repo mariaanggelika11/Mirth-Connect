@@ -26,7 +26,7 @@ export async function startHl7Listener(): Promise<net.Server> {
     let count = 0;
     socket.on('data', (chunk) => {
       try {
-        const messages = decoder.push(typeof chunk==='string'?Buffer.from(chunk):chunk);
+        const messages = decoder.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
         if (count + messages.length > 100) {
           socket.destroy();
           return;

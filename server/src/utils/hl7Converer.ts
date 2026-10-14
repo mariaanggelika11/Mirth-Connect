@@ -66,39 +66,49 @@ export function jsonToHl7(input: unknown): string {
     throw new AppError(400, 'INVALID_HL7_OBJECT', 'HL7 object required');
   const obj = input as Record<string, unknown>;
   const msh = obj.MSH as Record<string, unknown>;
+  if (!msh || typeof msh !== 'object' || Array.isArray(msh))
+    throw new AppError(400, 'INVALID_HL7_OBJECT', 'Exactly one MSH object required');
+  if (
+    (msh['1'] !== undefined && typeof msh['1'] !== 'string') ||
+    (msh['2'] !== undefined && typeof msh['2'] !== 'string')
+  )
+    throw new AppError(400, 'INVALID_HL7_DELIMITERS', 'Invalid HL7 delimiters');
   const f = typeof msh?.['1'] === 'string' ? msh['1'] : '|';
   const enc = typeof msh?.['2'] === 'string' ? msh['2'] : '^~\\&';
+  if (f.length !== 1 || enc.length !== 4)
+    throw new AppError(400, 'INVALID_HL7_DELIMITERS', 'Invalid HL7 delimiters');
+  const d = delimiters('MSH' + f + enc);
   const segments: string[] = [];
-  for (const [name, value] of Object.entries(obj)) {
+  // MSH is always first; preserve the caller's ordering for all other segments.
+  const ordered: [string, unknown][] = [
+    ['MSH', msh],
+    ...Object.entries(obj).filter(([name]) => name !== 'MSH'),
+  ];
+  for (const [name, value] of ordered) {
     if (!/^[A-Z0-9]{3}$/.test(name))
       throw new AppError(400, 'INVALID_HL7_OBJECT', 'Invalid segment name');
     for (const fields of Array.isArray(value) ? value : [value]) {
-      if (!fields || typeof fields !== 'object')
+      if (!fields || typeof fields !== 'object' || Array.isArray(fields))
         throw new AppError(400, 'INVALID_HL7_OBJECT', 'Invalid segment fields');
       const rec = fields as Record<string, unknown>;
       const indexes = Object.keys(rec).map(Number);
-      if (indexes.some((n) => !Number.isInteger(n) || n < 1 || n > 1000))
+      if (
+        Object.keys(rec).some((key) => !/^[1-9]\d*$/.test(key)) ||
+        indexes.some((n) => !Number.isInteger(n) || n < 1 || n > 1000)
+      )
         throw new AppError(400, 'INVALID_HL7_OBJECT', 'Invalid field index');
       const max = Math.max(0, ...indexes);
       const values: string[] = [];
       for (let n = name === 'MSH' ? 2 : 1; n <= max; n++) {
         const v = rec[String(n)];
-        values.push(
-          name === 'MSH' && n <= 2
-            ? String(v ?? '')
-            : buildField(v, {
-                field: f,
-                component: enc[0],
-                repetition: enc[1],
-                escape: enc[2],
-                subcomponent: enc[3],
-              }),
-        );
+        values.push(name === 'MSH' && n <= 2 ? enc : buildField(v, d));
       }
       segments.push(name + f + values.join(f));
     }
   }
-  return segments.join('\r') + '\r';
+  const raw = segments.join('\r') + '\r';
+  parseSegments(raw);
+  return raw;
 }
 export function buildAck(raw: string, code: 'AA' | 'AE' | 'AR', reason = ''): string {
   let d: Delimiters = {

@@ -1,199 +1,18 @@
+import { serialize, convertPayload } from './engine/conversion.js';
+import { attempt } from './engine/delivery.js';
+import { recordAttempt, updateAggregate } from './engine/repository.js';
+export { finalStatus, retryDecision } from './engine/policy.js';
+export { updateAggregate } from './engine/repository.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { getConnection, withTransaction } from '../config/db.js';
 import { executeScript } from './script.services.js';
-import { jsonToHl7, hl7ToJson, parseSegments } from '../utils/hl7Converer.js';
-import { Builder, parseStringPromise } from 'xml2js';
-import { sendRest, sendTcp } from '../utils/transport.js';
+import { hl7ToJson, parseSegments } from '../utils/hl7Converer.js';
 import { AppError, safeError } from '../utils/errors.js';
 import { encrypt, decrypt } from '../utils/secrets.js';
 import { logger } from '../utils/logger.js';
 import type { Destination } from '../models/Destination.js';
 import type { Channel } from '../models/Channel.js';
-import type { StoredMessage, InboundStatus, OutboundStatus } from '../models/Message.js';
-export function finalStatus(statuses: string[]): InboundStatus {
-  if (!statuses.length) return 'RECEIVED';
-  if (statuses.every((s) => s === 'FILTERED')) return 'FILTERED';
-  if (statuses.some((s) => ['PROCESSING', 'QUEUED', 'RETRYING'].includes(s))) return 'QUEUED';
-  const sent = statuses.filter((s) => s === 'OUT-SENT').length;
-  const failed = statuses.filter((s) => ['OUT-ERROR', 'DEAD_LETTER'].includes(s)).length;
-  return failed === 0 ? 'SUCCESS' : sent > 0 ? 'PARTIAL' : 'FAILED';
-}
-export function retryDecision(
-  dest: Pick<Destination, 'retry_enabled' | 'max_retries' | 'retry_interval_seconds'>,
-  retryCount: number,
-) {
-  return dest.retry_enabled && retryCount < dest.max_retries
-    ? {
-        status: 'QUEUED' as OutboundStatus,
-        delay: Math.min(86400, dest.retry_interval_seconds * 2 ** retryCount),
-      }
-    : {
-        status: dest.retry_enabled
-          ? ('DEAD_LETTER' as OutboundStatus)
-          : ('OUT-ERROR' as OutboundStatus),
-        delay: null,
-      };
-}
-function serialize(value: unknown) {
-  return JSON.stringify(value ?? null);
-}
-async function convert(value: unknown, type: string): Promise<unknown> {
-  if (type === 'HL7V2') {
-    const raw = typeof value === 'string' ? value : jsonToHl7(value);
-    parseSegments(raw);
-    return raw;
-  }
-  if (type === 'JSON') {
-    if (typeof value !== 'string') return value;
-    if (value.startsWith('MSH')) return hl7ToJson(value);
-    if (value.trim().startsWith('<')) return parseStringPromise(value, { explicitArray: false });
-    try {
-      return JSON.parse(value);
-    } catch {
-      return { raw: value };
-    }
-  }
-  if (type === 'XML')
-    return typeof value === 'string' && value.trim().startsWith('<')
-      ? value
-      : new Builder({ headless: true }).buildObject(
-          typeof value === 'string' ? { raw: value } : value,
-        );
-  return typeof value === 'string' ? value : serialize(value);
-}
-async function deliver(
-  dest: Destination,
-  payload: unknown,
-  channelId: number,
-  correlationId: string,
-): Promise<string> {
-  const body = typeof payload === 'string' ? payload : serialize(payload);
-  const response =
-    dest.type === 'REST'
-      ? await sendRest(
-          dest.endpoint,
-          body,
-          {
-            'Content-Type':
-              dest.outbound_data_type === 'HL7V2'
-                ? 'application/hl7-v2'
-                : dest.outbound_data_type === 'XML'
-                  ? 'application/xml'
-                  : 'application/json',
-            'x-channel-id': String(channelId),
-            'x-destination-id': String(dest.id),
-            'x-correlation-id': correlationId,
-            'Idempotency-Key': correlationId + ':' + dest.id,
-          },
-          dest.timeout_ms,
-        )
-      : await sendTcp(dest.endpoint, body, ['HL7', 'MLLP'].includes(dest.type), dest.timeout_ms);
-  return dest.response_script?.trim()
-    ? String(await executeScript(dest.response_script, { msg: payload, response }, 'response'))
-    : response;
-}
-async function recordAttempt(
-  message: StoredMessage,
-  dest: Destination,
-  status: OutboundStatus,
-  response: string,
-  error: string | null,
-  delay: number | null,
-  retryCount: number,
-) {
-  await withTransaction(async (tx) => {
-    await tx
-      .request()
-      .input('id', message.id)
-      .input('status', status)
-      .input('error', error)
-      .input('delay', delay)
-      .input('count', retryCount)
-      .query(
-        `UPDATE "Messages" SET status=@status,last_error=@error,retry_count=@count,last_retry_at=CASE WHEN @count>0 THEN CURRENT_TIMESTAMP ELSE last_retry_at END,next_retry_at=CASE WHEN @delay::double precision IS NULL THEN NULL ELSE (CURRENT_TIMESTAMP + (@delay)::double precision * INTERVAL \'1 second\') END,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=@id`,
-      );
-    const ackCode = error?.startsWith('HL7_NACK_')
-      ? error.slice(-2)
-      : dest.type === 'HL7' || dest.type === 'MLLP'
-        ? status === 'OUT-SENT'
-          ? 'AA'
-          : null
-        : null;
-    let controlId: string | null = null;
-    try {
-      controlId = parseSegments(JSON.parse(message.transformed_payload)).segments[0].fields[10];
-    } catch {
-      /* not HL7 */
-    }
-    await tx
-      .request()
-      .input('id', message.id)
-      .input('dest', dest.id)
-      .input('status', status === 'QUEUED' || status === 'DEAD_LETTER' ? 'OUT-ERROR' : status)
-      .input('response', response)
-      .input('request', message.original_payload)
-      .input('outbound', message.transformed_payload)
-      .input('ack', ackCode)
-      .input('control', controlId)
-      .query(
-        `INSERT INTO "MessageDestinationLog"(message_id,destination_id,status,response_text,request_data,outbound_data,ack_code,message_control_id,sent_at) VALUES(@id,@dest,@status,@response,@request,@outbound,@ack,@control,CURRENT_TIMESTAMP)`,
-      );
-  });
-  logger.info(
-    {
-      messageId: message.id,
-      channelId: message.channel_id,
-      destinationId: dest.id,
-      status,
-      errorCode: error,
-    },
-    'Destination attempt completed',
-  );
-}
-async function attempt(message: StoredMessage, dest: Destination, retryCount: number) {
-  let response = '',
-    status: OutboundStatus = 'OUT-SENT',
-    error: string | null = null,
-    delay: number | null = null;
-  try {
-    response = await deliver(
-      dest,
-      JSON.parse(message.transformed_payload),
-      message.channel_id,
-      message.correlation_id,
-    );
-  } catch (e) {
-    error = safeError(e);
-    response = error;
-    const decision = retryDecision(dest, retryCount);
-    status = decision.status;
-    delay = decision.delay;
-  }
-  // Persisting the delivery result is mandatory: DB failure propagates instead of emitting a false ACK.
-  await recordAttempt(message, dest, status, response, error, delay, retryCount);
-  return {
-    destinationId: dest.id,
-    destinationName: dest.name,
-    outboundMessageId: message.id,
-    status,
-  };
-}
-export async function updateAggregate(inboundId: number) {
-  const pool = await getConnection();
-  const rows = (
-    await pool
-      .request()
-      .input('id', inboundId)
-      .query(`SELECT status FROM "Messages" WHERE inbound_message_id=@id AND direction='OUT'`)
-  ).recordset;
-  const status = finalStatus(rows.map((r) => r.status));
-  await pool
-    .request()
-    .input('id', inboundId)
-    .input('status', status)
-    .query('UPDATE "Messages" SET status=@status,updated_at=CURRENT_TIMESTAMP WHERE id=@id');
-  return status;
-}
+import type { StoredMessage } from '../models/Message.js';
 export async function processInboundMessage(
   channelId: number,
   payload: unknown,
@@ -357,7 +176,7 @@ export async function processInboundMessage(
           outbound = await executeScript(dest.processing_script, { msg: outbound });
         if (dest.template_script?.trim())
           outbound = await executeScript(dest.template_script, { msg: outbound });
-        outbound = await convert(outbound, dest.outbound_data_type);
+        outbound = await convertPayload(outbound, dest.outbound_data_type);
       } catch (error) {
         await recordAttempt(
           message,

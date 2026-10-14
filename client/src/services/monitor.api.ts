@@ -1,5 +1,5 @@
 import { api } from './api';
-import { MonitorStats } from '../types';
+import type { MonitorStats } from '../types';
 
 export const fetchMonitorStats = async (): Promise<MonitorStats> => {
   const today = new Date();

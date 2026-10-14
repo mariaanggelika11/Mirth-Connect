@@ -1,4 +1,4 @@
-import { ErrorRequestHandler } from 'express';
+import type { ErrorRequestHandler } from 'express';
 import { AppError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
@@ -20,17 +20,15 @@ export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
           : 'INTERNAL_ERROR';
   logger.error({ requestId: req.requestId, code }, 'Request failed');
   if (!res.headersSent)
-    res
-      .status(status)
-      .json({
-        success: false,
-        code,
-        message:
-          error instanceof AppError
-            ? error.message
-            : status === 500
-              ? 'Internal server error'
-              : 'Invalid request body',
-        requestId: req.requestId,
-      });
+    res.status(status).json({
+      success: false,
+      code,
+      message:
+        error instanceof AppError
+          ? error.message
+          : status === 500
+            ? 'Internal server error'
+            : 'Invalid request body',
+      requestId: req.requestId,
+    });
 };

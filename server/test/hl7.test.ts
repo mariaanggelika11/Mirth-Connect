@@ -12,6 +12,47 @@ import { decodeEscapes } from '../src/utils/hl7Fields.js';
 import { sample } from './fixtures.js';
 
 describe('HL7 interoperability', () => {
+  const msh = { '9': { '1': 'ADT', '2': 'A01' }, '10': 'JSON001', '11': 'P', '12': '2.5' };
+  it('places MSH first and supplies default delimiters without mutating JSON', () => {
+    const input = { PID: { '3': 'RM001' }, MSH: msh };
+    const raw = jsonToHl7(input);
+    expect(raw.startsWith('MSH|^~\\&|')).toBe(true);
+    expect(parseSegments(raw).segments.map((s) => s.name)).toEqual(['MSH', 'PID']);
+    expect(input.MSH).toEqual(msh);
+    expect(input.MSH).not.toHaveProperty('1');
+  });
+  it('escapes ordinary delimiters and prevents newline segment injection', () => {
+    const raw = jsonToHl7({ MSH: msh, PID: { '5': 'Budi|Santoso^A~B&C\\folder\rOBX|1\n' } });
+    const parsed = parseSegments(raw);
+    expect(parsed.segments.map((s) => s.name)).toEqual(['MSH', 'PID']);
+    expect(parsed.segments[1].fields[5]).toBe(
+      'Budi\\F\\Santoso\\S\\A\\R\\B\\T\\C\\E\\folder\\X0D\\OBX\\F\\1\\X0A\\',
+    );
+    expect(parsed.segments[1].fields).toHaveLength(6);
+  });
+  it('escapes component values while preserving existing encoded values', () => {
+    const raw = jsonToHl7({ MSH: msh, PID: { '5': { '1': 'A^B', '2': 'C\\F\\D' } } });
+    expect(hl7ToJson(raw).PID).toMatchObject({ '5': { '1': 'A\\S\\B', '2': 'C\\F\\D' } });
+  });
+  it('escapes using custom delimiters', () => {
+    const raw = jsonToHl7({
+      MSH: { ...msh, '1': '!', '2': '$%?@' },
+      PID: { '5': 'A!B$C%D@E?path' },
+    });
+    expect(parseSegments(raw).segments[1].fields[5]).toBe('A?F?B?S?C?R?D?T?E?E?path');
+  });
+  for (const invalid of [
+    {},
+    { MSH: [msh] },
+    { MSH: { ...msh, '1': '||' } },
+    { MSH: { ...msh, '2': '^^^^' } },
+    { MSH: { ...msh, '10': '' } },
+    { MSH: msh, PID: { '01': 'bad' } },
+    { MSH: msh, PID: [[{ '1': 'bad' }]] },
+  ])
+    it('rejects invalid JSON structure ' + JSON.stringify(invalid), () => {
+      expect(() => jsonToHl7(invalid)).toThrow();
+    });
   it('parses repetitions and subcomponents and explicitly decodes escapes', () => {
     const obj = hl7ToJson(sample);
     expect((obj.OBX as Record<string, unknown>[])[0]['5']).toEqual([

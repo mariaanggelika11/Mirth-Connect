@@ -1,6 +1,6 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import { getQuickJS } from 'quickjs-emscripten';
-import { parseField, buildField } from '../utils/hl7Fields.js';
+import { parseField, buildField, escapeField } from '../utils/hl7Fields.js';
 import { delimiters, parseSegments, hl7ToJson, jsonToHl7 } from '../utils/hl7Converer.js';
 async function run() {
   const { script, context, resultVariable, timeout, memoryMb } = workerData;
@@ -13,7 +13,7 @@ async function run() {
   const vm = runtime.newContext();
   try {
     // Only JSON values cross the boundary. Helpers execute INSIDE QuickJS, with no host callbacks.
-    const helpers = `class AppError extends Error { constructor(status, code, message) { super(code); } }\n${parseField.toString()}\n${buildField.toString()}\n${delimiters.toString()}\n${parseSegments.toString()}\n${hl7ToJson.toString()}\n${jsonToHl7.toString()}`;
+    const helpers = `class AppError extends Error { constructor(status, code, message) { super(code); } }\n${parseField.toString()}\n${escapeField.toString()}\n${buildField.toString()}\n${delimiters.toString()}\n${parseSegments.toString()}\n${hl7ToJson.toString()}\n${jsonToHl7.toString()}`;
     const vars = Object.entries(context as Record<string, unknown>)
       .map(([k, v]) => `var ${k}=JSON.parse(${JSON.stringify(JSON.stringify(v ?? null))});`)
       .join('\n');

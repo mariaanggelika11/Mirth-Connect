@@ -19,7 +19,7 @@ router.use(
 );
 router.post(
   '/register',
-  (req, _res, next) =>
+  (_req, _res, next) =>
     config.auth.publicRegistration
       ? next()
       : next(new AppError(403, 'REGISTRATION_DISABLED', 'Public registration is disabled')),

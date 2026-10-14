@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, SlidersHorizontal, X, ArrowRight } from 'lucide-react';
 import { fetchChannels } from '../../services/channel.api';
 import { fetchLogPage, fetchLogDetail } from '../../services/message.api';
-import { LogEntry, Channel } from '../../types';
+import type { LogEntry, Channel } from '../../types';
 import { Button } from '../../components/ui/Button';
 import {
   EmptyState,

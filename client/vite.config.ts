@@ -1,7 +1,6 @@
 import { defineConfig, loadEnv } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import path from 'path';
 
 export default defineConfig(({ mode }) => {
   // Load environment variables sesuai mode (development / production)
@@ -19,11 +18,6 @@ export default defineConfig(({ mode }) => {
       outDir: '../server/public', // hasil build langsung ke server/public
       emptyOutDir: true,
       sourcemap: false,
-    },
-    resolve: {
-      alias: {
-        '@': path.resolve(__dirname, './src'),
-      },
     },
     server: {
       port: Number(env.VITE_PORT) || 5173, // bisa ubah port lewat .env

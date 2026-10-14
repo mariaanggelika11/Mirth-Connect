@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RequestHandler } from 'express';
+import type { RequestHandler } from 'express';
 import { AppError } from './errors.js';
 const script = z.string().max(65536).default('');
 const dataType = z.enum(['HL7V2', 'JSON', 'XML', 'TEXT']);
@@ -10,7 +10,11 @@ export const credentials = z.object({
     .min(3)
     .max(100)
     .regex(/^[a-zA-Z0-9_.@-]+$/),
-  password: z.string().min(1).max(72).refine(v=>Buffer.byteLength(v)<=72,'Password exceeds bcrypt byte limit'),
+  password: z
+    .string()
+    .min(1)
+    .max(72)
+    .refine((v) => Buffer.byteLength(v) <= 72, 'Password exceeds bcrypt byte limit'),
 });
 export const registration = credentials
   .extend({

@@ -7,7 +7,7 @@ import {
   deleteChannel,
 } from '../../services/channel.api';
 import { uploadXmlConfig } from '../../services/upload.api';
-import { Channel, ChannelFormData } from '../../types';
+import type { Channel, ChannelFormData } from '../../types';
 
 import ChannelTable from './ChannelTable';
 import { channelConfiguration } from '../../services/channel.config';

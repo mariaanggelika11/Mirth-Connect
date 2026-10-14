@@ -88,6 +88,16 @@ describe('QuickJS isolated script execution', () => {
   });
   it('provides HL7 helpers inside sandbox', async () =>
     expect(await executeScript("return hl7ToJson(msg).MSH['10']", { msg: sample })).toBe('ID123'));
+  it('converts JSON safely inside the isolated transformer', async () => {
+    const raw = await executeScript('return jsonToHl7(msg)', {
+      msg: {
+        PID: { '5': 'A|B\rOBX|1' },
+        MSH: { '9': { '1': 'ADT', '2': 'A01' }, '10': 'SANDBOX001', '11': 'P', '12': '2.5' },
+      },
+    });
+    expect(raw).toContain('MSH|^~\\&|');
+    expect(raw).toContain('A\\F\\B\\X0D\\OBX\\F\\1');
+  });
   it('accepts/rejects filters', async () => {
     expect(await executeScript('return true', { msg: {} }, 'true')).toBe(true);
     expect(await executeScript('return false', { msg: {} }, 'true')).toBe(false);

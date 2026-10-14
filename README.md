@@ -128,6 +128,10 @@ REST destination mempunyai timeout dan limit response, tanpa redirect/proxy envi
 
 ## HL7 / MLLP integration
 
+JSON → HL7: pilih HTTP source dengan inbound JSON dan destination dengan outbound HL7V2. Objek harus berisi satu `MSH` dengan field `9`, `10`, `11`, `12`; `MSH.1` dan `MSH.2` default ke `|` dan `^~\&`. Converter menempatkan MSH pertama, mempertahankan urutan segmen lain, dan menolak struktur yang tidak valid sebelum delivery. Ini validasi dasar, bukan validasi profil rumah sakit.
+
+Nilai string dianggap teks: `A|B` menjadi `A\F\B`; kontrol/baris baru menjadi escape hex sehingga tidak membuat segmen tambahan. Komponen gunakan objek numerik (contoh `"9": {"1": "ADT", "2": "A01"}`), repetisi gunakan array. String `"ADT^A01"` bukan pengganti objek komponen. Escape HL7 yang sudah valid dipertahankan untuk round trip; untuk teks literal `\F\`, gunakan `\E\F\E\`. JSON bisnis seperti `{"nama":"Budi"}` tetap perlu transformer untuk memetakan field ke segmen.
+
 Source HL7 menggunakan listener bersama dan IP allowlist. Filter routing menerima object `msg` hasil parser. Tepat satu channel RUNNING harus cocok; tanpa filter berarti channel tersebut menerima semua. Dua channel cocok menghasilkan AR untuk mencegah duplikasi tak disengaja.
 
 Pesan contoh, separator sebenarnya `CR` (`\r`):

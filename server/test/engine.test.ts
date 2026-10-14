@@ -131,6 +131,30 @@ describe('Engine aggregation and durable retry policy', () => {
     expect(mock.send).toHaveBeenCalledWith(dest.endpoint, '{"data":1}', expect.any(Object), 1000);
     expect(mock.script).not.toHaveBeenCalled();
   });
+  it('converts incoming JSON to escaped HL7 before delivery', async () => {
+    const hl7Dest = { ...dest, outbound_data_type: 'HL7V2' };
+    mock.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT * FROM "Channels"')) return { recordset: [channel] };
+      if (sql.includes('INSERT INTO "Messages"') && sql.includes("'IN'"))
+        return { recordset: [{ id: 4 }] };
+      if (sql.includes('SELECT * FROM "Destinations"')) return { recordset: [hl7Dest] };
+      if (sql.includes('RETURNING *')) return { recordset: [{ ...row, status: 'PROCESSING' }] };
+      if (sql.includes('SELECT status FROM "Messages"'))
+        return { recordset: [{ status: 'OUT-SENT' }] };
+      return { recordset: [] };
+    });
+    const result = await processInboundMessage(1, {
+      PID: { '5': 'Budi|Santoso\rOBX|1' },
+      MSH: { '9': { '1': 'ADT', '2': 'A01' }, '10': 'DELIVERY001', '11': 'P', '12': '2.5' },
+    });
+    expect(result.inboundStatus).toBe('SUCCESS');
+    expect(mock.send).toHaveBeenCalledWith(
+      dest.endpoint,
+      expect.stringContaining('PID|||||Budi\\F\\Santoso\\X0D\\OBX\\F\\1\r'),
+      expect.objectContaining({ 'Content-Type': 'application/hl7-v2' }),
+      1000,
+    );
+  });
   it('retry failure becomes dead letter after max retries', async () => {
     mock.send.mockRejectedValue(new Error('patient data should be private'));
     await processRetry({ ...row, retry_count: 2 });

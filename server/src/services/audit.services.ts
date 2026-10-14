@@ -1,4 +1,4 @@
-import { Request } from 'express';
+import type { Request } from 'express';
 import type { DatabaseTransaction } from '../config/db.js';
 import { getConnection } from '../config/db.js';
 export async function audit(

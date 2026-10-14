@@ -1,4 +1,5 @@
-import { Channel, ChannelFormData, DataType } from '../types';
+import type { Channel, ChannelFormData } from '../types';
+import { DataType } from '../types';
 export function channelConfiguration(channel: Channel): ChannelFormData {
   return {
     name: channel.name,

@@ -29,6 +29,16 @@ flowchart TD
   RETRY --> DL[Dead letter / operator reconciliation]
 ```
 
+## Code organization and contribution rules
+
+`services/messageProcessor.services.ts` coordinates inbound processing and preserves the existing public entry points. Its `engine/` modules separate pure retry/status rules (`policy.ts`), format conversion (`conversion.ts`), delivery and response scripts (`delivery.ts`), and transactional attempt persistence (`repository.ts`). Network delivery remains outside database transactions. The worker imports the same public entry points.
+
+Monitor HTTP handlers stay in `services/message.services.ts`; `monitor/query.ts` validates filters, `monitor/repository.ts` contains PostgreSQL reads, and `monitor/mapping.ts` controls response and payload projection. Payload authorization and audit remain in the HTTP handler. Repository modules do not depend on Express request/response objects.
+
+Frontend domain types have one definition in `client/src/types/`, exported through the existing `types.ts` entry point. API calls belong in `services/`; page components own UI state. The channel wizard delegates destination fields to `DestinationEditor` and draft defaults to `channelDraft`; message details delegate payload rendering to `PayloadViewer`. Add new connector or conversion behavior to the corresponding engine module instead of enlarging page components or orchestration code.
+
+Use TypeScript strict checking, separate `import type` statements, and explicit `_` prefixes for intentionally unused handler parameters. Unused variables/parameters and explicit `any` fail checks. Prettier supplies the repository's formatting rules. Run `npm run format` for formatting, and `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`, `npm run build`, and `npm run test:e2e` before submitting changes. Real PostgreSQL verification uses only a newly created `mirth_test_*` schema via `npm run test:sql`.
+
 ## Message reliability
 
 Receive checks current RUNNING state. Persist inbound before source validation. HL7 sender application/facility/control ID is deduplicated per channel via a unique partial PostgreSQL index and transaction-scoped advisory lock. Reserve all destination records before transport side effects. Source and destination failures remain visible in SQL.

@@ -1,5 +1,6 @@
 import { parseSegments } from '../utils/hl7Converer.js';
-import { parseField, FieldValue } from '../utils/hl7Fields.js';
+import type { FieldValue } from '../utils/hl7Fields.js';
+import { parseField } from '../utils/hl7Fields.js';
 export interface HL7Node {
   id: string;
   name: string;
