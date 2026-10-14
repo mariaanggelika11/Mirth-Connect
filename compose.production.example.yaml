@@ -1,0 +1,72 @@
+# Review placeholders and network/TLS policy before use. Keep compose.yaml for development.
+services:
+  engine:
+    build: .
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      ENV_FILE: /run/secrets/runtime_env
+      HOST: 0.0.0.0
+      HL7_ENABLED: 'false'
+      PG_SSL: 'true'
+      PG_SSL_REJECT_UNAUTHORIZED: 'true'
+      PG_SSL_CA_FILE: /run/certificates/postgres-ca.pem
+      TRUST_PROXY: 172.29.0.2/32
+    secrets: [runtime_env]
+    volumes:
+      - ./certificates/postgres-ca.pem:/run/certificates/postgres-ca.pem:ro
+    expose: ['9000']
+    networks: [internal]
+    init: true
+    read_only: true
+    tmpfs: ['/tmp:size=64m,noexec,nosuid']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 512m
+    cpus: 2
+    pids_limit: 128
+    stop_grace_period: 40s
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:9000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+  proxy:
+    image: nginxinc/nginx-unprivileged:stable-alpine
+    restart: unless-stopped
+    ports: ['443:8443']
+    read_only: true
+    tmpfs: ['/tmp:size=32m,noexec,nosuid']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certificates:/run/certificates:ro
+    networks:
+      internal:
+        ipv4_address: 172.29.0.2
+    depends_on:
+      engine:
+        condition: service_healthy
+networks:
+  internal:
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+
+secrets:
+  runtime_env:
+    file: .env.production

@@ -1,0 +1,14 @@
+name: Bug report
+description: Report a reproducible fault with synthetic data
+body:
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps, expected result, actual result
+      description: Use synthetic payloads. Do not include credentials or patient data.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit and runtime version

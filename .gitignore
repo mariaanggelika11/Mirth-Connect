@@ -101,3 +101,11 @@ server/public/
 
 playwright-report/
 test-results/
+
+backups/
+*.dump
+*.dump.enc
+*.p12
+*.pfx
+*.pgpass
+*.age

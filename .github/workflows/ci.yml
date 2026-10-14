@@ -1,0 +1,72 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: synthetic
+          POSTGRES_PASSWORD: synthetic-ci-only
+          POSTGRES_DB: mirth_disposable_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://synthetic:synthetic-ci-only@127.0.0.1:5432/mirth_disposable_ci
+      PG_SSL: 'false'
+      PG_SCHEMA: public
+      JWT_SECRET: synthetic-ci-only-jwt-key-at-least-32-characters
+      CONFIG_ENCRYPTION_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      INBOUND_API_KEY: synthetic-ci-only-source-key-32-characters
+      OUTBOUND_ALLOWED_HOSTS: localhost,127.0.0.1
+      HL7_ENABLED: 'false'
+      LOG_LEVEL: silent
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run test:coverage
+      - run: npm run build
+      - run: npm run db:migrate -- --dry-run
+      - run: npm run db:migrate
+      - run: npm run db:migrate
+      - name: Actual startup and active SIGTERM smoke on a separate disposable database
+        run: |
+          node --input-type=module -e "import pg from 'pg'; const c=new pg.Client({connectionString:process.env.DATABASE_URL}); await c.connect(); await c.query('CREATE DATABASE mirth_disposable_runtime_ci'); await c.end();"
+          npm run test:runtime
+        env:
+          TEST_DATABASE_URL: postgresql://synthetic:synthetic-ci-only@127.0.0.1:5432/mirth_disposable_runtime_ci
+      - run: npm run test:sql
+        env:
+          PG_SCHEMA: mirth_test_ci
+      - name: Disposable backup/restore drill
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client-16
+          npm run test:backup
+        env:
+          TEST_DATABASE_URL: postgresql://synthetic:synthetic-ci-only@127.0.0.1:5432/mirth_disposable_ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: node scripts/secret-scan.mjs
+      - run: npm audit --audit-level=high
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: synthetic-test-reports
+          path: |
+            coverage/
+            playwright-report/
+          retention-days: 7

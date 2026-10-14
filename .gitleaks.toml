@@ -1,0 +1,12 @@
+[extend]
+useDefault = true
+
+# Synthetic CI/test fixture values only. Never allowlist .env, arbitrary paths or real key families.
+[[allowlists]]
+description = "Explicit non-production synthetic fixtures"
+regexTarget = "secret"
+regexes = [
+  '^synthetic-(ci-only|runtime-only|disposable|password|fixture)',
+  '^test-only-',
+  '^a{64}$',
+]

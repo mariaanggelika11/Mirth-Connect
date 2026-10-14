@@ -1,13 +1,13 @@
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY client/package.json client/package.json
 COPY server/package.json server/package.json
 RUN npm ci
 COPY . .
-RUN npm run build && npm prune --omit=dev
+RUN npm run build && npm prune --omit=dev && mkdir -p server/node_modules
 
-FROM node:22-alpine
+FROM node:24-alpine
 ENV NODE_ENV=production HOST=0.0.0.0 HL7_HOST=0.0.0.0
 WORKDIR /app
 COPY --from=build --chown=node:node /app/package.json ./

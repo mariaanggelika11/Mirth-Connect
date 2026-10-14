@@ -1,0 +1,9 @@
+name: Feature request
+description: Propose an integration engine improvement
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: Problem, desired behavior, compatibility requirements
+    validations:
+      required: true

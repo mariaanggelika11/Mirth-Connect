@@ -9,3 +9,10 @@ reports
 test-results
 playwright-report
 **/*.log
+
+backups
+**/*.dump*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
