@@ -6,10 +6,10 @@
 | --- | --- | --- |
 | npm ci | PASS | Initial install and final-lockfile npm ci verified; npm install-script policy warnings recorded |
 | Typecheck / lint / formatting / build | PASS | Commands rerun; see implementation report |
-| Unit/API regression and coverage | PASS (212 tests) | Coverage gates use exact initial baseline; synthetic fixtures |
-| PostgreSQL integration/concurrency | PASS (13 tests) | Dedicated /tmp PostgreSQL cluster and new mirth_test_* schemas |
+| Unit/API regression and coverage | PASS (234 tests) | Statements 77.48%, branches 71.03%, functions 78.96%, lines 78.65%; gates raised to previous verified V2 baseline; synthetic fixtures |
+| PostgreSQL integration/concurrency | PASS (17 tests) | Dedicated /tmp PostgreSQL cluster and new mirth_test_* schemas |
 | Repeated migration / existing-channel initial revision | PASS | CLI preflight + two migrations and runtime smoke on empty disposable DB |
-| Browser permission/editor/revision workflow | PASS (13 tests) | Synthetic API fixtures; does not establish production API/browser integration |
+| Browser permission/editor/revision workflow | PASS (19 tests) | Synthetic API fixtures; does not establish production API/browser integration |
 | MLLP TLS/mTLS | PASS locally; RUNTIME VERIFICATION REQUIRED | Synthetic one-day certificate; CA/hostname rejection; hospital certificates and renewal not exercised |
 | Health/readiness/idle SIGTERM | PASS | Actual compiled backend against disposable database |
 | SIGTERM with active work / HA / load | PASS active SIGTERM; HA/load NOT TESTED | Synthetic delayed delivery completes during SIGTERM; sustained failover/load still required |
@@ -23,3 +23,5 @@
 | Production HTTPS / PostgreSQL TLS / cert custody | IMPLEMENTED — RUNTIME VERIFICATION REQUIRED | Examples/code supplied; no production infrastructure touched |
 | Hospital UAT / independent security review / RPO/RTO | NOT TESTED | Owners, profiles and acceptance infrastructure must be supplied |
 | Full requested feature completeness | NOT IMPLEMENTED in full | See GAP_ANALYSIS_2026.md; no production-ready claim |
+
+Follow-up verification on `development`: 234 unit/API tests, 17 native PostgreSQL tests and 19 browser tests passed, including Axe scans for login/channel/revision surfaces. Schema version 5 adds destination policy plus HTTP reservation expiry/historical/canonical hash metadata. The final synthetic runtime and encrypted full backup/restore drill passed with this migration. OpenAPI structure/reference checks pass for 43 paths/47 operations; semantic review of the entire legacy contract remains required. Environment-owned settings are displayed read-only and diagnostics contain aggregate metadata only. None of these local checks certify production.

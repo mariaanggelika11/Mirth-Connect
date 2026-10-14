@@ -69,9 +69,17 @@ export async function importChannelXml(xml: string) {
       'maxRetries',
       'retryIntervalSeconds',
       'timeoutMs',
+      'deliveryPolicy',
     ];
     if (Object.keys(d).some((k) => !keys.includes(k)))
       throw new AppError(400, 'UNSUPPORTED_CHANNEL_XML', 'Unsupported destination field');
+    if (typeof d.deliveryPolicy === 'string') {
+      try {
+        d.deliveryPolicy = JSON.parse(d.deliveryPolicy);
+      } catch {
+        throw new AppError(400, 'INVALID_CHANNEL_XML', 'Invalid destination delivery policy');
+      }
+    }
     for (const key of ['maxRetries', 'retryIntervalSeconds', 'timeoutMs'])
       if (d[key] !== undefined) d[key] = Number(d[key]);
     for (const key of ['isEnabled', 'retryEnabled'])

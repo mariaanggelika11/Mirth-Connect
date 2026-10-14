@@ -74,6 +74,7 @@ export const getAllChannels = async (req: Request, res: Response, next: NextFunc
         maxRetries: d.max_retries,
         retryIntervalSeconds: d.retry_interval_seconds,
         timeoutMs: d.timeout_ms,
+        deliveryPolicy: d.delivery_policy || {},
         circuitState: (d as DestinationRow & { circuit_state?: string }).circuit_state || 'CLOSED',
         circuitFailures: (d as DestinationRow & { failure_count?: number }).failure_count || 0,
         sent: d.sent,
@@ -149,14 +150,15 @@ export async function saveDestinations(
       .input('retry', d.retryEnabled)
       .input('maxRetries', d.maxRetries)
       .input('interval', d.retryIntervalSeconds)
-      .input('timeout', d.timeoutMs);
+      .input('timeout', d.timeoutMs)
+      .input('policy', JSON.stringify(d.deliveryPolicy));
     if (old)
       await r.query(
-        `UPDATE "Destinations" SET name=@name,type=@type,endpoint=@endpoint,outbound_data_type=@data_type,processing_script=@processing,response_script=@response,template_script=@template,filter_script=@filter,is_enabled=@enabled,retry_enabled=@retry,max_retries=@maxRetries,retry_interval_seconds=@interval,timeout_ms=@timeout,updated_at=CURRENT_TIMESTAMP WHERE id=@id AND channel_id=@channel_id`,
+        `UPDATE "Destinations" SET name=@name,type=@type,endpoint=@endpoint,outbound_data_type=@data_type,processing_script=@processing,response_script=@response,template_script=@template,filter_script=@filter,is_enabled=@enabled,retry_enabled=@retry,max_retries=@maxRetries,retry_interval_seconds=@interval,timeout_ms=@timeout,delivery_policy=@policy::jsonb,updated_at=CURRENT_TIMESTAMP WHERE id=@id AND channel_id=@channel_id`,
       );
     else
       await r.query(
-        `INSERT INTO "Destinations"(channel_id,name,type,endpoint,outbound_data_type,processing_script,response_script,template_script,filter_script,is_enabled,retry_enabled,max_retries,retry_interval_seconds,timeout_ms,created_at,updated_at) VALUES(@channel_id,@name,@type,@endpoint,@data_type,@processing,@response,@template,@filter,@enabled,@retry,@maxRetries,@interval,@timeout,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+        `INSERT INTO "Destinations"(channel_id,name,type,endpoint,outbound_data_type,processing_script,response_script,template_script,filter_script,is_enabled,retry_enabled,max_retries,retry_interval_seconds,timeout_ms,delivery_policy,created_at,updated_at) VALUES(@channel_id,@name,@type,@endpoint,@data_type,@processing,@response,@template,@filter,@enabled,@retry,@maxRetries,@interval,@timeout,@policy::jsonb,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
       );
   }
   // Keep historical logs and FK links by disabling removed connectors instead of deleting evidence.

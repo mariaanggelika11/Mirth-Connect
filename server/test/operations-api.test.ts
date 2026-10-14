@@ -16,13 +16,18 @@ const requestMock = () => ({
   },
 });
 vi.mock('../src/config/db.js', () => ({
+  databasePoolStats: () => ({
+    database_pool_total: 2,
+    database_pool_idle: 1,
+    database_pool_waiting: 0,
+  }),
   getConnection: async () => ({ request: requestMock }),
   withTransaction: async (fn: (tx: unknown) => Promise<unknown>) => fn({ request: requestMock }),
 }));
 import app from '../src/app.js';
 import { signToken } from '../src/services/auth.services.js';
 import { channelSchema } from '../src/utils/validator.js';
-import { encrypt } from '../src/utils/secrets.js';
+import { encrypt, decrypt } from '../src/utils/secrets.js';
 import { migrationPreflight } from '../src/services/migrationPreflight.services.js';
 import { rotateSecrets } from '../src/services/rotation.services.js';
 import type { DatabaseTransaction } from '../src/config/db.js';
@@ -321,5 +326,294 @@ describe('Operational APIs and authorization', () => {
     expect((await rotateSecrets(false)).recordsUpdated).toBe(4);
     expect(state.history.filter((sql) => sql.startsWith('UPDATE')).length).toBe(4);
     expect(state.history.at(-1)).toContain('ROTATE_ENCRYPTION_KEYS');
+  });
+});
+
+describe('Revision successor drafts and stored dry-run', () => {
+  const configuration = channelSchema.parse({
+    name: 'Stored synthetic draft',
+    source: { type: 'HTTP', inboundDataType: 'JSON' },
+    processingScript: 'msg.processed = true;',
+    destinations: [
+      {
+        name: 'Synthetic sender',
+        type: 'REST',
+        endpoint: 'http://user:synthetic-credential@localhost/send?token=synthetic-key',
+        outboundDataType: 'JSON',
+      },
+    ],
+  });
+  const row = {
+    state: 'DRAFT',
+    checksum: 'a'.repeat(64),
+    configuration: encrypt(JSON.stringify(configuration)),
+  };
+  const setup = (revision = row) =>
+    state.query.mockImplementation(async (sql: string) => ({
+      recordset: sql.includes('SELECT id,name,role')
+        ? [admin]
+        : sql.includes('MAX(revision)')
+          ? [{ revision: 3 }]
+          : sql.includes('FROM "ChannelRevisions"') && sql.includes('SELECT')
+            ? [revision]
+            : sql.includes('SELECT id FROM "Channels"')
+              ? [{ id: 1 }]
+              : [],
+      rowsAffected: [1],
+    }));
+  it('edits stored draft, archives predecessor, audits and leaves runtime untouched', async () => {
+    setup();
+    const response = await request(app)
+      .patch('/api/channel/1/revisions/2')
+      .set('Authorization', 'Bearer ' + token)
+      .send({
+        expectedChecksum: row.checksum,
+        changeSummary: 'Synthetic successor',
+        patch: { name: 'Edited synthetic draft', destinations: [{ index: 0, timeoutMs: 3456 }] },
+      });
+    expect(response.status).toBe(200);
+    expect(response.body.revision).toBe(3);
+    const stored = JSON.parse(decrypt(String(state.inputs.config)));
+    expect(stored.destinations[0].endpoint).toBe(configuration.destinations[0].endpoint);
+    expect(stored.processingScript).toBe(configuration.processingScript);
+    expect(stored.destinations[0].timeoutMs).toBe(3456);
+    expect(state.inputs.action).toBe('EDIT_CHANNEL_DRAFT');
+    expect(state.history.some((sql) => sql.startsWith('UPDATE "Channels"'))).toBe(false);
+    expect(JSON.stringify(response.body)).not.toContain('synthetic-credential');
+  });
+  it('rejects stale checksums, archived revisions, missing channels and invalid patches', async () => {
+    for (const revision of [
+      { ...row, checksum: 'b'.repeat(64) },
+      { ...row, state: 'PUBLISHED' },
+    ]) {
+      setup(revision);
+      expect(
+        (
+          await request(app)
+            .patch('/api/channel/1/revisions/2')
+            .set('Authorization', 'Bearer ' + token)
+            .send({
+              expectedChecksum: row.checksum,
+              changeSummary: 'Synthetic conflict',
+              patch: { name: 'Changed' },
+            })
+        ).status,
+      ).toBe(409);
+    }
+    setup();
+    expect(
+      (
+        await request(app)
+          .patch('/api/channel/1/revisions/2')
+          .set('Authorization', 'Bearer ' + token)
+          .send({
+            expectedChecksum: row.checksum,
+            changeSummary: 'Synthetic invalid',
+            patch: { destinations: [{ index: 2 }] },
+          })
+      ).status,
+    ).toBe(400);
+    state.query.mockImplementation(async (sql) => ({
+      recordset: sql.includes('SELECT id,name,role') ? [admin] : [],
+    }));
+    expect(
+      (
+        await request(app)
+          .patch('/api/channel/1/revisions/2')
+          .set('Authorization', 'Bearer ' + token)
+          .send({
+            expectedChecksum: row.checksum,
+            changeSummary: 'Synthetic absent',
+            patch: { name: 'Changed' },
+          })
+      ).status,
+    ).toBe(404);
+  });
+  it('stored revision dry-run uses private scripts but returns masked preview and no delivery', async () => {
+    setup();
+    const response = await request(app)
+      .post('/api/channel/1/revisions/2/dry-run')
+      .set('Authorization', 'Bearer ' + token)
+      .send({ payload: { patientName: 'Synthetic Patient', fixture: true } });
+    expect(response.status).toBe(200);
+    expect(response.body.results[0].finalPayload.processed).toBe(true);
+    expect(response.body.results[0].finalPayload.patientName).toBe('[REDACTED]');
+    expect(response.body.warnings[0]).toContain('No DNS');
+    expect(state.inputs.action).toBe('DRY_RUN_REVISION');
+    expect(JSON.stringify(response.body)).not.toContain('synthetic-credential');
+    expect(state.history.some((sql) => sql.includes('INSERT INTO "Messages"'))).toBe(false);
+    setup({ ...row, state: 'ARCHIVED' });
+    expect(
+      (
+        await request(app)
+          .post('/api/channel/1/revisions/2/dry-run')
+          .set('Authorization', 'Bearer ' + token)
+          .send({ payload: {} })
+      ).status,
+    ).toBe(404);
+  });
+  it('viewer and operator cannot edit, test revision or open connection probes', async () => {
+    for (const role of ['VIEWER', 'OPERATOR']) {
+      state.query.mockResolvedValue({ recordset: [{ ...admin, role }], rowsAffected: [1] });
+      expect(
+        (
+          await request(app)
+            .patch('/api/channel/1/revisions/2')
+            .set('Authorization', 'Bearer ' + token)
+            .send({})
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await request(app)
+            .post('/api/channel/1/revisions/2/dry-run')
+            .set('Authorization', 'Bearer ' + token)
+            .send({ payload: {} })
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await request(app)
+            .post('/api/channel/1/revisions/2/destinations/0/test-connection')
+            .set('Authorization', 'Bearer ' + token)
+            .send({})
+        ).status,
+      ).toBe(403);
+    }
+  });
+  it('connection probe rejects invalid indices and missing/archived destinations before DNS', async () => {
+    setup();
+    expect(
+      (
+        await request(app)
+          .post('/api/channel/1/revisions/2/destinations/99/test-connection')
+          .set('Authorization', 'Bearer ' + token)
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(app)
+          .post('/api/channel/1/revisions/2/destinations/1/test-connection')
+          .set('Authorization', 'Bearer ' + token)
+      ).status,
+    ).toBe(404);
+    setup({ ...row, state: 'ARCHIVED' });
+    expect(
+      (
+        await request(app)
+          .post('/api/channel/1/revisions/2/destinations/0/test-connection')
+          .set('Authorization', 'Bearer ' + token)
+      ).status,
+    ).toBe(404);
+  });
+  it('circuit reset is audited, requires reason and refuses active deliveries', async () => {
+    state.query.mockImplementation(async (sql) => ({
+      recordset: sql.includes('SELECT id,name,role')
+        ? [admin]
+        : sql.includes('SELECT id FROM "Destinations"')
+          ? [{ id: 1 }]
+          : sql.includes('SELECT count(*)')
+            ? [{ total: 0 }]
+            : [],
+      rowsAffected: [1],
+    }));
+    expect(
+      (
+        await request(app)
+          .post('/api/destination/1/circuit/reset')
+          .set('Authorization', 'Bearer ' + token)
+          .send({ reason: 'DESTINATION_RECOVERED' })
+      ).status,
+    ).toBe(200);
+    expect(state.inputs.action).toBe('RESET_CIRCUIT_DESTINATION_RECOVERED');
+    expect(
+      (
+        await request(app)
+          .post('/api/destination/1/circuit/reset')
+          .set('Authorization', 'Bearer ' + token)
+          .send({ reason: 'free text' })
+      ).status,
+    ).toBe(400);
+    state.query.mockImplementation(async (sql) => ({
+      recordset: sql.includes('SELECT id,name,role')
+        ? [admin]
+        : sql.includes('SELECT count(*)')
+          ? [{ total: 1 }]
+          : [{ id: 1 }],
+      rowsAffected: [1],
+    }));
+    expect(
+      (
+        await request(app)
+          .post('/api/destination/1/circuit/reset')
+          .set('Authorization', 'Bearer ' + token)
+          .send({ reason: 'DESTINATION_RECOVERED' })
+      ).status,
+    ).toBe(409);
+  });
+});
+
+describe('Administrator-only effective settings and diagnostics', () => {
+  it('exports fixed configuration and aggregate metadata with an audit and no secrets', async () => {
+    state.query.mockImplementation(async (sql) => ({
+      recordset: sql.includes('SELECT id,name,role')
+        ? [admin]
+        : sql.includes('SELECT version')
+          ? [{ version: 5 }]
+          : sql.includes('GROUP BY direction')
+            ? [{ direction: 'IN', status: 'SUCCESS', total: 2 }]
+            : sql.includes('GROUP BY status')
+              ? [{ status: 'RUNNING', total: 1 }]
+              : [],
+      rowsAffected: [1],
+    }));
+    const settings = await request(app)
+      .get('/api/system/configuration')
+      .set('Authorization', 'Bearer ' + token);
+    expect(settings.status).toBe(200);
+    expect(settings.body.data.runtime.encryptionKeyVersion).toBe('current');
+    const diagnostic = await request(app)
+      .get('/api/system/diagnostics')
+      .set('Authorization', 'Bearer ' + token);
+    expect(diagnostic.status).toBe(200);
+    expect(diagnostic.headers['cache-control']).toBe('no-store');
+    expect(diagnostic.body.schemaVersions).toEqual([5]);
+    expect(diagnostic.body.databasePool.database_pool_idle).toBe(1);
+    expect(state.inputs.action).toBe('EXPORT_DIAGNOSTIC_METADATA');
+    for (const forbidden of [
+      'postgresql://',
+      'JWT_SECRET',
+      'original_payload',
+      'password_hash',
+      'endpoint',
+    ])
+      expect(JSON.stringify(diagnostic.body)).not.toContain(forbidden);
+    state.query.mockRejectedValue(new Error('synthetic database failure'));
+    expect(
+      (
+        await request(app)
+          .get('/api/system/diagnostics')
+          .set('Authorization', 'Bearer ' + token)
+      ).status,
+    ).toBe(500);
+  });
+  it('viewer, operator and developer cannot export operational settings', async () => {
+    for (const role of ['VIEWER', 'OPERATOR', 'DEVELOPER']) {
+      state.query.mockResolvedValue({ recordset: [{ ...admin, role }], rowsAffected: [1] });
+      expect(
+        (
+          await request(app)
+            .get('/api/system/configuration')
+            .set('Authorization', 'Bearer ' + token)
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await request(app)
+            .get('/api/system/diagnostics')
+            .set('Authorization', 'Bearer ' + token)
+        ).status,
+      ).toBe(403);
+    }
   });
 });

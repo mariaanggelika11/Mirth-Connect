@@ -1,5 +1,6 @@
 import { AlertPanel } from './AlertPanel';
 import { SessionPanel } from './SessionPanel';
+import { RuntimeSettingsPanel } from './RuntimeSettingsPanel';
 import { useCallback, useEffect, useState } from 'react';
 import { ShieldCheck, Users, History, UserRound } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -58,6 +59,13 @@ export default function SettingsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    if (!can('user:manage') && tab !== 'account') {
+      setTab('account');
+      setUsers([]);
+      setAudits([]);
+    }
+  }, [role, tab, can]);
   async function saveUser(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -135,6 +143,7 @@ export default function SettingsPage() {
         <div className="settings-grid">
           <SessionPanel />
           {can('audit:read') && <AlertPanel />}
+          {can('audit:read') && <RuntimeSettingsPanel />}
           <section className="card-bw settings-panel">
             <ShieldCheck size={25} className="accent" />
             <h2>Your account</h2>

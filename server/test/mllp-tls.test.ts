@@ -6,7 +6,7 @@ import path from 'node:path';
 import tls from 'node:tls';
 import type { AddressInfo } from 'node:net';
 import { config } from '../src/config/env.js';
-import { sendTcp } from '../src/utils/transport.js';
+import { sendTcp, testConnection } from '../src/utils/transport.js';
 import { MllpDecoder, frame } from '../src/utils/mllp.js';
 import { buildAck } from '../src/utils/hl7Converer.js';
 import { sample } from './fixtures.js';
@@ -62,6 +62,15 @@ afterAll(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 describe('MLLP TLS verifies certificate and hostname', () => {
+  it('probe verifies CA and hostname without sending MLLP frames', async () => {
+    expect(await testConnection(`mllps://localhost:${port}`, 'MLLP', 2000)).toMatchObject({
+      reachable: true,
+      secure: true,
+    });
+    await expect(testConnection(`mllps://127.0.0.1:${port}`, 'MLLP', 2000)).rejects.toMatchObject({
+      code: 'CONNECTION_TLS_FAILED',
+    });
+  });
   it('accepts trusted localhost certificate with framed ACK', async () => {
     expect(await sendTcp(`mllps://localhost:${port}`, sample, true, 2000)).toContain(
       'MSA|AA|ID123',

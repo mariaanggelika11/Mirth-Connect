@@ -26,9 +26,11 @@
     "db:verify-restore": "tsx server/src/scripts/backup.ts verify-restore",
     "test:runtime": "node scripts/runtime-smoke.mjs",
     "secrets:scan": "node scripts/secret-scan.mjs",
-    "test:backup": "node scripts/backup-smoke.mjs"
+    "test:backup": "node scripts/backup-smoke.mjs",
+    "docs:check": "node scripts/check-openapi.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.63.0",
     "@types/cors": "^2.8.19",
     "@types/supertest": "^7.2.1",

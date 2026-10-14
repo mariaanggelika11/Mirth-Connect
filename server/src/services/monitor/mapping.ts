@@ -1,6 +1,7 @@
 export interface MonitorRow {
   channel_revision?: number;
   dedupe_key?: string;
+  idempotency_key_hash?: string;
   reconciliation?: unknown;
   id: number;
   channel_id: number;

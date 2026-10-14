@@ -1,4 +1,5 @@
 export interface Destination {
+  delivery_policy?: { failureThreshold?: number; openSeconds?: number; maxConcurrency?: number };
   id: number;
   channel_id: number;
   name: string;

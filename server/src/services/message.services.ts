@@ -1,4 +1,3 @@
-import { increment } from '../utils/runtimeMetrics.js';
 import { maskPayload } from '../utils/masking.js';
 import { querySchema } from './monitor/query.js';
 import { parsed, logRow } from './monitor/mapping.js';
@@ -45,7 +44,6 @@ export const handleInboundMessage = async (req: Request, res: Response, next: Ne
       .json({ success: result.success, result });
   } catch (error) {
     if (error instanceof AppError && error.code === 'IDEMPOTENCY_CONFLICT') {
-      increment('idempotency_conflicts_total');
       try {
         await audit('IDEMPOTENCY_CONFLICT', req, 'channel', Number(req.params.channelId));
       } catch (auditError) {
@@ -121,7 +119,7 @@ export const getMessageDetail = async (req: Request, res: Response, next: NextFu
         correlationId: m.correlation_id,
         errorCode: m.last_error,
         channelRevision: m.channel_revision,
-        idempotencyApplied: !!m.dedupe_key,
+        idempotencyApplied: !!(m.dedupe_key || m.idempotency_key_hash),
         reconciliation:
           m.reconciliation && typeof m.reconciliation === 'object'
             ? {

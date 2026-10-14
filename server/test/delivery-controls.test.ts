@@ -87,4 +87,22 @@ describe('Persisted circuit breaker and delivery concurrency', () => {
     expect(state.inputs.seconds).toBe(config.delivery.openSeconds);
     expect(state.history.at(-1)).toContain('WHEN @success THEN NULL');
   });
+  it('destination policy overrides deployment defaults and caps local admission', async () => {
+    state.query.mockImplementation(async (sql) => ({
+      recordset: sql.includes('SELECT count(*)') ? [{ total: 1, destination: 1 }] : [],
+      rowsAffected: [1],
+    }));
+    expect(await acquireDelivery(1, 2, { maxConcurrency: 1 })).toMatchObject({
+      acquired: false,
+      reason: 'DELIVERY_CAPACITY',
+    });
+    await releaseDelivery(1, 2, 'synthetic-owner', false, { failureThreshold: 2, openSeconds: 90 });
+    expect(state.inputs.threshold).toBe(2);
+    expect(state.inputs.seconds).toBe(90);
+  });
+  it('stale or expired delivery owner cannot overwrite the circuit after reset', async () => {
+    state.query.mockResolvedValue({ recordset: [], rowsAffected: [0] });
+    await releaseDelivery(1, 2, 'stale-owner', false);
+    expect(state.history.some((sql) => sql.startsWith('UPDATE "DestinationRuntime"'))).toBe(false);
+  });
 });

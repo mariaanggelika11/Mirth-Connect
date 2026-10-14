@@ -121,6 +121,13 @@ export async function closeConnection() {
   pool = undefined;
   if (current) await current.end();
 }
+export function databasePoolStats() {
+  return {
+    database_pool_total: pool?.totalCount || 0,
+    database_pool_idle: pool?.idleCount || 0,
+    database_pool_waiting: pool?.waitingCount || 0,
+  };
+}
 export async function withTransaction<T>(
   work: (transaction: DatabaseTransaction) => Promise<T>,
 ): Promise<T> {

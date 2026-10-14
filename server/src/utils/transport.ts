@@ -79,6 +79,79 @@ async function resolveHost(hostname: string, timeout: number) {
     if (timer) clearTimeout(timer);
   }
 }
+// Explicit operator probe: only DNS + TCP/TLS handshake, never HTTP/MLLP/application bytes.
+// Resolve once and pin the socket to the vetted address to prevent a second DNS lookup.
+export async function testConnection(endpoint: string, type: string, timeout = 5000) {
+  const started = performance.now();
+  const url = validateEndpoint(decrypt(endpoint), type);
+  const addresses = await resolveHost(url.hostname, timeout);
+  const address = addresses.find((a) => a.family === 4) || addresses[0];
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  const secure = ['https:', 'mllps:'].includes(url.protocol);
+  const port = Number(url.port || (secure ? 443 : 80));
+  await new Promise<void>((resolve, reject) => {
+    const socket = secure
+      ? tls.connect({
+          host: address.address,
+          port,
+          servername: net.isIP(hostname) ? undefined : hostname,
+          rejectUnauthorized: true,
+          checkServerIdentity: (_host, cert) => tls.checkServerIdentity(hostname, cert),
+          ...(url.protocol === 'mllps:' && config.hl7.tls.caFile
+            ? { ca: readFileSync(config.hl7.tls.caFile) }
+            : {}),
+          ...(url.protocol === 'mllps:' && config.hl7.tls.certFile && config.hl7.tls.keyFile
+            ? {
+                cert: readFileSync(config.hl7.tls.certFile),
+                key: readFileSync(config.hl7.tls.keyFile),
+              }
+            : {}),
+        })
+      : net.connect({ host: address.address, port });
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = setTimeout(
+      () =>
+        finish(
+          new AppError(504, 'CONNECTION_TEST_TIMEOUT', 'Destination connection test timed out'),
+        ),
+      Math.max(1, timeout - (performance.now() - started)),
+    );
+    socket.once(secure ? 'secureConnect' : 'connect', () => finish());
+    socket.once('error', () =>
+      finish(
+        new AppError(
+          502,
+          secure ? 'CONNECTION_TLS_FAILED' : 'CONNECTION_TEST_FAILED',
+          'Destination connection test failed',
+        ),
+      ),
+    );
+    socket.once('close', () => {
+      if (!settled)
+        finish(
+          new AppError(502, 'CONNECTION_TEST_FAILED', 'Destination closed during connection test'),
+        );
+    });
+  });
+  return {
+    reachable: true,
+    secure,
+    elapsedMs: Math.round(performance.now() - started),
+    warnings: [
+      secure
+        ? 'Certificate and hostname verified. Application authentication and delivery are not tested.'
+        : 'Plaintext transport. Use only on a trusted isolated network. Application authentication and delivery are not tested.',
+    ],
+  };
+}
 export async function sendRest(
   endpoint: string,
   body: string,

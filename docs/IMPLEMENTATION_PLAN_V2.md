@@ -8,3 +8,6 @@
 6. Review the implementation and deploy first to disposable/staging infrastructure. Production rollout requires the readiness matrix, hospital UAT, independent security review, load test and DR drill. No automatic push/deploy/history rewrite or production data access.
 
 Feature scope differences and unmet requirements are explicit in GAP_ANALYSIS_2026.md. This plan is not a certification or production authorization.
+
+
+Follow-up on development: successor draft editing and revision tests; canonical JSON/opt-in reservation TTL; destination policy/reset; bounded XML rules; expanded operational metrics and admin diagnostics; live UI permissions and WCAG checks. Source implementation and native synthetic verification completed for these additions. Remaining settings/XSD/telemetry/export scope and infrastructure verification are explicitly retained in the updated gap analysis.

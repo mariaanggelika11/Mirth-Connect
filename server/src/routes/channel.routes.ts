@@ -2,9 +2,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import * as service from '../services/channel.services.js';
 import { requirePermission } from '../middleware/auth.js';
-import { validate, validateId, channelSchema } from '../utils/validator.js';
+import { validate, validateId, channelSchema, draftPatchSchema } from '../utils/validator.js';
 import * as revision from '../services/revision.services.js';
 import { dryRun } from '../services/dryRun.services.js';
+import { AppError } from '../utils/errors.js';
 const router = Router();
 router.post('/dry-run', requirePermission('channel:write'), dryRun);
 const revisionId = (
@@ -39,6 +40,38 @@ router.get(
   validateId,
   revisionId,
   revision.revisionDetail,
+);
+router.patch(
+  '/:id/revisions/:revision',
+  requirePermission('channel:write'),
+  validateId,
+  revisionId,
+  validate(draftPatchSchema),
+  revision.editDraft,
+);
+router.post(
+  '/:id/revisions/:revision/dry-run',
+  requirePermission('channel:write'),
+  validateId,
+  revisionId,
+  validate(
+    z
+      .object({ payload: z.unknown().refine((v) => v !== undefined, 'Provide synthetic payload') })
+      .strict(),
+  ),
+  revision.dryRunRevision,
+);
+router.post(
+  '/:id/revisions/:revision/destinations/:index/test-connection',
+  requirePermission('channel:write'),
+  validateId,
+  revisionId,
+  (req, _res, next) => {
+    if (!/^(?:[0-9]|[1-4][0-9])$/.test(req.params.index))
+      return next(new AppError(400, 'INVALID_DESTINATION_INDEX', 'Invalid destination index'));
+    next();
+  },
+  revision.testRevisionDestination,
 );
 for (const action of ['publish', 'rollback'])
   router.post(

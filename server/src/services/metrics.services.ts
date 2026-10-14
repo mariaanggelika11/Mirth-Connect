@@ -1,6 +1,6 @@
 import { renderRuntimeMetrics } from '../utils/runtimeMetrics.js';
 import type { Request, Response, NextFunction } from 'express';
-import { getConnection } from '../config/db.js';
+import { getConnection, databasePoolStats } from '../config/db.js';
 export async function metrics(_req: Request, res: Response, next: NextFunction) {
   try {
     const pool = await getConnection();
@@ -28,7 +28,31 @@ export async function metrics(_req: Request, res: Response, next: NextFunction) 
             `SELECT count(*) FILTER(WHERE active=true AND state='OPEN') alerts_open FROM "OperationalAlerts"`,
           )
       ).recordset[0] || {};
-    const lines = Object.entries({ ...row, ...circuits, ...alerts }).map(([name, value]) => {
+    const channelRows = (
+      await pool.request().query('SELECT status,count(*) total FROM "Channels" GROUP BY status')
+    ).recordset;
+    const slots =
+      (
+        await pool
+          .request()
+          .query(
+            'SELECT count(*) workers_active FROM "DeliverySlots" WHERE expires_at>CURRENT_TIMESTAMP',
+          )
+      ).recordset[0] || {};
+    const channels = Object.fromEntries(
+      ['RUNNING', 'STOPPED', 'PAUSED', 'ERROR'].map((status) => [
+        'channels_' + status.toLowerCase(),
+        Number(channelRows.find((r) => r.status === status)?.total || 0),
+      ]),
+    );
+    const lines = Object.entries({
+      ...row,
+      ...circuits,
+      ...alerts,
+      ...slots,
+      ...channels,
+      ...databasePoolStats(),
+    }).map(([name, value]) => {
       const n = Number(value);
       return `# TYPE mirth_${name} gauge\nmirth_${name} ${Number.isFinite(n) ? n : 0}`;
     });

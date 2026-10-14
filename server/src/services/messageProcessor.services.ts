@@ -10,8 +10,9 @@ import { executeScript } from './script.services.js';
 import { hl7ToJson, parseSegments } from '../utils/hl7Converer.js';
 import { AppError, safeError } from '../utils/errors.js';
 import { encrypt, decrypt } from '../utils/secrets.js';
-import { increment, observe } from '../utils/runtimeMetrics.js';
+import { increment, observe, gauge } from '../utils/runtimeMetrics.js';
 import { config } from '../config/env.js';
+import { requestDigest, releasableReservation } from '../utils/idempotency.js';
 import { logger } from '../utils/logger.js';
 import type { Destination } from '../models/Destination.js';
 import type { Channel } from '../models/Channel.js';
@@ -28,6 +29,7 @@ export async function processInboundMessage(
   if (activeInbound >= config.server.maxActiveInbound)
     throw new AppError(503, 'INBOUND_CAPACITY', 'Inbound processing capacity exceeded');
   activeInbound++;
+  gauge('inbound_workers_active', activeInbound);
   try {
     return await processInboundCore(
       channelId,
@@ -39,6 +41,7 @@ export async function processInboundMessage(
     );
   } finally {
     activeInbound--;
+    gauge('inbound_workers_active', activeInbound);
   }
 }
 async function processInboundCore(
@@ -90,7 +93,7 @@ async function processInboundCore(
     throw new AppError(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key is required');
   if (idempotencyKey && !/^[\x21-\x7e]{1,200}$/.test(idempotencyKey))
     throw new AppError(400, 'INVALID_IDEMPOTENCY_KEY', 'Invalid Idempotency-Key');
-  const requestHash = createHash('sha256').update(serialize(payload)).digest('hex');
+  const requestHash = requestDigest(payload, channel.inbound_data_type === 'JSON');
   let dedupe: string | null =
     idempotencyKey && mode !== 'DISABLED'
       ? createHash('sha256')
@@ -113,21 +116,51 @@ async function processInboundCore(
         .request()
         .input('key', channelId + ':' + dedupe)
         .query('SELECT pg_advisory_xact_lock(hashtextextended(@key,0))');
+      const expired = await tx
+        .request()
+        .input('channel', channelId)
+        .input('dedupe', dedupe)
+        .query(
+          `UPDATE "Messages" SET dedupe_key=NULL WHERE channel_id=@channel AND dedupe_key=@dedupe AND ${releasableReservation} RETURNING id`,
+        );
+      increment('idempotency_expired_total', expired.recordset.length);
       const existing = (
         await tx
           .request()
           .input('channel', channelId)
           .input('dedupe', dedupe)
           .query(
-            'SELECT id,status,request_hash FROM "Messages" WHERE channel_id=@channel AND dedupe_key=@dedupe FOR UPDATE',
+            'SELECT id,status,request_hash,canonical_request_hash,original_payload FROM "Messages" WHERE channel_id=@channel AND dedupe_key=@dedupe FOR UPDATE',
           )
       ).recordset[0];
-      if (existing && existing.request_hash && existing.request_hash !== requestHash)
+      // Legacy rows used order-sensitive JSON hashes. Compare their stored payload without
+      // rewriting evidence or treating the same JSON with different key order as a conflict.
+      let matchesLegacy = false;
+      if (
+        existing &&
+        channel.inbound_data_type === 'JSON' &&
+        typeof existing.original_payload === 'string'
+      ) {
+        try {
+          matchesLegacy =
+            requestDigest(JSON.parse(existing.original_payload), true) === requestHash;
+        } catch {
+          /* corrupt legacy evidence fails closed */
+        }
+      }
+      if (
+        existing &&
+        (existing.canonical_request_hash || existing.request_hash) &&
+        (existing.canonical_request_hash || existing.request_hash) !== requestHash &&
+        !matchesLegacy
+      ) {
+        increment('idempotency_conflicts_total');
         throw new AppError(
           409,
           'IDEMPOTENCY_CONFLICT',
           'Idempotency key was already used for a different payload',
         );
+      }
       if (existing)
         return { id: existing.id as number, status: String(existing.status), duplicate: true };
     }
@@ -150,10 +183,17 @@ async function processInboundCore(
         .input('payload', serialize(payload))
         .input('correlation', correlationId)
         .input('dedupe', dedupe)
-        .input('hash', requestHash)
+        // Retain the legacy digest for readers from the previous deployment during rollback.
+        .input('hash', createHash('sha256').update(serialize(payload)).digest('hex'))
+        .input('canonicalHash', requestHash)
+        .input('keyHash', idempotencyKey && mode !== 'DISABLED' ? dedupe : null)
+        .input(
+          'ttlHours',
+          idempotencyKey && mode !== 'DISABLED' ? config.inbound.idempotencyRetentionHours : 0,
+        )
         .input('revision', channel.active_revision || null)
         .query(
-          `INSERT INTO "Messages"(channel_id,direction,message_type,original_payload,status,correlation_id,dedupe_key,request_hash,channel_revision,lease_until,created_at) VALUES(@channel,'IN',@type,@payload,'IN-PROCESS',@correlation,@dedupe,@hash,@revision,(CURRENT_TIMESTAMP + (300)::double precision * INTERVAL \'1 second\'),CURRENT_TIMESTAMP) RETURNING id`,
+          `INSERT INTO "Messages"(channel_id,direction,message_type,original_payload,status,correlation_id,dedupe_key,idempotency_key_hash,dedupe_expires_at,request_hash,canonical_request_hash,channel_revision,lease_until,created_at) VALUES(@channel,'IN',@type,@payload,'IN-PROCESS',@correlation,@dedupe,@keyHash,CASE WHEN @ttlHours>0 THEN CURRENT_TIMESTAMP+@ttlHours::double precision*INTERVAL '1 hour' ELSE NULL END,@hash,@canonicalHash,@revision,(CURRENT_TIMESTAMP + (300)::double precision * INTERVAL \'1 second\'),CURRENT_TIMESTAMP) RETURNING id`,
         )
     ).recordset[0];
     return { id: row.id as number, status: 'IN-PROCESS', duplicate: false };

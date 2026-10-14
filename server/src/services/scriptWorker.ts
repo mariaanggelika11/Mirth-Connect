@@ -21,8 +21,24 @@ async function run() {
       `${helpers}\n${vars}\n(function(){const value=(function(){${script}\nreturn ${resultVariable};})(); if(value && typeof value.then === 'function') throw new Error('SCRIPT_ASYNC_UNSUPPORTED'); return JSON.stringify(value);})();`,
     );
     if (evaluated.error) {
+      // Reserve diagnostic headroom only after evaluation has failed. Never dump a user
+      // exception object (its getters/toJSON could execute code or contain payload).
+      runtime.setMemoryLimit(memoryMb * 1024 * 1024 + 1024 * 1024);
+      const nameHandle = vm.getProp(evaluated.error, 'name');
+      const messageHandle = vm.getProp(evaluated.error, 'message');
+      const failure = { name: vm.getString(nameHandle), message: vm.getString(messageHandle) };
+      nameHandle.dispose();
+      messageHandle.dispose();
       evaluated.error.dispose();
-      throw new Error('SCRIPT_EXECUTION_FAILED');
+      // Inspect inside this worker; never send user script exception text across the boundary.
+      const code =
+        failure?.name === 'InternalError' && failure?.message === 'interrupted'
+          ? 'SCRIPT_TIMEOUT'
+          : failure?.name === 'InternalError' && failure?.message === 'out of memory'
+            ? 'SCRIPT_MEMORY_LIMIT'
+            : 'SCRIPT_EXECUTION_FAILED';
+      parentPort?.postMessage({ success: false, code });
+      return;
     }
     const encoded = vm.getString(evaluated.value);
     evaluated.value.dispose();

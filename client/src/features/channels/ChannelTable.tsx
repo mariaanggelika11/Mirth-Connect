@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { downloadChannelXml } from '../../services/channel.config';
 import {
   ChevronDown,
@@ -16,6 +17,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import type { Channel } from '../../types';
 import { ChannelStatus } from '../../types';
 import { updateChannelStatus } from '../../services/channel.api';
+import { api } from '../../services/api';
+import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
 import { StatusBadge, FlowLabel, EmptyState } from '../../components/ui/OperationalUI';
 interface Props {
   channels: Channel[];
@@ -38,6 +41,7 @@ function ChannelRow({
   const { can } = useAuth();
   const menuRef = useRef<HTMLDetailsElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [resetTarget, setResetTarget] = useState<{ id: number; name: string } | null>(null);
   const [menuPoint, setMenuPoint] = useState({ left: 0, top: 0 });
   useEffect(() => {
     if (!menuOpen) return;
@@ -82,6 +86,24 @@ function ChannelRow({
   }
   return (
     <>
+      {createPortal(
+        <ConfirmationModal
+          isOpen={!!resetTarget}
+          onClose={() => setResetTarget(null)}
+          title="Reset destination circuit"
+          confirmLabel="Confirm circuit reset"
+          message={`Reset the circuit for ${resetTarget?.name}? Confirm that the destination has recovered. This permits new delivery attempts and is audited.`}
+          onConfirm={async () => {
+            if (!resetTarget) return;
+            await api.post(`/destination/${resetTarget.id}/circuit/reset`, {
+              reason: 'DESTINATION_RECOVERED',
+            });
+            setResetTarget(null);
+            onRefresh();
+          }}
+        />,
+        document.body,
+      )}
       <tr className="table-row">
         <td>
           <button
@@ -250,6 +272,14 @@ function ChannelRow({
                             ? 'Enabled · retry on'
                             : 'Enabled'}
                       </span>
+                      {can('channel:write') && d.id && d.circuitState === 'OPEN' && (
+                        <button
+                          className="text-button"
+                          onClick={() => setResetTarget({ id: d.id!, name: d.name })}
+                        >
+                          Reset circuit · {d.name}
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

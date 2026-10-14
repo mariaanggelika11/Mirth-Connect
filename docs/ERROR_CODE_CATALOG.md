@@ -27,3 +27,24 @@ Errors return success=false, code, safe message and requestId; central handler a
 | INTERNAL_ERROR | 500; internal details withheld |
 
 Delivery diagnostics such as DELIVERY_OUTCOME_UNKNOWN, DESTINATION_CIRCUIT_OPEN, DELIVERY_CAPACITY and RESPONSE_SCRIPT_FAILED_AFTER_DELIVERY appear in message metadata. Response-script failure after accepted delivery never triggers automatic network resend. TCP_WRITE_COMPLETE means socket write completed; it does not prove application acceptance.
+
+
+Follow-up operational control errors:
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| DRAFT_CONFLICT | 409 | Stale checksum or draft no longer editable; reload revisions |
+| INVALID_DESTINATION_INDEX | 400 | Probe index outside 0–49 |
+| DESTINATION_NOT_FOUND | 404 | Stored revision lacks the selected destination or runtime destination retired |
+| CONNECTION_TEST_CAPACITY | 503 | Four connection probes already active in this process |
+| CONNECTION_TEST_TIMEOUT | 504 | Bounded destination handshake expired |
+| CONNECTION_TEST_FAILED | 502 | TCP connection refused/closed/failed; no application message sent |
+| CONNECTION_TLS_FAILED | 502 | TLS connection or certificate/hostname verification failed |
+| CIRCUIT_RESET_BUSY | 409 | Active destination delivery slots prevent a safe reset |
+| JSON_STRUCTURE_LIMIT | 422 | JSON nesting exceeds 100 before canonical hashing |
+| INVALID_XML_PROFILE | 400 | Profile uses unsupported literal path/rule structure |
+| XML_INVALID | 422 | Malformed/non-string XML or structural/size limits exceeded |
+| XML_PROFILE_REJECTED | 422 | Root, required text path or allowed-value rule rejected payload |
+| SCRIPT_MEMORY_LIMIT | 422 | QuickJS memory exhaustion; exception content is not returned |
+
+Canonical-key conflicts continue to use IDEMPOTENCY_CONFLICT. XML rules use literal dotted element names; XPath expressions/attributes/XSD are not implemented.

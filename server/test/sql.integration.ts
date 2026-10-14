@@ -5,12 +5,17 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { signToken } from '../src/services/auth.services.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import http from 'node:http';
 import pg from 'pg';
 import { encrypt, decrypt } from '../src/utils/secrets.js';
 import { rotateSecrets } from '../src/services/rotation.services.js';
-import { retryTick, retentionTick } from '../src/services/worker.services.js';
+import {
+  retryTick,
+  retentionTick,
+  idempotencyCleanupTick,
+} from '../src/services/worker.services.js';
+import { acquireDelivery, releaseDelivery } from '../src/services/circuitBreaker.services.js';
 import {
   processInboundMessage,
   resendMessage as resendStoredMessage,
@@ -62,6 +67,14 @@ before(async () => {
       .batch(
         await readFile(
           new URL('../migrations/004_operational_alerts.sql', import.meta.url),
+          'utf8',
+        ),
+      );
+    await tx
+      .request()
+      .batch(
+        await readFile(
+          new URL('../migrations/005_operational_controls.sql', import.meta.url),
           'utf8',
         ),
       );
@@ -261,11 +274,19 @@ test('real PostgreSQL: migration repeats without duplicate versions or data loss
           'utf8',
         ),
       );
+    await tx
+      .request()
+      .batch(
+        await readFile(
+          new URL('../migrations/005_operational_controls.sql', import.meta.url),
+          'utf8',
+        ),
+      );
   });
   assert.equal(
     (await pool.request().query('SELECT count(*) total FROM "SchemaMigrations"')).recordset[0]
       .total,
-    4,
+    5,
   );
   assert.equal(
     (await pool.request().query('SELECT count(*) total FROM "Channels"')).recordset[0].total,
@@ -623,6 +644,365 @@ test('real PostgreSQL: resolving dead letter preserves evidence and assignment b
   assert.match(metrics.text, /mirth_dead_letter_open 0/);
   assert.match(metrics.text, /mirth_dead_letter 1/);
 });
+
+async function syntheticAdminAuth() {
+  const user = (
+    await pool
+      .request()
+      .input('name', username)
+      .query('SELECT id,name,role FROM "Users" WHERE username=@name')
+  ).recordset[0];
+  return 'Bearer ' + signToken({ id: user.id, name: user.name, role: user.role });
+}
+test('real PostgreSQL: concurrent successor drafts preserve private configuration and stored dry-run has no side effects', async () => {
+  const auth = await syntheticAdminAuth();
+  const initial = {
+    name: 'Synthetic editable draft',
+    source: { type: 'HTTP', inboundDataType: 'JSON' },
+    processingScript: 'msg.processed = true;',
+    destinations: [
+      {
+        name: 'Synthetic private sender',
+        type: 'REST',
+        endpoint: `http://user:synthetic-secret@127.0.0.1:${port}/send?token=synthetic-token`,
+        outboundDataType: 'JSON',
+        deliveryPolicy: { failureThreshold: 2, openSeconds: 45, maxConcurrency: 1 },
+      },
+    ],
+  };
+  const create = await request(app).post('/api/channel').set('Authorization', auth).send(initial);
+  assert.equal(create.status, 201);
+  const id = create.body.channelId;
+  const draft = await request(app)
+    .put('/api/channel/' + id)
+    .set('Authorization', auth)
+    .send({ ...initial, changeSummary: 'Synthetic private draft' });
+  assert.equal(draft.status, 200);
+  const endpoint = `/api/channel/${id}/revisions/${draft.body.revision}`;
+  const detail = await request(app).get(endpoint).set('Authorization', auth);
+  assert.equal(detail.status, 200);
+  assert.ok(!JSON.stringify(detail.body).includes('synthetic-secret'));
+  const patch = {
+    expectedChecksum: detail.body.checksum,
+    changeSummary: 'Synthetic successor edit',
+    patch: { name: 'Successor synthetic draft', destinations: [{ index: 0, timeoutMs: 4321 }] },
+  };
+  const edits = await Promise.all([
+    request(app).patch(endpoint).set('Authorization', auth).send(patch),
+    request(app).patch(endpoint).set('Authorization', auth).send(patch),
+  ]);
+  assert.deepEqual(edits.map((r) => r.status).sort(), [200, 409]);
+  const successor = edits.find((r) => r.status === 200)!.body.revision;
+  const row = (
+    await pool
+      .request()
+      .input('id', id)
+      .input('revision', successor)
+      .query(
+        'SELECT configuration FROM "ChannelRevisions" WHERE channel_id=@id AND revision=@revision',
+      )
+  ).recordset[0];
+  const stored = JSON.parse(decrypt(row.configuration));
+  assert.equal(stored.destinations[0].endpoint, initial.destinations[0].endpoint);
+  assert.equal(stored.processingScript, initial.processingScript);
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', id)
+        .query('SELECT name,active_revision FROM "Channels" WHERE id=@id')
+    ).recordset[0].name,
+    initial.name,
+  );
+  const before = received;
+  const run = await request(app)
+    .post(`/api/channel/${id}/revisions/${successor}/dry-run`)
+    .set('Authorization', auth)
+    .send({ payload: { patientName: 'Synthetic Patient', fixture: true } });
+  assert.equal(run.status, 200);
+  assert.equal(run.body.results[0].finalPayload.processed, true);
+  assert.equal(run.body.results[0].finalPayload.patientName, '[REDACTED]');
+  const probe = await request(app)
+    .post(`/api/channel/${id}/revisions/${successor}/destinations/0/test-connection`)
+    .set('Authorization', auth)
+    .send({});
+  assert.equal(probe.status, 200);
+  assert.equal(probe.body.reachable, true);
+  assert.equal(received, before);
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', id)
+        .query('SELECT count(*) total FROM "Messages" WHERE channel_id=@id')
+    ).recordset[0].total,
+    0,
+  );
+  const publish = await request(app)
+    .post(`/api/channel/${id}/revisions/${successor}/publish`)
+    .set('Authorization', auth)
+    .send({ expectedActiveRevision: 1, changeSummary: 'Publish successor synthetic draft' });
+  assert.equal(publish.status, 200);
+  const policy = (
+    await pool
+      .request()
+      .input('id', id)
+      .query('SELECT delivery_policy FROM "Destinations" WHERE channel_id=@id AND is_deleted=false')
+  ).recordset[0].delivery_policy;
+  assert.deepEqual(policy, initial.destinations[0].deliveryPolicy);
+});
+test('real PostgreSQL: canonical hash accepts reordered legacy JSON and bounded TTL releases reservation without deleting evidence', async () => {
+  const id = (
+    await pool
+      .request()
+      .query(
+        `INSERT INTO "Channels"(name,status,source_type,inbound_data_type) VALUES('Synthetic canonical TTL','RUNNING','HTTP','JSON') RETURNING id`,
+      )
+  ).recordset[0].id;
+  const original = { z: 1, a: { y: 2, x: 3 } },
+    reordered = { a: { x: 3, y: 2 }, z: 1 };
+  const first = await processInboundMessage(id, original, 'synthetic-legacy', 'legacy-order');
+  await pool
+    .request()
+    .input('id', first.inboundMessageId)
+    .input('hash', createHash('sha256').update(JSON.stringify(original)).digest('hex'))
+    .query('UPDATE "Messages" SET request_hash=@hash,canonical_request_hash=NULL WHERE id=@id');
+  const duplicate = await processInboundMessage(
+    id,
+    reordered,
+    'synthetic-reordered',
+    'legacy-order',
+  );
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.inboundMessageId, first.inboundMessageId);
+  const previous = config.inbound.idempotencyRetentionHours;
+  config.inbound.idempotencyRetentionHours = 1;
+  try {
+    const initial = await processInboundMessage(id, original, 'synthetic-ttl-1', 'ttl-key');
+    const stored = (
+      await pool
+        .request()
+        .input('id', initial.inboundMessageId)
+        .query('SELECT dedupe_expires_at,idempotency_key_hash FROM "Messages" WHERE id=@id')
+    ).recordset[0];
+    assert.ok(stored.dedupe_expires_at);
+    assert.ok(stored.idempotency_key_hash);
+    await pool
+      .request()
+      .input('id', initial.inboundMessageId)
+      .query(
+        `UPDATE "Messages" SET dedupe_expires_at=CURRENT_TIMESTAMP-INTERVAL '1 second' WHERE id=@id`,
+      );
+    const results = await Promise.allSettled([
+      processInboundMessage(id, reordered, 'synthetic-ttl-a', 'ttl-key'),
+      processInboundMessage(id, reordered, 'synthetic-ttl-b', 'ttl-key'),
+    ]);
+    assert.ok(results.some((r) => r.status === 'fulfilled'));
+    assert.equal(
+      (
+        await pool
+          .request()
+          .input('id', id)
+          .query('SELECT count(*) total FROM "Messages" WHERE channel_id=@id')
+      ).recordset[0].total,
+      3,
+    );
+    assert.equal(
+      (
+        await pool
+          .request()
+          .input('id', initial.inboundMessageId)
+          .query('SELECT dedupe_key FROM "Messages" WHERE id=@id')
+      ).recordset[0].dedupe_key,
+      null,
+    );
+    const current = (
+      await pool
+        .request()
+        .input('id', id)
+        .query(
+          'SELECT id FROM "Messages" WHERE channel_id=@id AND dedupe_expires_at IS NOT NULL AND dedupe_key IS NOT NULL',
+        )
+    ).recordset[0].id;
+    await pool
+      .request()
+      .input('id', current)
+      .query(
+        `UPDATE "Messages" SET status='IN-PROCESS',dedupe_expires_at=CURRENT_TIMESTAMP-INTERVAL '1 second' WHERE id=@id`,
+      );
+    await idempotencyCleanupTick();
+    assert.ok(
+      (
+        await pool
+          .request()
+          .input('id', current)
+          .query('SELECT dedupe_key FROM "Messages" WHERE id=@id')
+      ).recordset[0].dedupe_key,
+    );
+    await pool
+      .request()
+      .input('id', current)
+      .query(`UPDATE "Messages" SET status='RECEIVED' WHERE id=@id`);
+    await idempotencyCleanupTick();
+    const evidence = (
+      await pool
+        .request()
+        .input('id', current)
+        .query(
+          'SELECT dedupe_key,idempotency_key_hash,original_payload FROM "Messages" WHERE id=@id',
+        )
+    ).recordset[0];
+    assert.equal(evidence.dedupe_key, null);
+    assert.ok(evidence.idempotency_key_hash);
+    assert.ok(evidence.original_payload);
+  } finally {
+    config.inbound.idempotencyRetentionHours = previous;
+  }
+});
+test('real PostgreSQL: destination policy bounds concurrency, half-open probe and audited reset reject stale owners', async () => {
+  const auth = await syntheticAdminAuth();
+  const policy = { failureThreshold: 1, openSeconds: 1, maxConcurrency: 1 };
+  const created = await request(app)
+    .post('/api/channel')
+    .set('Authorization', auth)
+    .send({
+      name: 'Synthetic circuit policy',
+      source: { type: 'HTTP', inboundDataType: 'JSON' },
+      destinations: [
+        {
+          name: 'Synthetic circuit sender',
+          type: 'REST',
+          endpoint: `http://127.0.0.1:${port}`,
+          deliveryPolicy: policy,
+        },
+      ],
+    });
+  assert.equal(created.status, 201);
+  const id = created.body.channelId,
+    destination = (
+      await pool
+        .request()
+        .input('id', id)
+        .query('SELECT id FROM "Destinations" WHERE channel_id=@id')
+    ).recordset[0].id;
+  const messages = [];
+  for (let index = 0; index < 2; index++)
+    messages.push(
+      (
+        await pool
+          .request()
+          .input('id', id)
+          .input('dest', destination)
+          .query(
+            `INSERT INTO "Messages"(channel_id,destination_id,direction,message_type,original_payload,transformed_payload,status) VALUES(@id,@dest,'OUT','JSON','{}','{}','OUT-ERROR') RETURNING id`,
+          )
+      ).recordset[0].id,
+    );
+  const slot = await acquireDelivery(messages[0], destination, policy);
+  assert.equal(slot.acquired, true);
+  assert.equal(
+    (await acquireDelivery(messages[1], destination, policy)).reason,
+    'DELIVERY_CAPACITY',
+  );
+  assert.equal(
+    (
+      await request(app)
+        .post(`/api/destination/${destination}/circuit/reset`)
+        .set('Authorization', auth)
+        .send({ reason: 'SYNTHETIC_TEST' })
+    ).status,
+    409,
+  );
+  await releaseDelivery(messages[0], destination, slot.owner, false, policy);
+  assert.equal(
+    (await acquireDelivery(messages[1], destination, policy)).reason,
+    'DESTINATION_CIRCUIT_OPEN',
+  );
+  await pool
+    .request()
+    .input('id', destination)
+    .query(
+      `UPDATE "DestinationRuntime" SET open_until=CURRENT_TIMESTAMP-INTERVAL '1 second' WHERE destination_id=@id`,
+    );
+  const probe = await acquireDelivery(messages[1], destination, policy);
+  assert.equal(probe.acquired, true);
+  assert.equal(
+    (await acquireDelivery(messages[0], destination, policy)).reason,
+    'DESTINATION_CIRCUIT_OPEN',
+  );
+  await releaseDelivery(messages[1], destination, probe.owner, true, policy);
+  assert.equal(
+    (
+      await request(app)
+        .post(`/api/destination/${destination}/circuit/reset`)
+        .set('Authorization', auth)
+        .send({ reason: 'SYNTHETIC_TEST' })
+    ).status,
+    200,
+  );
+  await releaseDelivery(messages[0], destination, 'synthetic-stale-owner', false, policy);
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', destination)
+        .query('SELECT failure_count FROM "DestinationRuntime" WHERE destination_id=@id')
+    ).recordset[0].failure_count,
+    0,
+  );
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', destination)
+        .query(
+          `SELECT count(*) total FROM "AuditLog" WHERE resource_id=@id AND action='RESET_CIRCUIT_SYNTHETIC_TEST'`,
+        )
+    ).recordset[0].total,
+    1,
+  );
+});
+test('real PostgreSQL: protected diagnostic bundle has metadata only and reports schema/pool state', async () => {
+  const auth = await syntheticAdminAuth();
+  const diagnostic = await request(app).get('/api/system/diagnostics').set('Authorization', auth);
+  assert.equal(diagnostic.status, 200);
+  assert.deepEqual(diagnostic.body.schemaVersions, [1, 2, 3, 4, 5]);
+  assert.ok(diagnostic.body.databasePool.database_pool_total > 0);
+  const body = JSON.stringify(diagnostic.body);
+  for (const value of [
+    'synthetic-secret',
+    'synthetic-token',
+    'original_payload',
+    'password_hash',
+    config.auth.jwtSecret,
+    config.encryptionKey,
+  ])
+    assert.ok(!body.includes(value));
+  const settings = await request(app).get('/api/system/configuration').set('Authorization', auth);
+  assert.equal(settings.status, 200);
+  assert.equal(settings.body.data.transport.postgresTlsVerified, false);
+  for (const role of ['VIEWER', 'OPERATOR', 'DEVELOPER']) {
+    const user = (
+      await pool
+        .request()
+        .input('username', 'diagnostic-' + role + suffix)
+        .input('role', role)
+        .query(
+          `INSERT INTO "Users"(username,name,password_hash,role) VALUES(@username,'Synthetic restricted user','synthetic-unused-hash',@role) RETURNING id,name,role`,
+        )
+    ).recordset[0];
+    const restricted = 'Bearer ' + signToken({ id: user.id, name: user.name, role: user.role });
+    assert.equal(
+      (await request(app).get('/api/system/diagnostics').set('Authorization', restricted)).status,
+      403,
+    );
+    assert.equal(
+      (await request(app).get('/api/system/configuration').set('Authorization', restricted)).status,
+      403,
+    );
+  }
+});
+
 test('real PostgreSQL: key rotation failure rolls back all records and new keyring reads rotated snapshots', async () => {
   const id = (
     await pool

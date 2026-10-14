@@ -1,7 +1,13 @@
 import { afterEach, describe, it, expect } from 'vitest';
 import net from 'node:net';
 import http from 'node:http';
-import { sendTcp, sendRest, validateEndpoint, isUnsafeAddress } from '../src/utils/transport.js';
+import {
+  sendTcp,
+  sendRest,
+  validateEndpoint,
+  isUnsafeAddress,
+  testConnection,
+} from '../src/utils/transport.js';
 import { frame } from '../src/utils/mllp.js';
 import { buildAck } from '../src/utils/hl7Converer.js';
 import { sample } from './fixtures.js';
@@ -21,6 +27,44 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => new Promise<void>((r) => s.close(() => r()))));
 });
 describe('Destination transports (real loopback)', () => {
+  it('connection test pins DNS and opens a socket without sending application bytes', async () => {
+    let bytes = 0,
+      connections = 0;
+    const endpoint = await listen(
+      net.createServer((socket) => {
+        connections++;
+        socket.on('data', (data) => {
+          bytes += data.length;
+        });
+      }),
+    );
+    const result = await testConnection(
+      'http://' + endpoint + '/not-requested?token=synthetic',
+      'REST',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(result.reachable).toBe(true);
+    expect(result.secure).toBe(false);
+    expect(connections).toBe(1);
+    expect(bytes).toBe(0);
+    expect(JSON.stringify(result)).not.toContain('synthetic');
+    await expect(testConnection('tcp://169.254.169.254:80', 'TCP')).rejects.toMatchObject({
+      code: 'DESTINATION_HOST_DENIED',
+    });
+  });
+  it('connection test contains refused connections and times out silent TLS handshakes', async () => {
+    const endpoint = await listen(net.createServer(() => {}));
+    await expect(testConnection('https://' + endpoint, 'REST', 50)).rejects.toMatchObject({
+      code: 'CONNECTION_TEST_TIMEOUT',
+    });
+    const stopped = net.createServer();
+    await new Promise<void>((resolve) => stopped.listen(0, '127.0.0.1', resolve));
+    const address = stopped.address() as net.AddressInfo;
+    await new Promise<void>((resolve) => stopped.close(() => resolve()));
+    await expect(testConnection('tcp://127.0.0.1:' + address.port, 'TCP')).rejects.toMatchObject({
+      code: 'CONNECTION_TEST_FAILED',
+    });
+  });
   it('blocks resolved metadata/link-local addresses including IPv6 mappings', () => {
     for (const ip of [
       '169.254.169.254',

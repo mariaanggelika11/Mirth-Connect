@@ -47,3 +47,8 @@ PG_SCHEMA=mirth_test_$(date +%s) LOG_LEVEL=silent npm run test:sql
 ```
 
 Referensi implementasi transaksi dan locking: [node-postgres transactions](https://node-postgres.com/features/transactions) dan [PostgreSQL SELECT locking](https://www.postgresql.org/docs/current/sql-select.html).
+
+
+### Schema 5 operational controls
+
+Migration 005 is additive and transactional/repeatable. It adds Destinations.delivery_policy JSONB (empty defaults inherit deployment policy), Messages.idempotency_key_hash/dedupe_expires_at/canonical_request_hash, and a partial expiry index. Existing reservation hashes are retained as historical metadata; existing rows keep NULL expiry and legacy digest compatibility. No payload/message is deleted. Review backfill/index duration on a staging copy before production; large installations may need a maintenance window. New startup requires schema 5. Do not remove schema-5 columns/history during rollback; deploy the previously tested application artifact and preserve credentials/keyring. See OPERATIONAL_CONTROLS.md.

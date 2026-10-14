@@ -134,14 +134,17 @@ describe('Engine aggregation and durable retry policy', () => {
     const sequence: string[] = [];
     mock.query.mockImplementation(async (sql: string) => {
       sequence.push(sql);
-      if (sql.includes('SELECT * FROM "Channels"')) return { recordset: [channel] };
+      if (sql.includes('SELECT * FROM "Channels"'))
+        return { rowsAffected: [1], recordset: [channel] };
       if (sql.includes('INSERT INTO "Messages"') && sql.includes("'IN'"))
-        return { recordset: [{ id: 4 }] };
-      if (sql.includes('SELECT * FROM "Destinations"')) return { recordset: [dest] };
-      if (sql.includes('RETURNING *')) return { recordset: [{ ...row, status: 'PROCESSING' }] };
+        return { rowsAffected: [1], recordset: [{ id: 4 }] };
+      if (sql.includes('SELECT * FROM "Destinations"'))
+        return { rowsAffected: [1], recordset: [dest] };
+      if (sql.includes('RETURNING *'))
+        return { rowsAffected: [1], recordset: [{ ...row, status: 'PROCESSING' }] };
       if (sql.includes('SELECT status FROM "Messages"'))
-        return { recordset: [{ status: 'OUT-SENT' }] };
-      return { recordset: [] };
+        return { rowsAffected: [1], recordset: [{ status: 'OUT-SENT' }] };
+      return { rowsAffected: [1], recordset: [] };
     });
     mock.send.mockImplementation(async () => {
       sequence.push('SEND');
@@ -157,6 +160,7 @@ describe('Engine aggregation and durable retry policy', () => {
   it('retry success uses persisted final payload without running scripts again', async () => {
     mock.query.mockImplementation(async (sql: string) => ({
       recordset: sql.includes('SELECT status') ? [{ status: 'OUT-SENT' }] : [],
+      rowsAffected: [1],
     }));
     await processRetry(row);
     expect(mock.send).toHaveBeenCalledWith(dest.endpoint, '{"data":1}', expect.any(Object), 1000);
@@ -165,14 +169,17 @@ describe('Engine aggregation and durable retry policy', () => {
   it('converts incoming JSON to escaped HL7 before delivery', async () => {
     const hl7Dest = { ...dest, outbound_data_type: 'HL7V2' };
     mock.query.mockImplementation(async (sql: string) => {
-      if (sql.includes('SELECT * FROM "Channels"')) return { recordset: [channel] };
+      if (sql.includes('SELECT * FROM "Channels"'))
+        return { rowsAffected: [1], recordset: [channel] };
       if (sql.includes('INSERT INTO "Messages"') && sql.includes("'IN'"))
-        return { recordset: [{ id: 4 }] };
-      if (sql.includes('SELECT * FROM "Destinations"')) return { recordset: [hl7Dest] };
-      if (sql.includes('RETURNING *')) return { recordset: [{ ...row, status: 'PROCESSING' }] };
+        return { rowsAffected: [1], recordset: [{ id: 4 }] };
+      if (sql.includes('SELECT * FROM "Destinations"'))
+        return { rowsAffected: [1], recordset: [hl7Dest] };
+      if (sql.includes('RETURNING *'))
+        return { rowsAffected: [1], recordset: [{ ...row, status: 'PROCESSING' }] };
       if (sql.includes('SELECT status FROM "Messages"'))
-        return { recordset: [{ status: 'OUT-SENT' }] };
-      return { recordset: [] };
+        return { rowsAffected: [1], recordset: [{ status: 'OUT-SENT' }] };
+      return { rowsAffected: [1], recordset: [] };
     });
     const result = await processInboundMessage(1, {
       PID: { '5': 'Budi|Santoso\rOBX|1' },

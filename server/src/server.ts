@@ -44,7 +44,7 @@ try {
   const pool = await getConnection();
   startupStage = 'migration';
   const ready = (
-    await pool.request().query('SELECT version FROM "SchemaMigrations" WHERE version=4')
+    await pool.request().query('SELECT version FROM "SchemaMigrations" WHERE version=5')
   ).recordset;
   if (!ready.length) throw new Error('Migration required');
   if (config.hl7.enabled) {

@@ -33,6 +33,7 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
+      - run: npm run docs:check
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check

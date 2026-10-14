@@ -1,20 +1,23 @@
 import { alertTick } from './alert.services.js';
+import { increment, gauge } from '../utils/runtimeMetrics.js';
 import { getConnection, withTransaction } from '../config/db.js';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { processRetry, updateAggregate } from './messageProcessor.services.js';
 import type { StoredMessage } from '../models/Message.js';
+import { releasableReservation } from '../utils/idempotency.js';
 let stopped = false,
   running: Promise<void> | undefined,
   timer: ReturnType<typeof setTimeout> | undefined;
 export async function retryTick() {
   const pool = await getConnection();
   // Ambiguous delivery after process crash is not automatically repeated. Operator must reconcile.
-  await pool
+  const interrupted = await pool
     .request()
     .query(
       "UPDATE \"Messages\" SET status='IN-ERROR',last_error='SOURCE_PROCESS_INTERRUPTED',lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE direction='IN' AND status='IN-PROCESS' AND lease_until<CURRENT_TIMESTAMP",
     );
+  increment('worker_source_lease_recoveries_total', interrupted.rowsAffected?.[0] || 0);
   const abandoned = (
     await pool
       .request()
@@ -22,6 +25,7 @@ export async function retryTick() {
         `UPDATE "Messages" SET status='DEAD_LETTER',last_error='DELIVERY_OUTCOME_UNKNOWN',lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE direction='OUT' AND status IN ('PROCESSING','RETRYING') AND lease_until<CURRENT_TIMESTAMP RETURNING inbound_message_id`,
       )
   ).recordset;
+  increment('worker_delivery_lease_recoveries_total', abandoned.length);
   for (const id of new Set<number>(abandoned.map((r) => r.inbound_message_id)))
     await updateAggregate(id);
   const row = (
@@ -36,7 +40,14 @@ export async function retryTick() {
           FROM candidate c WHERE m.id=c.id RETURNING m.*`,
     )
   ).recordset[0] as StoredMessage | undefined;
-  if (row) await processRetry(row);
+  if (row) {
+    gauge('retry_worker_active', 1);
+    try {
+      await processRetry(row);
+    } finally {
+      gauge('retry_worker_active', 0);
+    }
+  }
 }
 export async function retentionTick() {
   // Bounded batches; skip inbound chains containing queued/active work. Delete children first.
@@ -92,15 +103,32 @@ export async function retentionTick() {
       );
   });
 }
+export async function idempotencyCleanupTick() {
+  const pool = await getConnection();
+  const result = await pool
+    .request()
+    .query(
+      `UPDATE "Messages" SET dedupe_key=NULL WHERE id IN (SELECT id FROM "Messages" WHERE dedupe_key IS NOT NULL AND ${releasableReservation} ORDER BY dedupe_expires_at,id LIMIT 100 FOR UPDATE SKIP LOCKED) RETURNING id`,
+    );
+  increment('idempotency_expired_total', result.recordset.length);
+}
 export function startWorkers() {
   stopped = false;
   let lastMaintenance = 0;
+  let lastIdempotencyMaintenance = 0;
   const tick = async () => {
     if (stopped) return;
     running = (async () => {
       try {
         await retryTick();
         await alertTick();
+        if (
+          config.inbound.idempotencyRetentionHours > 0 &&
+          Date.now() - lastIdempotencyMaintenance > 60000
+        ) {
+          await idempotencyCleanupTick();
+          lastIdempotencyMaintenance = Date.now();
+        }
         if (config.retention.enabled && Date.now() - lastMaintenance > 3600000) {
           await retentionTick();
           lastMaintenance = Date.now();

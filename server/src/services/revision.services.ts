@@ -2,13 +2,15 @@ import { createHash } from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
 import type { DatabaseTransaction } from '../config/db.js';
 import { getConnection, withTransaction } from '../config/db.js';
-import { channelSchema } from '../utils/validator.js';
+import { channelSchema, draftPatchSchema } from '../utils/validator.js';
+import { runConfiguration } from './dryRun.services.js';
+import { maskPayload } from '../utils/masking.js';
 import { decrypt, encrypt, publicEndpoint, storeEndpoint } from '../utils/secrets.js';
 import { AppError } from '../utils/errors.js';
 import { audit } from './audit.services.js';
 import { saveDestinations, applyChannelConfiguration } from './channel.services.js';
 import { validateProfileConfiguration } from './profileValidation.services.js';
-import { validateEndpoint } from '../utils/transport.js';
+import { validateEndpoint, testConnection } from '../utils/transport.js';
 import type { z } from 'zod';
 export type RevisionConfig = z.infer<typeof channelSchema>;
 export async function readRuntimeConfiguration(
@@ -47,6 +49,7 @@ export async function readRuntimeConfiguration(
       maxRetries: d.max_retries,
       retryIntervalSeconds: d.retry_interval_seconds,
       timeoutMs: d.timeout_ms,
+      deliveryPolicy: d.delivery_policy || {},
     })),
   });
 }
@@ -264,5 +267,147 @@ export const archiveRevision = async (req: Request, res: Response, next: NextFun
     res.json({ success: true });
   } catch (error) {
     next(error);
+  }
+};
+export function patchDraft(
+  data: RevisionConfig,
+  input: z.infer<typeof draftPatchSchema>['patch'],
+): RevisionConfig {
+  const changes = new Map((input.destinations || []).map((d) => [d.index, d]));
+  if (
+    changes.size !== (input.destinations || []).length ||
+    [...changes.keys()].some((i) => i >= data.destinations.length)
+  )
+    throw new AppError(400, 'INVALID_DESTINATION', 'Invalid or duplicate draft destination index');
+  return channelSchema.parse({
+    ...data,
+    ...input,
+    source: { ...data.source, ...input.source },
+    destinations: data.destinations.map((destination, index) => {
+      const change = changes.get(index);
+      if (!change) return destination;
+      const { index: _index, ...fields } = change;
+      void _index;
+      return { ...destination, ...fields };
+    }),
+  });
+}
+export const editDraft = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const input = draftPatchSchema.parse(req.body);
+    const revision = await withTransaction(async (tx) => {
+      const id = Number(req.params.id),
+        requested = Number(req.params.revision);
+      const channel = (
+        await tx
+          .request()
+          .input('id', id)
+          .query('SELECT id FROM "Channels" WHERE id=@id FOR UPDATE')
+      ).recordset[0];
+      if (!channel) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
+      const row = (
+        await tx
+          .request()
+          .input('id', id)
+          .input('revision', requested)
+          .query(
+            'SELECT * FROM "ChannelRevisions" WHERE channel_id=@id AND revision=@revision FOR UPDATE',
+          )
+      ).recordset[0];
+      if (!row) throw new AppError(404, 'REVISION_NOT_FOUND', 'Revision not found');
+      if (row.state !== 'DRAFT' || row.checksum !== input.expectedChecksum)
+        throw new AppError(
+          409,
+          'DRAFT_CONFLICT',
+          'Draft changed or is no longer editable; reload revisions',
+        );
+      const data = patchDraft(
+        channelSchema.parse(JSON.parse(decrypt(row.configuration))),
+        input.patch,
+      );
+      validateProfileConfiguration(data.validationProfile);
+      const successor = await insertRevision(
+        tx,
+        id,
+        data,
+        'DRAFT',
+        input.changeSummary,
+        req.user?.id,
+      );
+      await tx
+        .request()
+        .input('id', id)
+        .input('revision', requested)
+        .query(
+          'UPDATE "ChannelRevisions" SET state=\'ARCHIVED\' WHERE channel_id=@id AND revision=@revision',
+        );
+      await audit('EDIT_CHANNEL_DRAFT', req, 'channel', id, tx);
+      return successor;
+    });
+    res.json({ success: true, draft: true, revision });
+  } catch (error) {
+    next(error);
+  }
+};
+export const dryRunRevision = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const pool = await getConnection();
+    const row = (
+      await pool
+        .request()
+        .input('id', Number(req.params.id))
+        .input('revision', Number(req.params.revision))
+        .query(
+          'SELECT configuration,state FROM "ChannelRevisions" WHERE channel_id=@id AND revision=@revision',
+        )
+    ).recordset[0];
+    if (!row || row.state === 'ARCHIVED')
+      throw new AppError(404, 'REVISION_NOT_FOUND', 'Revision not available');
+    const result = await runConfiguration(
+      channelSchema.parse(JSON.parse(decrypt(row.configuration))),
+      req.body.payload,
+    );
+    await audit('DRY_RUN_REVISION', req, 'channel', Number(req.params.id));
+    res.json({
+      ...result,
+      revision: Number(req.params.revision),
+      results: result.results.map((r) => ({ ...r, finalPayload: maskPayload(r.finalPayload) })),
+    });
+  } catch (error) {
+    next(
+      error instanceof AppError
+        ? error
+        : new AppError(400, 'DRY_RUN_INVALID', 'Invalid configuration or synthetic payload'),
+    );
+  }
+};
+let activeProbes = 0;
+export const testRevisionDestination = async (req: Request, res: Response, next: NextFunction) => {
+  if (activeProbes >= 4)
+    return next(new AppError(503, 'CONNECTION_TEST_CAPACITY', 'Connection test capacity exceeded'));
+  activeProbes++;
+  try {
+    const pool = await getConnection();
+    const row = (
+      await pool
+        .request()
+        .input('id', Number(req.params.id))
+        .input('revision', Number(req.params.revision))
+        .query(
+          'SELECT configuration,state FROM "ChannelRevisions" WHERE channel_id=@id AND revision=@revision',
+        )
+    ).recordset[0];
+    if (!row || row.state === 'ARCHIVED')
+      throw new AppError(404, 'REVISION_NOT_FOUND', 'Revision not available');
+    const data = channelSchema.parse(JSON.parse(decrypt(row.configuration)));
+    const destination = data.destinations[Number(req.params.index)];
+    if (!destination) throw new AppError(404, 'DESTINATION_NOT_FOUND', 'Destination not found');
+    await audit('TEST_DESTINATION_CONNECTION', req, 'channel', Number(req.params.id));
+    const result = await testConnection(destination.endpoint, destination.type);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    next(error);
+  } finally {
+    activeProbes--;
   }
 };

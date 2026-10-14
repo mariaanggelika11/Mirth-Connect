@@ -9,3 +9,6 @@ React/Vite and Express/TypeScript remain. PostgreSQL adapter binds named paramet
 Tests use synthetic fixtures. Unit SQL mocks are distinct from real PostgreSQL integration tests. No source code or local test can establish hospital profile conformity, regulatory certification, production TLS, production capacity, backup ownership or DR readiness.
 
 Pre-audit user changes were preserved in local baseline commit `af84592d67ea7dcc9e8a4ee19420c8289fb63c0c`; implementation commits are reviewed relative to this snapshot. No working-tree content was reset or pushed.
+
+
+Follow-up baseline: commit `4214c5f`, clean `development` after fast-forward of the previous implementation. The temporary hardening branch was deleted at the user's request; current work is directly on `development`. Starting verification again passed typecheck and 212 tests. Follow-up adds schema 5 operational controls, strict secret-preserving successor draft edits, stored dry-run, explicit handshake probes, canonical JSON and independent opt-in key TTL, per-destination circuit policy/reset, expanded metrics, live UI role reconciliation, metadata diagnostics and accessibility scanning. Current results and limitations are in GAP_CLOSURE_REPORT_2026.md.

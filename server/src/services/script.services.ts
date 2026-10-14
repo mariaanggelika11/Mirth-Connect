@@ -1,4 +1,4 @@
-import { increment } from '../utils/runtimeMetrics.js';
+import { increment, gauge } from '../utils/runtimeMetrics.js';
 import { Worker } from 'node:worker_threads';
 import { config } from '../config/env.js';
 import { AppError } from '../utils/errors.js';
@@ -16,6 +16,7 @@ export async function executeScript(
   )
     throw new AppError(413, 'SCRIPT_INPUT_LIMIT', 'Script input limit exceeded');
   active++;
+  gauge('script_workers_active', active);
   try {
     return await new Promise((resolve, reject) => {
       // tsx loader is needed only for development. Production always uses compiled JS.
@@ -56,6 +57,10 @@ export async function executeScript(
         void worker.terminate();
         if (error) {
           increment('script_failures_total');
+          if (error instanceof AppError && error.code === 'SCRIPT_TIMEOUT')
+            increment('script_timeouts_total');
+          if (error instanceof AppError && error.code === 'SCRIPT_MEMORY_LIMIT')
+            increment('script_memory_failures_total');
           reject(error);
         } else resolve(value);
       };
@@ -69,7 +74,13 @@ export async function executeScript(
         finish(
           result.success
             ? undefined
-            : new AppError(422, 'SCRIPT_EXECUTION_FAILED', 'Script execution failed'),
+            : new AppError(
+                422,
+                ['SCRIPT_TIMEOUT', 'SCRIPT_MEMORY_LIMIT'].includes(result.code)
+                  ? result.code
+                  : 'SCRIPT_EXECUTION_FAILED',
+                'Script execution failed',
+              ),
           result.value,
         );
       });
@@ -82,5 +93,6 @@ export async function executeScript(
     });
   } finally {
     active--;
+    gauge('script_workers_active', active);
   }
 }

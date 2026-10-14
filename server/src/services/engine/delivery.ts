@@ -39,7 +39,7 @@ async function deliver(
 }
 export async function attempt(message: StoredMessage, dest: Destination, retryCount: number) {
   const started = performance.now();
-  const slot = await acquireDelivery(message.id, dest.id);
+  const slot = await acquireDelivery(message.id, dest.id, dest.delivery_policy);
   if (!slot.acquired) {
     await recordAttempt(message, dest, 'QUEUED', slot.reason, slot.reason, 30, message.retry_count);
     return {
@@ -95,7 +95,13 @@ export async function attempt(message: StoredMessage, dest: Destination, retryCo
   try {
     await recordAttempt(message, dest, status, response, error, delay, retryCount);
   } finally {
-    await releaseDelivery(message.id, dest.id, slot.owner, status === 'OUT-SENT');
+    await releaseDelivery(
+      message.id,
+      dest.id,
+      slot.owner,
+      status === 'OUT-SENT',
+      dest.delivery_policy,
+    );
     observe('destination_request_seconds', (performance.now() - started) / 1000);
   }
   return {

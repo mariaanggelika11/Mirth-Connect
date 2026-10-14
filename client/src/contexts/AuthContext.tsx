@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { api, setAccessToken, refreshSession, csrfToken } from '../services/api';
+import { api, setAccessToken, getAccessToken, refreshSession, csrfToken } from '../services/api';
 import { login as apiLogin } from '../services/auth.api';
 
 interface AuthContextType {
@@ -35,7 +35,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     window.addEventListener('auth:expired', expire);
     localStorage.removeItem('authToken');
     const refreshed = (event: Event) => {
-      if (mounted) setToken((event as CustomEvent<string>).detail);
+      const current = (event as CustomEvent<string>).detail;
+      if (mounted) setToken(current);
+      void api
+        .get('/auth/me')
+        .then(({ data }) => {
+          if (mounted && getAccessToken() === current) {
+            setRole(data.data.role);
+            setName(data.data.name || 'User');
+          }
+        })
+        .catch(() => {
+          if (mounted && getAccessToken() === current) setRole('VIEWER');
+        });
     };
     window.addEventListener('auth:refreshed', refreshed);
     if (csrfToken())
@@ -61,6 +73,35 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       window.removeEventListener('auth:refreshed', refreshed);
     };
   }, []);
+  useEffect(() => {
+    if (!token) return;
+    let mounted = true;
+    let last = 0;
+    const reconcile = () => {
+      if (document.hidden || Date.now() - last < 5000) return;
+      last = Date.now();
+      void api
+        .get('/auth/me')
+        .then(({ data }) => {
+          if (mounted && getAccessToken() === token) {
+            setRole(data.data.role);
+            setName(data.data.name || 'User');
+          }
+        })
+        .catch(() => {
+          if (mounted && getAccessToken() === token) setRole('VIEWER');
+        });
+    };
+    const timer = setInterval(reconcile, 60000);
+    window.addEventListener('focus', reconcile);
+    document.addEventListener('visibilitychange', reconcile);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+      window.removeEventListener('focus', reconcile);
+      document.removeEventListener('visibilitychange', reconcile);
+    };
+  }, [token]);
   useEffect(() => {
     if (!token) return;
     try {

@@ -8,6 +8,7 @@ import { config } from '../config/env.js';
 import { normalizeRole } from '../middleware/auth.js';
 import { AppError } from '../utils/errors.js';
 import { registration, credentials } from '../utils/validator.js';
+import { increment } from '../utils/runtimeMetrics.js';
 export function signToken(user: { id: number; name: string; role: string }, sessionId?: string) {
   return jwt.sign(
     {
@@ -67,8 +68,10 @@ export const AuthService = {
         )
     ).recordset[0];
     const valid = await bcrypt.compare(data.password, user?.password_hash || dummyHash);
-    if (!user || !valid)
+    if (!user || !valid) {
+      increment('login_failures_total');
       throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid username or password');
+    }
     return { token: signToken(user), id: user.id };
   },
 };

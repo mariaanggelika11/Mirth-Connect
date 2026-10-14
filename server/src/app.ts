@@ -24,6 +24,7 @@ import hl7Routes from './routes/hl7.js';
 import { handleInboundMessage } from './services/message.services.js';
 import { increment } from './utils/runtimeMetrics.js';
 import { metrics } from './services/metrics.services.js';
+import { systemConfiguration, diagnosticBundle } from './services/system.services.js';
 export const app = express();
 app.disable('x-powered-by');
 if (config.server.trustProxy.length) app.set('trust proxy', config.server.trustProxy);
@@ -144,9 +145,32 @@ const managementLimit = rateLimit({
   limit: 300,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
-  message: { success: false, code: 'RATE_LIMITED', message: 'Too many management requests' },
+  handler: (req, res) => {
+    increment('rate_limit_management_rejections_total');
+    res.status(429).json({
+      success: false,
+      code: 'RATE_LIMITED',
+      message: 'Too many management requests',
+      requestId: req.requestId,
+      details: [],
+    });
+  },
 });
 app.use('/api/alerts', managementLimit, alertRoutes);
+app.get(
+  '/api/system/configuration',
+  managementLimit,
+  authenticate,
+  requirePermission('audit:read'),
+  systemConfiguration,
+);
+app.get(
+  '/api/system/diagnostics',
+  managementLimit,
+  authenticate,
+  requirePermission('audit:read'),
+  diagnosticBundle,
+);
 app.use('/api/upload', managementLimit, authenticate, uploadRoutes);
 app.use(
   '/api/users',
@@ -162,7 +186,13 @@ app.use(
   express.json({ limit: config.server.payloadLimit }),
   channelRoutes,
 );
-app.use('/api/destination', managementLimit, authenticate, destinationRoutes);
+app.use(
+  '/api/destination',
+  managementLimit,
+  authenticate,
+  express.json({ limit: config.server.payloadLimit }),
+  destinationRoutes,
+);
 app.use('/api/message', managementLimit, authenticate, messageRoutes);
 app.use(
   '/api/hl7',

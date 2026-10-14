@@ -3,7 +3,7 @@
   "info": {
     "title": "Mini Mirth Connect",
     "version": "2.0.0-draft",
-    "description": "Static documentation of implemented routes. Synthetic examples only. No production readiness claim. Existing success envelopes vary by endpoint."
+    "description": "Static documentation of implemented routes. Synthetic examples only. No production readiness claim. Existing success envelopes vary by endpoint. Follow-up: schema version 5 operational controls; draft patches omit private configuration. JSON idempotency uses canonical hashes with legacy digest compatibility; IDEMPOTENCY_RETENTION_HOURS=0 retains prior behavior. Expired HTTP reservations only release after active/failed delivery guards; message evidence is retained. XML supports bounded literal path rules, not full XSD."
   },
   "servers": [
     {
@@ -578,6 +578,9 @@
           "200": {
             "description": "Success; see route-specific legacy envelope."
           },
+          "201": {
+            "description": "Created stopped channel"
+          },
           "400": {
             "description": "Safe validation error",
             "content": {
@@ -602,9 +605,6 @@
           },
           "503": {
             "description": "Database or capacity unavailable"
-          },
-          "201": {
-            "description": "Created stopped channel"
           }
         },
         "parameters": [],
@@ -947,6 +947,170 @@
           }
         ],
         "x-required-permission": "channel:write"
+      },
+      "patch": {
+        "summary": "Create a secret-preserving successor draft; archive predecessor atomically",
+        "operationId": "patch__api_channel__id__revisions__revision_",
+        "x-required-permission": "channel:write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful implemented operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "draft",
+                    "revision"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "draft": {
+                      "const": true
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/channel/{id}/revisions/{revision}/publish": {
@@ -1206,6 +1370,9 @@
           "200": {
             "description": "Success; see route-specific legacy envelope."
           },
+          "202": {
+            "description": "Durably queued; delivery/retry pending"
+          },
           "400": {
             "description": "Safe validation error",
             "content": {
@@ -1228,14 +1395,11 @@
           "429": {
             "description": "Management/authentication rate limit"
           },
-          "503": {
-            "description": "Database or capacity unavailable"
-          },
-          "202": {
-            "description": "Durably queued; delivery/retry pending"
-          },
           "502": {
             "description": "Persisted delivery failed/partial"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
           }
         },
         "parameters": [
@@ -1297,6 +1461,9 @@
           "200": {
             "description": "Success; see route-specific legacy envelope."
           },
+          "202": {
+            "description": "Durably queued; delivery/retry pending"
+          },
           "400": {
             "description": "Safe validation error",
             "content": {
@@ -1319,14 +1486,11 @@
           "429": {
             "description": "Management/authentication rate limit"
           },
-          "503": {
-            "description": "Database or capacity unavailable"
-          },
-          "202": {
-            "description": "Durably queued; delivery/retry pending"
-          },
           "502": {
             "description": "Persisted delivery failed/partial"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
           }
         },
         "parameters": [
@@ -2143,7 +2307,8 @@
           "404": {
             "description": "Family does not belong to caller"
           }
-        }
+        },
+        "operationId": "post__api_auth_sessions__sessionId__revoke"
       }
     },
     "/api/alerts": {
@@ -2160,7 +2325,8 @@
           "403": {
             "description": "ADMIN permission required"
           }
-        }
+        },
+        "operationId": "get__api_alerts"
       }
     },
     "/api/alerts/{code}/acknowledge": {
@@ -2191,6 +2357,743 @@
           },
           "409": {
             "description": "Alert not active"
+          }
+        },
+        "operationId": "post__api_alerts__code__acknowledge"
+      }
+    },
+    "/api/channel/{id}/revisions/{revision}/dry-run": {
+      "post": {
+        "summary": "Test stored revision with synthetic payload, masked preview and no network side effects",
+        "operationId": "post__api_channel__id__revisions__revision__dry_run",
+        "x-required-permission": "channel:write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "payload"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "payload": {
+                    "description": "Synthetic JSON value or HL7/XML/TEXT string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful implemented operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channel/{id}/revisions/{revision}/destinations/{index}/test-connection": {
+      "post": {
+        "summary": "Audited DNS and pinned TCP/TLS handshake only; no HTTP or MLLP message sent",
+        "operationId": "post__api_channel__id__revisions__revision__destinations__index__test_connection",
+        "x-required-permission": "channel:write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "revision",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "index",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 49
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful implemented operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "reachable",
+                    "secure",
+                    "elapsedMs",
+                    "warnings"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "reachable": {
+                      "const": true
+                    },
+                    "secure": {
+                      "type": "boolean"
+                    },
+                    "elapsedMs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/destination/{id}/circuit/reset": {
+      "post": {
+        "summary": "Reset idle circuit atomically with fixed reason audit; active slots return 409",
+        "operationId": "post__api_destination__id__circuit_reset",
+        "x-required-permission": "channel:write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "enum": [
+                      "DESTINATION_RECOVERED",
+                      "CONFIGURATION_FIXED",
+                      "SYNTHETIC_TEST"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful implemented operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/configuration": {
+      "get": {
+        "summary": "Read effective deployment-owned settings without credentials",
+        "operationId": "get__api_system_configuration",
+        "x-required-permission": "audit:read",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful implemented operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/diagnostics": {
+      "get": {
+        "summary": "Export audited aggregate diagnostic metadata without payloads, credentials, scripts or logs",
+        "operationId": "get__api_system_diagnostics",
+        "x-required-permission": "audit:read",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful implemented operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
@@ -2280,59 +3183,106 @@
       },
       "Channel": {
         "type": "object",
-        "required": [
-          "name",
-          "source",
-          "destinations"
-        ],
         "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 150
-          },
-          "source": {
+          "validationProfile": {
+            "default": {},
             "type": "object",
-            "required": [
-              "type"
-            ],
             "properties": {
-              "type": {
-                "enum": [
-                  "HTTP",
-                  "HL7"
-                ]
+              "jsonSchema": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
               },
-              "inboundDataType": {
-                "enum": [
-                  "HL7V2",
-                  "JSON",
-                  "XML",
-                  "TEXT"
-                ]
+              "xml": {
+                "type": "object",
+                "properties": {
+                  "root": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "pattern": "^[A-Za-z_][\\w:-]*$"
+                  },
+                  "requiredPaths": {
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "maxLength": 300,
+                      "pattern": "^[A-Za-z_][\\w:-]*(?:\\.[A-Za-z_][\\w:-]*){0,15}$"
+                    }
+                  },
+                  "values": {
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "maxLength": 300,
+                          "pattern": "^[A-Za-z_][\\w:-]*(?:\\.[A-Za-z_][\\w:-]*){0,15}$"
+                        },
+                        "allowed": {
+                          "minItems": 1,
+                          "maxItems": 50,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "maxLength": 300
+                          }
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "allowed"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "hl7": {
+                "type": "object",
+                "properties": {
+                  "messageTypes": {
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "maxLength": 50
+                    }
+                  },
+                  "versions": {
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "maxLength": 20
+                    }
+                  },
+                  "requiredFields": {
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Z0-9]{3}\\.[1-9][0-9]{0,2}$"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "script": {
+                "type": "string",
+                "maxLength": 65536
               }
-            }
-          },
-          "destinations": {
-            "type": "array",
-            "maxItems": 50,
-            "items": {
-              "$ref": "#/components/schemas/Destination"
-            }
-          },
-          "processingScript": {
-            "type": "string",
-            "maxLength": 65536
-          },
-          "filterScript": {
-            "type": "string",
-            "maxLength": 65536
-          },
-          "responseScript": {
-            "type": "string",
-            "maxLength": 65536
+            },
+            "additionalProperties": false
           },
           "idempotencyMode": {
+            "default": "OPTIONAL",
+            "type": "string",
             "enum": [
               "OPTIONAL",
               "REQUIRED",
@@ -2344,22 +3294,227 @@
             "minLength": 1,
             "maxLength": 500
           },
-          "validationProfile": {
-            "type": "object"
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 150
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "HTTP",
+                  "HL7"
+                ]
+              },
+              "inboundDataType": {
+                "default": "HL7V2",
+                "type": "string",
+                "enum": [
+                  "HL7V2",
+                  "JSON",
+                  "XML",
+                  "TEXT"
+                ]
+              },
+              "endpoint": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "inboundDataType"
+            ],
+            "additionalProperties": false
+          },
+          "destinations": {
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "deliveryPolicy": {
+                  "default": {},
+                  "type": "object",
+                  "properties": {
+                    "failureThreshold": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100
+                    },
+                    "openSeconds": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 3600
+                    },
+                    "maxConcurrency": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "id": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 150
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "REST",
+                    "HL7",
+                    "MLLP",
+                    "TCP",
+                    "RAW"
+                  ]
+                },
+                "endpoint": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                "outboundDataType": {
+                  "default": "HL7V2",
+                  "type": "string",
+                  "enum": [
+                    "HL7V2",
+                    "JSON",
+                    "XML",
+                    "TEXT"
+                  ]
+                },
+                "processingScript": {
+                  "default": "",
+                  "type": "string",
+                  "maxLength": 65536
+                },
+                "responseScript": {
+                  "default": "",
+                  "type": "string",
+                  "maxLength": 65536
+                },
+                "templateScript": {
+                  "default": "",
+                  "type": "string",
+                  "maxLength": 65536
+                },
+                "filterScript": {
+                  "default": "",
+                  "type": "string",
+                  "maxLength": 65536
+                },
+                "isEnabled": {
+                  "default": true,
+                  "type": "boolean"
+                },
+                "retryEnabled": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "maxRetries": {
+                  "default": 3,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 10
+                },
+                "retryIntervalSeconds": {
+                  "default": 30,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 86400
+                },
+                "timeoutMs": {
+                  "default": 10000,
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 120000
+                }
+              },
+              "required": [
+                "deliveryPolicy",
+                "name",
+                "type",
+                "endpoint",
+                "outboundDataType",
+                "processingScript",
+                "responseScript",
+                "templateScript",
+                "filterScript",
+                "isEnabled",
+                "retryEnabled",
+                "maxRetries",
+                "retryIntervalSeconds",
+                "timeoutMs"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "processingScript": {
+            "default": "",
+            "type": "string",
+            "maxLength": 65536
+          },
+          "responseScript": {
+            "default": "",
+            "type": "string",
+            "maxLength": 65536
+          },
+          "filterScript": {
+            "default": "",
+            "type": "string",
+            "maxLength": 65536
           }
-        }
+        },
+        "required": [
+          "validationProfile",
+          "idempotencyMode",
+          "name",
+          "source",
+          "destinations",
+          "processingScript",
+          "responseScript",
+          "filterScript"
+        ],
+        "additionalProperties": false
       },
       "Destination": {
         "type": "object",
-        "required": [
-          "name",
-          "type",
-          "endpoint"
-        ],
         "properties": {
+          "deliveryPolicy": {
+            "default": {},
+            "type": "object",
+            "properties": {
+              "failureThreshold": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              },
+              "openSeconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3600
+              },
+              "maxConcurrency": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              }
+            },
+            "additionalProperties": false
+          },
           "id": {
             "type": "integer",
-            "minimum": 1
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -2367,6 +3522,7 @@
             "maxLength": 150
           },
           "type": {
+            "type": "string",
             "enum": [
               "REST",
               "HL7",
@@ -2377,9 +3533,12 @@
           },
           "endpoint": {
             "type": "string",
+            "minLength": 1,
             "maxLength": 2048
           },
           "outboundDataType": {
+            "default": "HL7V2",
+            "type": "string",
             "enum": [
               "HL7V2",
               "JSON",
@@ -2387,28 +3546,70 @@
               "TEXT"
             ]
           },
+          "processingScript": {
+            "default": "",
+            "type": "string",
+            "maxLength": 65536
+          },
+          "responseScript": {
+            "default": "",
+            "type": "string",
+            "maxLength": 65536
+          },
+          "templateScript": {
+            "default": "",
+            "type": "string",
+            "maxLength": 65536
+          },
+          "filterScript": {
+            "default": "",
+            "type": "string",
+            "maxLength": 65536
+          },
           "isEnabled": {
+            "default": true,
             "type": "boolean"
           },
           "retryEnabled": {
+            "default": false,
             "type": "boolean"
           },
           "maxRetries": {
+            "default": 3,
             "type": "integer",
             "minimum": 0,
             "maximum": 10
           },
           "retryIntervalSeconds": {
+            "default": 30,
             "type": "integer",
             "minimum": 1,
             "maximum": 86400
           },
           "timeoutMs": {
+            "default": 10000,
             "type": "integer",
             "minimum": 100,
             "maximum": 120000
           }
-        }
+        },
+        "required": [
+          "deliveryPolicy",
+          "name",
+          "type",
+          "endpoint",
+          "outboundDataType",
+          "processingScript",
+          "responseScript",
+          "templateScript",
+          "filterScript",
+          "isEnabled",
+          "retryEnabled",
+          "maxRetries",
+          "retryIntervalSeconds",
+          "timeoutMs"
+        ],
+        "additionalProperties": false
       },
       "Registration": {
         "allOf": [
@@ -2434,6 +3635,211 @@
             }
           }
         ]
+      },
+      "DraftPatch": {
+        "type": "object",
+        "properties": {
+          "expectedChecksum": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "changeSummary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "patch": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 150
+              },
+              "idempotencyMode": {
+                "type": "string",
+                "enum": [
+                  "OPTIONAL",
+                  "REQUIRED",
+                  "DISABLED"
+                ]
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "HTTP",
+                      "HL7"
+                    ]
+                  },
+                  "inboundDataType": {
+                    "type": "string",
+                    "enum": [
+                      "HL7V2",
+                      "JSON",
+                      "XML",
+                      "TEXT"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "destinations": {
+                "maxItems": 50,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 49
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 150
+                    },
+                    "isEnabled": {
+                      "type": "boolean"
+                    },
+                    "retryEnabled": {
+                      "type": "boolean"
+                    },
+                    "maxRetries": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10
+                    },
+                    "retryIntervalSeconds": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 86400
+                    },
+                    "timeoutMs": {
+                      "type": "integer",
+                      "minimum": 100,
+                      "maximum": 120000
+                    },
+                    "outboundDataType": {
+                      "type": "string",
+                      "enum": [
+                        "HL7V2",
+                        "JSON",
+                        "XML",
+                        "TEXT"
+                      ]
+                    },
+                    "deliveryPolicy": {
+                      "type": "object",
+                      "properties": {
+                        "failureThreshold": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100
+                        },
+                        "openSeconds": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 3600
+                        },
+                        "maxConcurrency": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 100
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "index"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false,
+            "minProperties": 1
+          }
+        },
+        "required": [
+          "expectedChecksum",
+          "changeSummary",
+          "patch"
+        ],
+        "additionalProperties": false
+      },
+      "XmlProfile": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[A-Za-z_][\\w:-]*$"
+          },
+          "requiredPaths": {
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 300,
+              "pattern": "^[A-Za-z_][\\w:-]*(?:\\.[A-Za-z_][\\w:-]*){0,15}$"
+            }
+          },
+          "values": {
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "maxLength": 300,
+                  "pattern": "^[A-Za-z_][\\w:-]*(?:\\.[A-Za-z_][\\w:-]*){0,15}$"
+                },
+                "allowed": {
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 300
+                  }
+                }
+              },
+              "required": [
+                "path",
+                "allowed"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "DeliveryPolicy": {
+        "type": "object",
+        "properties": {
+          "failureThreshold": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "openSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false
       }
     }
   }

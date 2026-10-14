@@ -257,3 +257,10 @@ TLS MLLP opsional: MLLP_TLS_ENABLED + certificate/key/CA files untuk listener, m
 Rollback aplikasi: stop inbound baru, rekonsiliasi in-flight deliveries, pertahankan tabel/kolom/history/keyring; rollback konfigurasi lewat revision API. Jangan drop migration tables/columns atau reset database. Binary lama yang mengubah channel langsung tidak boleh dijalankan bersamaan dengan binary V2.
 
 V2 verification: 212 unit/API tests, 13 real disposable PostgreSQL scenarios and 13 browser tests passed; coverage exceeds the initial baseline. Actual encrypted dump/restore and active-delivery SIGTERM passed on synthetic databases. Docker/remote CI/hospital UAT/load/production DR remain unverified. Full evidence and remaining scope are recorded in the V2 report.
+
+
+### Development operational controls (schema 5)
+
+Current development includes a secret-preserving successor draft editor, stored-revision synthetic dry-run, separate DNS/TCP/TLS connection probes, canonical JSON idempotency, optional reservation TTL, revision-owned destination circuit tuning and audited idle-only reset. ADMIN settings expose effective configuration and an audited metadata diagnostic download. `npm run docs:check` checks the static OpenAPI structure; Playwright includes Axe accessibility scans.
+
+Apply migration 5 before starting the new backend. `IDEMPOTENCY_RETENTION_HOURS=0` preserves prior dedupe lifetime; enable expiry only after receiver/retention policy review. Expiry releases reservations without deleting messages and holds active/failed deliveries. See [operational controls](docs/OPERATIONAL_CONTROLS.md), [follow-up evidence](docs/GAP_CLOSURE_REPORT_2026.md) and the [remaining gaps](docs/GAP_ANALYSIS_2026.md). Production approval still requires runtime verification and hospital UAT.

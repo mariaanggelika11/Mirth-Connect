@@ -1,4 +1,4 @@
-import { increment } from '../utils/runtimeMetrics.js';
+import { increment, gauge } from '../utils/runtimeMetrics.js';
 import net from 'node:net';
 import tls from 'node:tls';
 import { readFileSync } from 'node:fs';
@@ -24,13 +24,13 @@ export async function startHl7Listener(): Promise<net.Server> {
       return;
     }
     sockets.add(socket);
-    increment('mllp_active_connections', 1);
+    gauge('mllp_active_connections', sockets.size);
     socket.setTimeout(config.transport.timeout);
     socket.on('timeout', () => socket.destroy());
     socket.on('error', () => logger.warn({ code: 'MLLP_SOCKET_ERROR' }, 'MLLP connection failed'));
     socket.on('close', () => {
       sockets.delete(socket);
-      increment('mllp_active_connections', -1);
+      gauge('mllp_active_connections', sockets.size);
     });
     const decoder = new MllpDecoder(config.server.payloadLimit);
     let queue = Promise.resolve();

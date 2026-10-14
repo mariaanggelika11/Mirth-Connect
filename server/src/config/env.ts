@@ -62,6 +62,7 @@ export function loadConfig(input: NodeJS.ProcessEnv) {
     REFRESH_TOKEN_SECONDS: integer(604800, 300, 2592000),
     RETENTION_ENABLED: bool(false),
     INBOUND_IDEMPOTENCY_MODE: z.enum(['OPTIONAL', 'REQUIRED', 'DISABLED']).default('OPTIONAL'),
+    IDEMPOTENCY_RETENTION_HOURS: integer(0, 0, 87600),
     MAX_ACTIVE_DELIVERY: integer(16, 1, 1000),
     MAX_DELIVERY_PER_DESTINATION: integer(2, 1, 100),
     CIRCUIT_FAILURE_THRESHOLD: integer(5, 1, 100),
@@ -211,6 +212,7 @@ export function loadConfig(input: NodeJS.ProcessEnv) {
       path: e.INBOUND_PATH.replace(/\/$/, ''),
       apiKey: e.INBOUND_API_KEY || '',
       idempotencyMode: e.INBOUND_IDEMPOTENCY_MODE,
+      idempotencyRetentionHours: e.IDEMPOTENCY_RETENTION_HOURS,
     },
     transport: { timeout: e.REQUEST_TIMEOUT_MS, allowedHosts: list(e.OUTBOUND_ALLOWED_HOSTS) },
     scripts: {

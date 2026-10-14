@@ -28,6 +28,7 @@ export interface Source {
 }
 
 export interface Destination {
+  deliveryPolicy?: { failureThreshold?: number; openSeconds?: number; maxConcurrency?: number };
   circuitState?: string;
   circuitFailures?: number;
   id?: number;

@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 // Synthetic browser fixtures. No writes to the real workspace database.
 const channel = {
   id: 1,
@@ -371,4 +372,238 @@ test('viewer settings hides user and audit administration', async ({ page }) => 
   await expect(page.getByRole('tab', { name: 'Account & connection' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Users', exact: true })).toHaveCount(0);
   await expect(page.getByRole('tab', { name: 'Audit log' })).toHaveCount(0);
+});
+
+test('draft iteration, stored dry-run and handshake probe use functional APIs without reposting secrets', async ({
+  page,
+}) => {
+  await session(page, 'DEVELOPER');
+  let saved = false;
+  let patchBody: unknown;
+  let probeCalls = 0;
+  const detail = {
+    name: 'Synthetic draft',
+    idempotencyMode: 'OPTIONAL',
+    destinations: [
+      {
+        name: 'Synthetic sender',
+        isEnabled: true,
+        timeoutMs: 1000,
+        endpoint: 'http://localhost/synthetic',
+        processingScript: '[CONFIGURED]',
+      },
+    ],
+    processingScript: '[CONFIGURED]',
+  };
+  await page.route('**/api/channel/1/revisions', (r) =>
+    r.fulfill({
+      json: {
+        success: true,
+        data: [
+          {
+            revision: saved ? 3 : 2,
+            state: 'DRAFT',
+            change_summary: 'Synthetic draft',
+            checksum: 'a'.repeat(64),
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/channel/1/revisions/2', (r) => {
+    if (r.request().method() === 'PATCH') {
+      patchBody = r.request().postDataJSON();
+      saved = true;
+      return r.fulfill({ json: { success: true, revision: 3, draft: true } });
+    }
+    return r.fulfill({ json: { success: true, data: detail, checksum: 'a'.repeat(64) } });
+  });
+  await page.route('**/api/channel/1/revisions/3', (r) =>
+    r.fulfill({
+      json: {
+        success: true,
+        data: { ...detail, name: 'Edited synthetic draft' },
+        checksum: 'b'.repeat(64),
+      },
+    }),
+  );
+  await page.route('**/api/channel/1/revisions/3/dry-run', (r) => {
+    expect(r.request().postDataJSON()).toEqual({ payload: { fixture: 'synthetic' } });
+    return r.fulfill({
+      json: {
+        success: true,
+        revision: 3,
+        results: [{ finalPayload: { fixture: 'synthetic', processed: true }, status: 'VALID' }],
+        warnings: ['No DNS or network delivery'],
+      },
+    });
+  });
+  await page.route('**/api/channel/1/revisions/3/destinations/0/test-connection', (r) => {
+    probeCalls++;
+    return r.fulfill({
+      json: {
+        success: true,
+        reachable: true,
+        secure: false,
+        warnings: ['Plaintext trusted network only'],
+      },
+    });
+  });
+  await page.getByLabel('More actions for Test Channel').click();
+  await page.getByRole('button', { name: 'Revisions', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit draft 2' }).click();
+  await page.getByLabel('Draft channel name').fill('Edited synthetic draft');
+  await page.getByLabel('Draft destination 1 timeout').fill('2345');
+  await page.getByLabel('Publish / rollback summary').fill('Synthetic reviewed edit');
+  await page.getByRole('button', { name: 'Save successor draft' }).click();
+  await expect(page.getByRole('button', { name: 'Edit draft 3' })).toBeVisible();
+  expect(patchBody).toEqual({
+    expectedChecksum: 'a'.repeat(64),
+    changeSummary: 'Synthetic reviewed edit',
+    patch: {
+      name: 'Edited synthetic draft',
+      idempotencyMode: 'OPTIONAL',
+      destinations: [{ index: 0, name: 'Synthetic sender', isEnabled: true, timeoutMs: 2345 }],
+    },
+  });
+  expect(JSON.stringify(patchBody)).not.toContain('processingScript');
+  expect(JSON.stringify(patchBody)).not.toContain('endpoint');
+  await page.getByRole('button', { name: 'Dry-run revision 3' }).click();
+  await expect(page.getByLabel('Revision dry-run result')).toContainText('processed');
+  await page.getByRole('button', { name: 'Review configuration' }).click();
+  await page.getByRole('button', { name: 'Test connection · Synthetic sender' }).click();
+  await expect(page.getByLabel('Revision dry-run result')).toContainText('reachable');
+  expect(probeCalls).toBe(1);
+});
+test('draft conflict keeps the editor open and exposes the server error', async ({ page }) => {
+  await session(page, 'DEVELOPER');
+  await page.route('**/api/channel/1/revisions', (r) =>
+    r.fulfill({
+      json: { data: [{ revision: 2, state: 'DRAFT', change_summary: 'Synthetic draft' }] },
+    }),
+  );
+  await page.route('**/api/channel/1/revisions/2', (r) =>
+    r.request().method() === 'PATCH'
+      ? r.fulfill({
+          status: 409,
+          json: { code: 'DRAFT_CONFLICT', message: 'Draft changed; reload revisions' },
+        })
+      : r.fulfill({
+          json: { checksum: 'a'.repeat(64), data: { name: 'Synthetic draft', destinations: [] } },
+        }),
+  );
+  await page.getByLabel('More actions for Test Channel').click();
+  await page.getByRole('button', { name: 'Revisions', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit draft 2' }).click();
+  await page.getByLabel('Publish / rollback summary').fill('Synthetic conflicting edit');
+  await page.getByRole('button', { name: 'Save successor draft' }).click();
+  await expect(page.getByRole('alert')).toContainText('Draft changed');
+  await expect(page.getByLabel('Draft channel name')).toBeVisible();
+});
+test('role changed during active session hides configuration actions after reconciliation', async ({
+  page,
+}) => {
+  await session(page, 'DEVELOPER');
+  await expect(page.getByRole('button', { name: 'New Channel' })).toBeVisible();
+  await page.route('**/api/auth/me', (r) =>
+    r.fulfill({
+      json: { success: true, data: { id: 1, name: 'Synthetic downgraded user', role: 'VIEWER' } },
+    }),
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.getByRole('button', { name: 'New Channel' })).toHaveCount(0);
+  await page.getByLabel('More actions for Test Channel').click();
+  await expect(page.getByRole('button', { name: 'Revisions', exact: true })).toHaveCount(0);
+});
+test('WCAG accessibility scan and keyboard focus trap cover login and revision editor', async ({
+  page,
+}) => {
+  await page.goto('/');
+  let scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(scan.violations).toEqual([]);
+  await session(page, 'DEVELOPER');
+  await page.route('**/api/channel/1/revisions', (r) =>
+    r.fulfill({
+      json: { data: [{ revision: 2, state: 'DRAFT', change_summary: 'Synthetic draft' }] },
+    }),
+  );
+  await page.getByLabel('More actions for Test Channel').click();
+  await page.getByRole('button', { name: 'Revisions', exact: true }).click();
+  scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(scan.violations).toEqual([]);
+  await page.getByLabel('Close dialog').focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByRole('button', { name: 'Compare selected revisions' })).not.toBeFocused();
+  expect(
+    await page.evaluate(() =>
+      document.querySelector('[role="dialog"]')?.contains(document.activeElement),
+    ),
+  ).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('dirty successor draft requires confirmation before closing', async ({ page }) => {
+  await session(page, 'DEVELOPER');
+  await page.route('**/api/channel/1/revisions', (r) =>
+    r.fulfill({
+      json: { data: [{ revision: 2, state: 'DRAFT', change_summary: 'Synthetic draft' }] },
+    }),
+  );
+  await page.route('**/api/channel/1/revisions/2', (r) =>
+    r.fulfill({
+      json: { checksum: 'a'.repeat(64), data: { name: 'Synthetic draft', destinations: [] } },
+    }),
+  );
+  await page.getByLabel('More actions for Test Channel').click();
+  await page.getByRole('button', { name: 'Revisions', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit draft 2' }).click();
+  await page.getByLabel('Draft channel name').fill('Unsaved synthetic change');
+  await page.getByLabel('Close dialog').click();
+  await expect(page.getByRole('dialog', { name: 'Discard draft changes?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByLabel('Draft channel name')).toHaveValue('Unsaved synthetic change');
+  await page.getByLabel('Close dialog').click();
+  await page.getByRole('button', { name: 'Discard draft changes', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+test('admin downloads audited metadata using real diagnostic API contract', async ({ page }) => {
+  await session(page, 'ADMIN');
+  await page.route('**/api/system/configuration', (r) =>
+    r.fulfill({
+      json: {
+        success: true,
+        data: {
+          runtime: { node: 'synthetic-runtime', encryptionKeyVersion: 'current' },
+          retention: { enabled: false },
+        },
+      },
+    }),
+  );
+  let downloads = 0;
+  await page.route('**/api/system/diagnostics', (r) => {
+    downloads++;
+    return r.fulfill({
+      json: {
+        success: true,
+        formatVersion: 1,
+        schemaVersions: [1, 2, 3, 4, 5],
+        messageStates: [],
+        exclusions: ['Payloads', 'Credentials'],
+      },
+    });
+  });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(
+    page.getByText('Effective security & operations settings', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download diagnostic metadata' })).toBeEnabled();
+  const report = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download diagnostic metadata' }).click();
+  expect((await report).suggestedFilename()).toBe('mirth-diagnostic-metadata.json');
+  expect(downloads).toBe(1);
 });

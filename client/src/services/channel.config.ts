@@ -26,6 +26,7 @@ export function channelConfiguration(channel: Channel): ChannelFormData {
       maxRetries: d.maxRetries ?? 3,
       retryIntervalSeconds: d.retryIntervalSeconds ?? 30,
       timeoutMs: d.timeoutMs ?? 10000,
+      deliveryPolicy: d.deliveryPolicy || {},
     })),
   };
 }
@@ -57,7 +58,7 @@ export function exportChannelXml(channel: Channel): string {
         (d) =>
           '<destination>' +
           Object.entries(d)
-            .map(([k, v]) => tag(k, v))
+            .map(([k, v]) => tag(k, k === 'deliveryPolicy' ? JSON.stringify(v) : v))
             .join('') +
           '</destination>',
       )

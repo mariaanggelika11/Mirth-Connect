@@ -215,7 +215,7 @@ const ChannelDashboard: React.FC<{
       {/* TABLE */}
       {renderContent()}
 
-      {revisionChannel && (
+      {revisionChannel && can('channel:write') && (
         <RevisionPanel
           channel={revisionChannel}
           onClose={() => setRevisionChannel(null)}
@@ -224,7 +224,7 @@ const ChannelDashboard: React.FC<{
       )}
       {/* FORM MODAL */}
       <ChannelForm
-        isOpen={isFormOpen}
+        isOpen={isFormOpen && can('channel:write')}
         onClose={() => setIsFormOpen(false)}
         onSubmit={handleFormSubmit}
         initialData={editingChannel}

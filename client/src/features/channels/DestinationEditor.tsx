@@ -135,6 +135,34 @@ export function DestinationEditor({ dest, index, onChange, onRemove, onEditScrip
             />
           </label>
         </div>
+        <div className="form-grid">
+          {(
+            [
+              ['failureThreshold', 'Circuit failure threshold', 100],
+              ['openSeconds', 'Circuit open duration (seconds)', 3600],
+              ['maxConcurrency', 'Destination concurrency limit', 100],
+            ] as const
+          ).map(([key, label, max]) => (
+            <label className="field" key={key}>
+              <span>{label}</span>
+              <input
+                type="number"
+                min={1}
+                max={max}
+                placeholder="Deployment default"
+                value={dest.deliveryPolicy?.[key] ?? ''}
+                onChange={(e) =>
+                  onChange({
+                    deliveryPolicy: {
+                      ...dest.deliveryPolicy,
+                      [key]: e.target.value ? Number(e.target.value) : undefined,
+                    },
+                  })
+                }
+              />
+            </label>
+          ))}
+        </div>
         <label className="field">
           <span>Destination filter</span>
           <textarea

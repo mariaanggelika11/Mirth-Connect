@@ -33,7 +33,7 @@ export default defineConfig({
     },
     coverage: {
       provider: 'v8',
-      thresholds: { statements: 74.18, lines: 75.13, functions: 73.01, branches: 67.66 },
+      thresholds: { statements: 75.93, lines: 77.05, functions: 77.43, branches: 69.71 },
       include: ['server/src/**/*.ts', 'client/src/services/*.ts'],
       exclude: [
         'server/src/server.ts',

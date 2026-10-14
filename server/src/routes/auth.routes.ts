@@ -7,6 +7,7 @@ import { AppError } from '../utils/errors.js';
 import { withTransaction } from '../config/db.js';
 import { audit } from '../services/audit.services.js';
 import { authenticate } from '../middleware/auth.js';
+import { increment } from '../utils/runtimeMetrics.js';
 import {
   browserLogin,
   browserRefresh,
@@ -22,7 +23,16 @@ router.use(
     limit: 20,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
-    message: { success: false, code: 'RATE_LIMITED', message: 'Too many authentication attempts' },
+    handler: (req, res) => {
+      increment('rate_limit_auth_rejections_total');
+      res.status(429).json({
+        success: false,
+        code: 'RATE_LIMITED',
+        message: 'Too many authentication attempts',
+        requestId: req.requestId,
+        details: [],
+      });
+    },
   }),
 );
 router.post('/browser/login', validate(credentials), browserLogin);
