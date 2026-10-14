@@ -15,3 +15,10 @@ Safety behavior changes: channel PUT saves a draft; publish activates it. DELETE
 - Reconcile active UI roles; protect dirty draft edits; add Axe checks and improve text contrast.
 - Expand to 234 unit/API, 17 native SQL and 19 browser tests; raise coverage gates and add OpenAPI structural CI check.
 - Production/hospital certification and remaining feature scope stay explicitly incomplete.
+
+
+## Development database maintenance — 2026-10-14
+
+- Add guarded snapshot backup, disposable restore/reset rehearsal and atomic single-ADMIN cleanup CLI with rollback/source-change/dependency protection.
+- Support pg_dump exported snapshots without putting credentials in arguments; add process/encryption/file-permission regression tests.
+- User-approved MiniMirthDev migration 1→5 and reset completed; admin@gmail.com and its original password hash preserved.

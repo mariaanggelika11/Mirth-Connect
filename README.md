@@ -264,3 +264,8 @@ V2 verification: 212 unit/API tests, 13 real disposable PostgreSQL scenarios and
 Current development includes a secret-preserving successor draft editor, stored-revision synthetic dry-run, separate DNS/TCP/TLS connection probes, canonical JSON idempotency, optional reservation TTL, revision-owned destination circuit tuning and audited idle-only reset. ADMIN settings expose effective configuration and an audited metadata diagnostic download. `npm run docs:check` checks the static OpenAPI structure; Playwright includes Axe accessibility scans.
 
 Apply migration 5 before starting the new backend. `IDEMPOTENCY_RETENTION_HOURS=0` preserves prior dedupe lifetime; enable expiry only after receiver/retention policy review. Expiry releases reservations without deleting messages and holds active/failed deliveries. See [operational controls](docs/OPERATIONAL_CONTROLS.md), [follow-up evidence](docs/GAP_CLOSURE_REPORT_2026.md) and the [remaining gaps](docs/GAP_ANALYSIS_2026.md). Production approval still requires runtime verification and hospital UAT.
+
+
+### Development database maintenance
+
+`npm run db:reset-development` previews the configured development database. Destructive execution requires an exact target, a verified encrypted backup receipt, unchanged source fingerprints and an existing ADMIN to retain. `db:verify-development-reset` runs the rehearsal only on a restored local disposable database. These are operator CLI utilities; there is no UI reset button. The user-approved MiniMirthDev reset and retained login are documented in [DATABASE_RESET_2026.md](docs/DATABASE_RESET_2026.md).

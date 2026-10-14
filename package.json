@@ -27,7 +27,9 @@
     "test:runtime": "node scripts/runtime-smoke.mjs",
     "secrets:scan": "node scripts/secret-scan.mjs",
     "test:backup": "node scripts/backup-smoke.mjs",
-    "docs:check": "node scripts/check-openapi.mjs"
+    "docs:check": "node scripts/check-openapi.mjs",
+    "db:reset-development": "tsx server/src/scripts/reset-development.ts",
+    "db:verify-development-reset": "tsx server/src/scripts/verify-development-reset.ts"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

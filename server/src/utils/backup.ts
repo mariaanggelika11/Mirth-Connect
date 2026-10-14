@@ -87,8 +87,14 @@ export async function decryptBackup(source: string, target: string, key: string)
     throw new Error('BACKUP_DECRYPTION_FAILED');
   }
 }
-export async function backupDatabase(url: string, directory: string, key: string) {
+export async function backupDatabase(
+  url: string,
+  directory: string,
+  key: string,
+  snapshot?: string,
+) {
   keyBytes(key);
+  if (snapshot && !/^[A-Fa-f0-9-]+$/.test(snapshot)) throw new Error('INVALID_BACKUP_SNAPSHOT');
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await chmod(directory, 0o700);
   const temporary = await mkdtemp(path.join(tmpdir(), 'mirth-backup-'));
@@ -100,7 +106,14 @@ export async function backupDatabase(url: string, directory: string, key: string
   try {
     await runPostgres(
       'pg_dump',
-      ['--format=custom', '--no-owner', '--no-acl', '--file', dump],
+      [
+        '--format=custom',
+        '--no-owner',
+        '--no-acl',
+        ...(snapshot ? ['--snapshot', snapshot] : []),
+        '--file',
+        dump,
+      ],
       url,
     );
     await chmod(dump, 0o600);
