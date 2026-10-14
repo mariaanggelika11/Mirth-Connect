@@ -78,6 +78,37 @@ beforeEach(() => {
   mock.send.mockResolvedValue('ok');
 });
 describe('Engine aggregation and durable retry policy', () => {
+  for (const code of ['INVALID_ACK', 'DELIVERY_OUTCOME_UNKNOWN', 'ERR_BAD_RESPONSE'])
+    it(
+      'quarantines ambiguous ' + code + ' instead of automatically repeating delivery',
+      async () => {
+        let attemptStatus = '';
+        mock.query.mockImplementation(async (sql: string) => {
+          if (sql.includes('lease_until=NULL')) attemptStatus = String(mock.inputs.status);
+          return {
+            recordset: sql.includes('SELECT status') ? [{ status: 'DEAD_LETTER' }] : [],
+            rowsAffected: [1],
+          };
+        });
+        mock.send.mockRejectedValueOnce({ code });
+        await processRetry(row);
+        expect(attemptStatus).toBe('DEAD_LETTER');
+        expect(mock.inputs.delay).toBe(null);
+        expect(mock.send).toHaveBeenCalledOnce();
+      },
+    );
+  it('accepted delivery with failed response script is never sent again automatically', async () => {
+    mock.script.mockRejectedValueOnce(new Error('synthetic response-script error'));
+    mock.query.mockImplementation(async (sql: string) => ({
+      recordset: sql.includes('SELECT status') ? [{ status: 'OUT-SENT' }] : [],
+      rowsAffected: [1],
+    }));
+    const snapshot = { ...dest, response_script: 'throw new Error("synthetic");' };
+    await processRetry({ ...row, transport_config: encrypt(JSON.stringify(snapshot)) });
+    expect(mock.send).toHaveBeenCalledOnce();
+    expect(mock.inputs.error).toBe('RESPONSE_SCRIPT_FAILED_AFTER_DELIVERY');
+    expect(mock.inputs.delay).toBe(null);
+  });
   for (const [statuses, expected] of [
     [['OUT-SENT', 'OUT-SENT'], 'SUCCESS'],
     [['OUT-SENT', 'OUT-ERROR'], 'PARTIAL'],

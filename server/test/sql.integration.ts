@@ -3,11 +3,18 @@ import type { AddressInfo } from 'node:net';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { signToken } from '../src/services/auth.services.js';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import pg from 'pg';
+import { encrypt, decrypt } from '../src/utils/secrets.js';
+import { rotateSecrets } from '../src/services/rotation.services.js';
 import { retryTick, retentionTick } from '../src/services/worker.services.js';
-import { processInboundMessage } from '../src/services/messageProcessor.services.js';
+import {
+  processInboundMessage,
+  resendMessage as resendStoredMessage,
+} from '../src/services/messageProcessor.services.js';
 import { sample } from './fixtures.js';
 import bcrypt from 'bcrypt';
 import request from 'supertest';
@@ -42,6 +49,22 @@ before(async () => {
     await tx
       .request()
       .batch(await readFile(new URL('../migrations/001_engine.sql', import.meta.url), 'utf8'));
+    await tx
+      .request()
+      .batch(await readFile(new URL('../migrations/002_hardening.sql', import.meta.url), 'utf8'));
+    await tx
+      .request()
+      .batch(
+        await readFile(new URL('../migrations/003_delivery_controls.sql', import.meta.url), 'utf8'),
+      );
+    await tx
+      .request()
+      .batch(
+        await readFile(
+          new URL('../migrations/004_operational_alerts.sql', import.meta.url),
+          'utf8',
+        ),
+      );
   });
   const userId = (
     await pool
@@ -222,11 +245,27 @@ test('real PostgreSQL: migration repeats without duplicate versions or data loss
     await tx
       .request()
       .batch(await readFile(new URL('../migrations/001_engine.sql', import.meta.url), 'utf8'));
+    await tx
+      .request()
+      .batch(await readFile(new URL('../migrations/002_hardening.sql', import.meta.url), 'utf8'));
+    await tx
+      .request()
+      .batch(
+        await readFile(new URL('../migrations/003_delivery_controls.sql', import.meta.url), 'utf8'),
+      );
+    await tx
+      .request()
+      .batch(
+        await readFile(
+          new URL('../migrations/004_operational_alerts.sql', import.meta.url),
+          'utf8',
+        ),
+      );
   });
   assert.equal(
     (await pool.request().query('SELECT count(*) total FROM "SchemaMigrations"')).recordset[0]
       .total,
-    1,
+    4,
   );
   assert.equal(
     (await pool.request().query('SELECT count(*) total FROM "Channels"')).recordset[0].total,
@@ -293,4 +332,352 @@ test('real PostgreSQL: retention removes resolved history and preserves queued w
     ).recordset[0].total,
     0,
   );
+});
+
+// Each request uses a synthetic fixture, with no production data or credentials.
+test('real PostgreSQL: concurrent HTTP idempotency and payload conflict', async () => {
+  const id = (
+    await pool
+      .request()
+      .query(
+        `INSERT INTO "Channels"(name,status,source_type,inbound_data_type) VALUES('Synthetic idempotency','RUNNING','HTTP','JSON') RETURNING id`,
+      )
+  ).recordset[0].id;
+  const payload = { fixture: 'synthetic' };
+  const results = await Promise.allSettled([
+    processInboundMessage(id, payload, 'synthetic-a', 'same-key'),
+    processInboundMessage(id, payload, 'synthetic-b', 'same-key'),
+  ]);
+  assert.ok(results.some((r) => r.status === 'fulfilled'));
+  const rows = (
+    await pool
+      .request()
+      .input('id', id)
+      .query('SELECT count(*) total FROM "Messages" WHERE channel_id=@id')
+  ).recordset[0];
+  assert.equal(rows.total, 1);
+  await assert.rejects(
+    processInboundMessage(id, { fixture: 'different' }, 'synthetic-c', 'same-key'),
+    (error: unknown) =>
+      error instanceof Error && 'code' in error && error.code === 'IDEMPOTENCY_CONFLICT',
+  );
+});
+test('real PostgreSQL: draft, competing publish and rollback preserve history', async () => {
+  const login = await request(app)
+    .post('/api/auth/login')
+    .send({ username, password: 'qa-password-with-12-characters' });
+  const auth = 'Bearer ' + login.body.token;
+  const initial = {
+    name: 'Synthetic revision',
+    source: { type: 'HTTP', inboundDataType: 'JSON' },
+    destinations: [],
+    changeSummary: 'Initial synthetic fixture',
+  };
+  const created = await request(app).post('/api/channel').set('Authorization', auth).send(initial);
+  assert.equal(created.status, 201);
+  const id = created.body.channelId;
+  const draft = await request(app)
+    .put('/api/channel/' + id)
+    .set('Authorization', auth)
+    .send({ ...initial, name: 'Changed revision', changeSummary: 'Synthetic draft' });
+  assert.equal(draft.status, 200);
+  assert.equal(draft.body.draft, true);
+  assert.equal(
+    (await pool.request().input('id', id).query('SELECT name FROM "Channels" WHERE id=@id'))
+      .recordset[0].name,
+    'Synthetic revision',
+  );
+  const endpoint = '/api/channel/' + id + '/revisions/' + draft.body.revision + '/publish';
+  const publishes = await Promise.all([
+    request(app)
+      .post(endpoint)
+      .set('Authorization', auth)
+      .send({ expectedActiveRevision: 1, changeSummary: 'Publish synthetic draft' }),
+    request(app)
+      .post(endpoint)
+      .set('Authorization', auth)
+      .send({ expectedActiveRevision: 1, changeSummary: 'Competing synthetic publish' }),
+  ]);
+  assert.deepEqual(publishes.map((r) => r.status).sort(), [200, 409]);
+  const active = publishes.find((r) => r.status === 200)!.body.activeRevision;
+  const rollback = await request(app)
+    .post('/api/channel/' + id + '/revisions/1/rollback')
+    .set('Authorization', auth)
+    .send({ expectedActiveRevision: active, changeSummary: 'Rollback synthetic fixture' });
+  assert.equal(rollback.status, 200);
+  assert.equal(
+    (await pool.request().input('id', id).query('SELECT name FROM "Channels" WHERE id=@id'))
+      .recordset[0].name,
+    'Synthetic revision',
+  );
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', id)
+        .query('SELECT count(*) total FROM "ChannelRevisions" WHERE channel_id=@id')
+    ).recordset[0].total,
+    4,
+  );
+});
+
+test('real PostgreSQL: browser refresh rotation and reuse revoke access session', async () => {
+  const login = await request(app)
+    .post('/api/auth/browser/login')
+    .send({ username, password: 'qa-password-with-12-characters' });
+  assert.equal(login.status, 200);
+  const cookies = login.headers['set-cookie'] as unknown as string[];
+  const cookieHeader = cookies.map((v) => v.split(';')[0]).join('; ');
+  const csrf = login.body.csrfToken;
+  const refresh = await request(app)
+    .post('/api/auth/browser/refresh')
+    .set('Cookie', cookieHeader)
+    .set('X-CSRF-Token', csrf);
+  assert.equal(refresh.status, 200);
+  assert.equal(
+    (
+      await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', 'Bearer ' + refresh.body.token)
+    ).status,
+    200,
+  );
+  const reused = await request(app)
+    .post('/api/auth/browser/refresh')
+    .set('Cookie', cookieHeader)
+    .set('X-CSRF-Token', csrf);
+  assert.equal(reused.status, 401);
+  assert.equal(
+    (
+      await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', 'Bearer ' + refresh.body.token)
+    ).status,
+    401,
+  );
+});
+
+test('real PostgreSQL: separate workers deduplicate persisted alert and admin acknowledges', async () => {
+  await pool
+    .request()
+    .query(
+      `INSERT INTO "Channels"(name,status,source_type,inbound_data_type) VALUES('Synthetic alert fixture','ERROR','HTTP','JSON')`,
+    );
+  let notifications = 0;
+  const alertReceiver = http.createServer((_req, res) => {
+    notifications++;
+    res.end('ok');
+  });
+  await new Promise<void>((resolve) => alertReceiver.listen(0, '127.0.0.1', resolve));
+  const endpoint = 'http://127.0.0.1:' + (alertReceiver.address() as AddressInfo).port;
+  const run = () =>
+    new Promise<void>((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          '--input-type=module',
+          '-e',
+          `import {alertTick} from './server/src/services/alert.services.ts';import {closeConnection} from './server/src/config/db.ts';await alertTick();await closeConnection();`,
+        ],
+        { env: { ...process.env, ALERT_WEBHOOK_URL: endpoint }, stdio: 'ignore' },
+      );
+      child.once('error', () => reject(new Error('SYNTHETIC_ALERT_WORKER_FAILED')));
+      child.once('exit', (code) =>
+        code === 0 ? resolve() : reject(new Error('SYNTHETIC_ALERT_WORKER_FAILED')),
+      );
+    });
+  try {
+    await Promise.all([run(), run()]);
+    assert.equal(notifications, 1);
+    const row = (
+      await pool
+        .request()
+        .query(`SELECT state,delivery_pending FROM "OperationalAlerts" WHERE code='CHANNEL_ERROR'`)
+    ).recordset[0];
+    assert.equal(row.state, 'OPEN');
+    assert.equal(row.delivery_pending, false);
+    const user = (
+      await pool
+        .request()
+        .input('name', username)
+        .query('SELECT id,name,role FROM "Users" WHERE username=@name')
+    ).recordset[0];
+    const acknowledged = await request(app)
+      .post('/api/alerts/CHANNEL_ERROR/acknowledge')
+      .set(
+        'Authorization',
+        'Bearer ' + signToken({ id: user.id, name: user.name, role: user.role }),
+      );
+    assert.equal(acknowledged.status, 200);
+    assert.equal(
+      (
+        await pool
+          .request()
+          .query(`SELECT state FROM "OperationalAlerts" WHERE code='CHANNEL_ERROR'`)
+      ).recordset[0].state,
+      'ACKNOWLEDGED',
+    );
+  } finally {
+    await new Promise<void>((resolve) => alertReceiver.close(() => resolve()));
+  }
+});
+
+test('real PostgreSQL: retired destination cannot be manually resent', async () => {
+  const id = (
+    await pool
+      .request()
+      .query(
+        `INSERT INTO "Channels"(name,status,source_type,inbound_data_type) VALUES('Synthetic retired sender','RUNNING','HTTP','JSON') RETURNING id`,
+      )
+  ).recordset[0].id;
+  const dest = (
+    await pool
+      .request()
+      .input('id', id)
+      .input('endpoint', encrypt('http://127.0.0.1:' + port))
+      .query(
+        `INSERT INTO "Destinations"(channel_id,name,type,endpoint,outbound_data_type,is_enabled,is_deleted) VALUES(@id,'Synthetic retired destination','REST',@endpoint,'JSON',false,true) RETURNING *`,
+      )
+  ).recordset[0];
+  const message = (
+    await pool
+      .request()
+      .input('id', id)
+      .input('dest', dest.id)
+      .input('snapshot', encrypt(JSON.stringify(dest)))
+      .query(
+        `INSERT INTO "Messages"(channel_id,destination_id,direction,message_type,original_payload,transformed_payload,status,transport_config,correlation_id) VALUES(@id,@dest,'OUT','JSON','{}','{}','DEAD_LETTER',@snapshot,'synthetic-retired') RETURNING id`,
+      )
+  ).recordset[0];
+  const before = received;
+  await assert.rejects(resendStoredMessage(message.id), /Resend requires/);
+  assert.equal(received, before);
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', message.id)
+        .query('SELECT status FROM "Messages" WHERE id=@id')
+    ).recordset[0].status,
+    'DEAD_LETTER',
+  );
+});
+test('real PostgreSQL: resolving dead letter preserves evidence and assignment but clears open metric', async () => {
+  const message = (
+    await pool
+      .request()
+      .query(
+        `SELECT id FROM "Messages" WHERE direction='OUT' AND status='DEAD_LETTER' ORDER BY id DESC LIMIT 1`,
+      )
+  ).recordset[0];
+  const user = (
+    await pool
+      .request()
+      .input('name', username)
+      .query('SELECT id,name,role FROM "Users" WHERE username=@name')
+  ).recordset[0];
+  const auth = 'Bearer ' + signToken({ id: user.id, name: user.name, role: user.role });
+  const endpoint = '/api/message/' + message.id + '/reconciliation';
+  assert.equal(
+    (
+      await request(app).put(endpoint).set('Authorization', auth).send({
+        state: 'IN_REVIEW',
+        note: 'Synthetic operator review',
+        category: 'TRANSPORT',
+        assignedTo: user.id,
+      })
+    ).status,
+    200,
+  );
+  assert.equal(
+    (
+      await request(app).put(endpoint).set('Authorization', auth).send({
+        state: 'RESOLVED',
+        note: 'Synthetic receiving-system reconciliation completed',
+        category: 'TRANSPORT',
+      })
+    ).status,
+    200,
+  );
+  const state = (
+    await pool
+      .request()
+      .input('id', message.id)
+      .query('SELECT state,assigned_to FROM "DeadLetterCases" WHERE message_id=@id')
+  ).recordset[0];
+  assert.equal(state.state, 'RESOLVED');
+  assert.equal(state.assigned_to, user.id);
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', message.id)
+        .query('SELECT status FROM "Messages" WHERE id=@id')
+    ).recordset[0].status,
+    'DEAD_LETTER',
+  );
+  const metrics = await request(app).get('/metrics').set('Authorization', auth);
+  assert.equal(metrics.status, 200);
+  assert.match(metrics.text, /mirth_dead_letter_open 0/);
+  assert.match(metrics.text, /mirth_dead_letter 1/);
+});
+test('real PostgreSQL: key rotation failure rolls back all records and new keyring reads rotated snapshots', async () => {
+  const id = (
+    await pool
+      .request()
+      .input('key', 'enc:v2:missing:invalid')
+      .query(
+        `INSERT INTO "Channels"(name,status,source_type,inbound_data_type,source_api_key) VALUES('Synthetic rotation failure','STOPPED','HTTP','JSON',@key) RETURNING id`,
+      )
+  ).recordset[0].id;
+  const destination = (
+    await pool
+      .request()
+      .input('id', id)
+      .input('endpoint', encrypt('http://localhost/synthetic'))
+      .query(
+        `INSERT INTO "Destinations"(channel_id,name,type,endpoint,outbound_data_type) VALUES(@id,'Synthetic rotation destination','REST',@endpoint,'JSON') RETURNING id,endpoint`,
+      )
+  ).recordset[0];
+  await assert.rejects(rotateSecrets(false), /Encrypted configuration cannot be read/);
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', destination.id)
+        .query('SELECT endpoint FROM "Destinations" WHERE id=@id')
+    ).recordset[0].endpoint,
+    destination.endpoint,
+  );
+  await pool
+    .request()
+    .input('id', id)
+    .query('UPDATE "Channels" SET source_api_key=NULL WHERE id=@id');
+  const previous = {
+    key: config.encryptionKey,
+    id: config.encryptionKeyId,
+    ring: config.previousEncryptionKeys,
+  };
+  config.encryptionKey = 'b'.repeat(64);
+  config.encryptionKeyId = 'next';
+  config.previousEncryptionKeys = JSON.stringify({ [previous.id]: previous.key });
+  try {
+    assert.ok((await rotateSecrets(true)).recordsVerified > 0);
+    const result = await rotateSecrets(false);
+    assert.ok(result.recordsUpdated > 0);
+    const value = (
+      await pool
+        .request()
+        .input('id', destination.id)
+        .query('SELECT endpoint FROM "Destinations" WHERE id=@id')
+    ).recordset[0].endpoint;
+    assert.ok(value.startsWith('enc:v2:next:'));
+    assert.equal(decrypt(value), 'http://localhost/synthetic');
+  } finally {
+    config.encryptionKey = previous.key;
+    config.encryptionKeyId = previous.id;
+    config.previousEncryptionKeys = previous.ring;
+  }
 });

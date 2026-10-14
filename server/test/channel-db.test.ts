@@ -43,6 +43,10 @@ beforeEach(() => {
   state.query.mockImplementation(async (sql: string) => {
     if (sql.includes('SELECT id,name,role FROM "Users"'))
       return { recordset: [{ id: 1, role: 'ADMIN', name: 'admin' }], rowsAffected: [1] };
+    if (sql.includes('SELECT * FROM "Channels"'))
+      return {
+        recordset: [{ id: 1, name: 'channel', source_type: 'HTTP', inbound_data_type: 'JSON' }],
+      };
     if (sql.includes('SELECT id FROM "Channels" WHERE') || sql.includes('SELECT id,status'))
       return { recordset: [{ id: 1, status: 'STOPPED' }] };
     if (sql.includes('RETURNING id')) return { recordset: [{ id: 1 }] };
@@ -97,7 +101,11 @@ describe('Channel transaction usage (database session mocked)', () => {
       .send(payload);
     expect(res.status).toBe(200);
     expect(state.commit).toHaveBeenCalledOnce();
-    expect(state.inputs.action).toBe('UPDATE_CHANNEL');
+    expect(state.inputs.action).toBe('CREATE_CHANNEL_DRAFT');
+    expect(res.body.draft).toBe(true);
+    expect(state.query.mock.calls.some((c) => c[0].includes('UPDATE "Channels" SET name'))).toBe(
+      false,
+    );
   });
   it('delete preserves messages and refuses running channels', async () => {
     state.query.mockImplementation(async (sql: string) => ({

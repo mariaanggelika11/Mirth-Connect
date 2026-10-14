@@ -56,7 +56,7 @@ describe('Monitor pagination and PHI separation', () => {
     expect(res.status).toBe(200);
     expect(res.body.pagination).toEqual({ page: 2, pageSize: 50, total: 101 });
     expect(state.history.find((h) => h.sql.includes('COUNT('))?.params.offset).toBe(50);
-    expect(state.history.some((h) => h.sql.includes('IN (42)'))).toBe(true);
+    expect(state.history.some((h) => h.params.ids === '42')).toBe(true);
     expect(res.body.data[0].originalPayload).toBeUndefined();
   });
   it('viewer detail omits all payloads and responses', async () => {
@@ -123,7 +123,7 @@ describe('Durable scheduler and retention', () => {
     expect(state.history[0].sql).toContain(
       "'PROCESSING','QUEUED','RETRYING','OUT-ERROR','DEAD_LETTER'",
     );
-    expect(state.history[2].sql).toContain('LIMIT 1000');
+    expect(state.history.some((h) => h.sql.includes('LIMIT 1000'))).toBe(true);
   });
 });
 

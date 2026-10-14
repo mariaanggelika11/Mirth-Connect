@@ -73,8 +73,18 @@ describe('Security boundaries', () => {
   });
   it('rejects tampered encrypted data', () =>
     expect(() => decrypt(encrypt('value').slice(0, -4) + 'AAAA')).toThrow());
+  it('hides URL fragments as well as authentication and query credentials', () => {
+    expect(publicEndpoint(encrypt('https://localhost/path#SYNTHETIC_VALUE')).endpoint).toBe(
+      'https://localhost/path',
+    );
+  });
 });
 describe('QuickJS isolated script execution', () => {
+  it('rejects asynchronous transformer results instead of silently serializing an empty object', async () => {
+    await expect(
+      executeScript('return Promise.resolve(msg)', { msg: { fixture: 'synthetic' } }),
+    ).rejects.toThrow('Script execution failed');
+  });
   it('rejects nonboolean filter results', async () => {
     await expect(executeScript('return "yes"', { msg: {} }, 'true')).rejects.toThrow(
       'Filter must return a boolean',

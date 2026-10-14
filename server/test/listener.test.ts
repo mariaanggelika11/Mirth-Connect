@@ -52,7 +52,7 @@ describe('Inbound MLLP listener (loopback)', () => {
     const bytes = frame(sample);
     const replies = await exchange([bytes.subarray(0, 20), bytes.subarray(20)]);
     expect(replies[0]).toContain('MSA|AA|ID123');
-    expect(state.process).toHaveBeenCalledWith(1, sample);
+    expect(state.process).toHaveBeenCalledWith(1, sample, undefined, undefined, 'HL7', undefined);
   });
   it('multiple frames processed sequentially', async () => {
     state.query.mockResolvedValue({ recordset: [{ id: 1, filter_script: '' }] });
