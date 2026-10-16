@@ -482,16 +482,14 @@ test('JSON to XML preview, connection test and confirmed onboarding delivery kee
   await onboarding.getByText('Test this channel', { exact: true }).click();
   const endpoint = onboarding.getByRole('region', { name: 'Current source endpoint' });
   await expect(endpoint).toContainText(`${productionBase}/api/message/inbound/2`);
-  await endpoint.getByRole('button', { name: 'Copy endpoint', exact: true }).click();
-  expect(await clipboard(page)).toBe(`${productionBase}/api/message/inbound/2`);
-  await expect(endpoint.getByRole('button', { name: 'Copy curl example' })).not.toBeVisible();
-  await endpoint.getByText('Request examples', { exact: true }).click();
-  await endpoint.getByRole('button', { name: 'Copy curl example' }).click();
-  expect(await clipboard(page)).toContain('X-API-Key: <SOURCE_API_KEY>');
-  await endpoint.getByRole('button', { name: 'Copy Postman request' }).click();
-  expect(JSON.parse(await clipboard(page)).item[0].request.url).toBe(
-    `${productionBase}/api/message/inbound/2`,
-  );
+  await expect(endpoint.getByRole('button')).toHaveCount(0);
+  await expect(endpoint.locator('summary')).toHaveCount(0);
+  await expect(
+    endpoint.getByText(
+      'Replace the API key and request ID placeholders before sending synthetic data.',
+      { exact: true },
+    ),
+  ).toHaveCount(0);
   await onboarding.getByRole('button', { name: 'Create API key', exact: true }).click();
   expect(state.rotations).toBe(0);
   await page.getByRole('button', { name: 'Create key', exact: true }).click();
@@ -856,7 +854,7 @@ for (const [label, base] of [
   ['local', 'http://localhost:9000'],
   ['production', productionBase],
 ] as const)
-  test(`${label} source endpoint stays visible and request examples remain optional`, async ({
+  test(`${label} source endpoint stays visible without copy controls or request examples`, async ({
     page,
   }) => {
     await workspace(page, {
@@ -872,15 +870,14 @@ for (const [label, base] of [
     const endpoint = page.getByRole('region', { name: 'Current source endpoint' });
     await expect(endpoint).toBeVisible();
     await expect(endpoint).toContainText(`${base}/api/message/inbound/1`);
-    await expect(endpoint.getByRole('button', { name: 'Copy curl example' })).not.toBeVisible();
-    await endpoint.getByText('Request examples', { exact: true }).click();
-    await endpoint.getByRole('button', { name: 'Copy curl example' }).click();
-    expect(await clipboard(page)).toContain(`POST '${base}/api/message/inbound/1'`);
-    expect(await clipboard(page)).toContain('<SOURCE_API_KEY>');
-    await endpoint.getByRole('button', { name: 'Copy Postman request' }).click();
-    expect(JSON.parse(await clipboard(page)).item[0].request.url).toBe(
-      `${base}/api/message/inbound/1`,
-    );
+    await expect(endpoint.getByRole('button')).toHaveCount(0);
+    await expect(endpoint.locator('summary')).toHaveCount(0);
+    await expect(
+      endpoint.getByText(
+        'Replace the API key and request ID placeholders before sending synthetic data.',
+        { exact: true },
+      ),
+    ).toHaveCount(0);
   });
 
 test('Messages separates inbound, source and final output while auditing raw pagination', async ({

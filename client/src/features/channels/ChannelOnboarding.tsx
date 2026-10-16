@@ -141,10 +141,7 @@ export function ChannelOnboarding({
                     Send synthetic message
                   </Button>
                   {(!running || !key) && (
-                    <small>
-                      Start the channel and create a key here to send a test, or use your saved key
-                      with a request example.
-                    </small>
+                    <small>Start the channel and create a key here to send a test.</small>
                   )}
                 </>
               ) : (
@@ -189,11 +186,10 @@ export function ChannelOnboarding({
         confirmLabel="Send test request"
         onConfirm={() =>
           action(async () => {
-            const collection = JSON.parse(sourceRequest(channel).postman);
-            const request = collection.item[0].request;
-            const { data } = await api.post(`/message/inbound/${channel.id}`, request.body.raw, {
+            const request = sourceRequest(channel);
+            const { data } = await api.post(`/message/inbound/${channel.id}`, request.body, {
               headers: {
-                'Content-Type': request.header[0].value,
+                'Content-Type': request.contentType,
                 'X-API-Key': key,
                 'Idempotency-Key': crypto.randomUUID(),
               },

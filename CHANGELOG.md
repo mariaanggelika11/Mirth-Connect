@@ -1,5 +1,11 @@
 # Changelog
 
+## Remove endpoint copy and request examples — 2026-10-16
+
+- Remove Copy endpoint, curl/Postman request examples and placeholder instructions from the shared endpoint display; retain the source URL and one-time API-key copy.
+- Remove unused example generation and styles while preserving confirmed synthetic-send payloads and headers. Remove two export-only tests with the deleted feature; retain format/request coverage.
+- Verify build, typecheck, lint, formatting, 301 unit/API tests and 45 browser tests. No backend or database changes.
+
 ## Simple filter choices — 2026-10-16
 
 - Replace source/destination boolean textareas with explicit accept/filter or deliver/skip choices; keep custom conditions in Advanced.

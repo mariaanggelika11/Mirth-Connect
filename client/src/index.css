@@ -35,14 +35,12 @@
   margin-top: 4px;
   font-size: 12px;
 }
-.channel-test-tools > summary,
-.source-request-examples > summary {
+.channel-test-tools > summary {
   font-size: 12px;
   color: var(--text-soft);
   cursor: pointer;
 }
-.channel-test-tools[open] > summary,
-.source-request-examples[open] > summary {
+.channel-test-tools[open] > summary {
   margin-bottom: 12px;
 }
 .source-key-tools {
