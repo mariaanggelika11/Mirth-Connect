@@ -65,6 +65,7 @@ Regression mencakup JSON → XML, XML → JSON, HL7 → JSON, JSON → HL7, dry-
 ### Kegagalan yang ditemukan dan diperbaiki
 
 - Runner snapshot awal memakai working directory sementara sebelum direktori dibuat; dibuat dulu lalu baseline build berhasil. Locator screenshot Messages semula salah (`Inspect`); dikoreksi ke tombol aktual `Open message` dan screenshot diambil ulang.
+- Preview baseline sempat mencatat `/ready: ECONNREFUSED` karena fixture screenshot belum mengintersep readiness dan tidak menjalankan backend nyata. Fixture `/ready` ditambahkan dan keenam screenshot diambil ulang; screenshot bukan bukti health deployment production.
 - Chrome / local listener awal diblokir sandbox (`EPERM`/Chrome `SIGABRT`). Command yang sama dijalankan dengan izin runtime lokal, lalu test/screenshot berhasil. Ini bukan kegagalan aplikasi yang disembunyikan.
 - Lint awal menemukan tipe `import()` pada test baru; diganti type-only import lalu lint lulus.
 - Test assertion lama mengharapkan preview tanpa masking; diperbarui untuk eksplisit meminta raw dengan ADMIN dan memverifikasi perilaku redacted terpisah. Satu assertion error-code semula tidak sesuai kode aktual `SCRIPT_EXECUTION_FAILED`; dikoreksi dan diulang.
