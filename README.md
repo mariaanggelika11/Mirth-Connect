@@ -13,7 +13,7 @@ Node.js **22.18+**, npm, PostgreSQL 14+ dengan database yang sudah dibuat. Chrom
 - `server/src/utils`: framing, parser, transport, enkripsi, validation.
 - `server/migrations`: schema/index versioned.
 - `server/test`, `client/test`, `client/e2e`: test otomatis.
-- `docs/ARCHITECTURE.md`, `docs/AUDIT.md`, `docs/AUDIT_REPORT.md`: desain dan hasil audit.
+- `docs/ARCHITECTURE.md`: desain engine; `docs/MIRTH_LITE_UI.md`: panduan pengguna; `docs/OPERATIONAL_CONTROLS.md`: operasi dan deployment.
 
 ## Installation dan environment
 
@@ -98,11 +98,11 @@ npm run build
 NODE_ENV=production npm start
 ```
 
-Set `HOST`, CORS, hostname outbound, verified PostgreSQL TLS dan source key sebelum exposure. Gunakan HTTPS reverse proxy untuk UI/API dan jaringan terisolasi atau TLS tunnel untuk MLLP. Aplikasi tidak menyediakan TLS MLLP native.
+Set `HOST`, CORS, hostname outbound, verified PostgreSQL TLS dan source key sebelum exposure. Gunakan HTTPS reverse proxy untuk UI/API. MLLP mendukung TLS/mTLS native; plaintext production memerlukan exception jaringan terisolasi yang disetujui.
 
 ## Authentication dan RBAC
 
-Bearer JWT HS256: expiry, issuer, audience, `jti`; role dibaca ulang dari database per request. Logout yang berhasil mencabut token di SQL. UI menghapus session pada seluruh 401/token invalid dan saat expiry. Token masih disimpan di localStorage; CSP dan tidak adanya script CDN mengurangi risiko, tetapi tidak menghilangkan risiko XSS.
+Bearer JWT HS256: expiry, issuer, audience, `jti`; role dibaca ulang dari database per request. Browser menyimpan access token hanya di memori dan memakai rotating refresh cookie HttpOnly/SameSite=Strict/Secure production dengan CSRF/reuse detection. Logout mencabut session; kegagalan refresh mengakhiri session UI. Bearer automation tetap tersedia. CSP dan pembatasan script membantu mengurangi risiko XSS.
 
 | Role | Izin |
 | --- | --- |
@@ -150,7 +150,7 @@ Parser mendukung CR/CRLF/LF, delimiter MSH, MSH-1/MSH-2 special numbering, repea
 
 Framing: `0x0B + message + 0x1C + 0x0D`. Fragmentasi/multiple frames diproses berurutan. ACK menukar sender/receiver, mempertahankan processing/version/trigger dan MSA control ID, memakai UTC HL7 timestamp. AA hanya untuk hasil sukses/accepted queue yang sudah persisten; AE untuk processing failure; AR untuk invalid HL7/tidak ada routing/ambiguity. Outbound MLLP memeriksa framed ACK, MSA code dan control ID tanpa menunggu peer menutup socket.
 
-Deduplikasi inbound HL7 memakai channel + sending application/facility + MSH-10 selama message masih retained. Pesan yang sama tidak dikirim ulang oleh receive; bila gagal, gunakan resend outbound terkontrol. JSON HTTP belum mempunyai idempotency inbound otomatis.
+Deduplikasi inbound HL7 memakai channel + sending application/facility + MSH-10 selama message masih retained. Pesan yang sama tidak dikirim ulang oleh receive; bila gagal, gunakan resend outbound terkontrol. HTTP/JSON mendukung scoped `Idempotency-Key` dan canonical request hash; pengaturan TTL dijelaskan pada [operational controls](docs/OPERATIONAL_CONTROLS.md#idempotency-identity-and-expiry).
 
 ## Transformer / filter
 
@@ -181,13 +181,13 @@ npm run test:e2e
 
 Browser test default menggunakan Google Chrome macOS. Linux/Windows: set `CHROME_PATH` ke executable Chrome yang tersedia. Test browser menggunakan fixture synthetic dan tidak membaca database rumah sakit. Unit/integration API menggunakan SQL driver mock; transport/listener memakai loopback sungguhan.
 
-Uji PostgreSQL **sungguhan**, pada schema sementara yang terisolasi:
+Uji PostgreSQL **sungguhan**, memakai environment test yang menunjuk database disposable lokal dan berisi key sintetis, pada schema sementara yang terisolasi:
 
 ```sh
-PG_SCHEMA=mirth_test_$(date +%s) LOG_LEVEL=silent npm run test:sql
+ENV_FILE=/secure/mirth-test.env PG_SCHEMA=mirth_test_$(date +%s) LOG_LEVEL=silent npm run test:sql
 ```
 
-Script menolak schema `public`, membuat schema baru, menjalankan migration dan enam skenario synthetic, lalu menghapus schema tersebut. Pengguna DB memerlukan izin CREATE schema. Login/channel/transport/monitor/logout, rollback, concurrent retry/dedupe, idempotent migration dan retention sudah diuji pada PostgreSQL nyata. Tabel `public` tidak dipakai oleh test ini.
+Path environment tersebut adalah placeholder; isi dengan konfigurasi test terpisah dari `.env` aplikasi. Script menolak schema `public`, membuat schema baru, menjalankan migration dan 19 skenario synthetic, lalu menghapus schema tersebut. Pengguna DB memerlukan izin CREATE schema. Login/channel/transport/monitor/logout, rollback, concurrent retry/dedupe, idempotent migration, retention dan visual mapping sudah diuji pada PostgreSQL nyata. Tabel `public` tidak dipakai oleh test ini.
 
 Local receiver harness (synthetic data saja):
 
@@ -229,24 +229,24 @@ Compose ini development, DB eksternal, port host loopback. Container/migration b
 
 Konfigurasi backend sekarang memakai `DATABASE_URL`, bukan `SQL_*`. URL lokal ditujukan ke **MiniMirthDev**, bukan database lain pada server yang sama. `server/.env` tidak dibaca. Gunakan `PG_SSL=true` dengan verifikasi sertifikat untuk production; konfigurasi development lokal mengikuti koneksi PostgreSQL yang diberikan.
 
-Migrasi 4 Oktober 2026 mempertahankan tabel dan ID existing, menambahkan tabel engine/audit/revocation/index, serta mempertahankan timestamp lama tanpa konversi otomatis. Detail penerapan dan hasil pemeriksaan ada di [laporan PostgreSQL](docs/POSTGRES_MIGRATION.md). Tidak ada username/password default atau credential database dalam source.
+Migration mempertahankan nama tabel mixed-case, ID, password hash dan timestamp existing tanpa konversi timezone otomatis. Migrator memakai transaksi dan advisory lock. Jalankan seluruh migration 001–006 melalui `npm run db:migrate`; ikuti [deployment dan rollback](docs/OPERATIONAL_CONTROLS.md#deployment-and-rollback) serta [backup/restore](docs/BACKUP_RESTORE_RUNBOOK.md). Tidak ada username/password default atau credential database dalam source.
 
 ## UI / UX workspace
 
-Navigasi sekarang memakai Overview, Channels, Messages dan Settings. Editor channel mengikuti empat langkah dengan advanced settings; detail message memakai drawer dan resend memerlukan review. Admin dapat mengelola pengguna dan melihat audit dari Settings. Detail fitur dan verifikasi: [UI / UX](docs/UI_UX.md).
+Navigasi memakai Overview, Channels, Messages dan Settings. Editor channel mengikuti empat langkah dengan advanced settings; detail message memakai drawer dan resend memerlukan review. Admin dapat mengelola pengguna dan melihat audit dari Settings. Detail fitur dan verifikasi: [manual UI](docs/MIRTH_LITE_UI.md).
 
 
-## Production hardening V2 (14 October 2026)
+## Production hardening dan readiness
 
-Laporan terbaru: [IMPLEMENTATION_REPORT_V2](docs/IMPLEMENTATION_REPORT_V2.md), [readiness matrix](docs/PRODUCTION_READINESS_MATRIX.md), [gap analysis](docs/GAP_ANALYSIS_2026.md). Aplikasi belum dinyatakan production-ready. Branch ini tidak mengakses atau mengubah database production.
+Status pengujian dan pekerjaan tersisa dirangkum dalam [readiness matrix](docs/PRODUCTION_READINESS_MATRIX.md). Batas keamanan dijelaskan pada [threat model](docs/THREAT_MODEL.md). Aplikasi belum dinyatakan production-ready.
 
 Sebelum upgrade: backup terenkripsi teruji, review konfigurasi keyring/TLS/allowlist, dan jalankan di database disposable/staging terlebih dahulu. Node 24 dipakai CI/container (minimum package tetap 22.18+). Jalankan `npm ci`, `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run test:coverage`, `npm run build`. Dengan database disposable dipilih secara eksplisit, jalankan `npm run db:migrate -- --dry-run`, `npm run db:migrate` dua kali, lalu SQL/browser tests. Production migration memerlukan `MIGRATION_BACKUP_CONFIRMED=true`; migrator tidak dipanggil otomatis saat startup.
 
-Migration 002 menambah session/revision/reconciliation/profile; 003 menambah delivery slot/circuit state dan lease owner; 004 menambah inbox alert, pending notification, cooldown dan acknowledgement. Existing channel menjadi revision awal. PUT `/api/channel/:id` sekarang **menyimpan draft**; publish melalui `POST /api/channel/:id/revisions/:revision/publish` dengan expectedActiveRevision dan changeSummary. Rollback membuat publish baru. UI Revisions menyediakan review/compare/publish/rollback; editor meminta summary, idempotency mode, profile, serta synthetic dry-run tanpa network. Channel dengan revision history ditolak oleh DELETE; stop untuk retire. Perubahan ini memerlukan penyesuaian automation lama yang mengandalkan update langsung.
+Migration 002 menambah session/revision/reconciliation/profile; 003 menambah delivery slot/circuit state dan lease owner; 004 menambah inbox alert, pending notification, cooldown dan acknowledgement. Existing channel menjadi revision awal. PUT `/api/channel/:id` **menyimpan draft**; publish melalui `POST /api/channel/:id/revisions/:revision/publish` dengan expectedActiveRevision dan changeSummary. Rollback membuat publish baru. UI Revisions menyediakan review/compare/publish/rollback; summary opsional di UI diisi otomatis untuk audit. Validation dan scripting berada di Advanced, sementara Transformation menyediakan mapping dan preview tanpa network. Channel dengan revision history ditolak oleh DELETE; stop untuk retire. Perubahan ini memerlukan penyesuaian automation lama yang mengandalkan update langsung.
 
 Browser memakai `/api/auth/browser/login`, refresh cookie HttpOnly/SameSite=Strict/Secure production, CSRF dan token rotation/reuse detection; access token hanya di memori. Session localStorage lama dibuang, sehingga pengguna perlu login ulang. Endpoint Bearer `/api/auth/login` tetap tersedia untuk automation. UI refresh diserialisasi melalui Web Locks bila browser mendukungnya. Settings menampilkan/revoke session sendiri. Role dibaca dari SQL pada setiap request.
 
-HTTP source menerima `Idempotency-Key` (printable ASCII 1–200, scope per channel, hanya hash disimpan). Default OPTIONAL; REQUIRED menolak tanpa key; DISABLED mengabaikan header namun HL7 control-ID dedupe tetap aktif. Payload sama/key sama memakai existing ID/status; perubahan payload menghasilkan IDEMPOTENCY_CONFLICT 409 dan audit; duplicate yang masih processing menghasilkan 409. Hash memakai representasi JSON yang diterima engine, bukan canonical JSON; perubahan urutan property dapat dianggap conflict. Key berlaku selama inbound message retained; tidak ada TTL terpisah. Retention otomatis default **false**, diaktifkan hanya setelah kebijakan/backup disetujui.
+HTTP source menerima `Idempotency-Key` (printable ASCII 1–200, scope per channel, hanya hash disimpan). Default OPTIONAL; REQUIRED menolak tanpa key; DISABLED mengabaikan header namun HL7 control-ID dedupe tetap aktif. Payload sama/key sama memakai existing ID/status; perubahan payload menghasilkan IDEMPOTENCY_CONFLICT 409 dan audit; duplicate yang masih processing menghasilkan 409. Canonical JSON mengabaikan urutan property object dan mempertahankan urutan array. `IDEMPOTENCY_RETENTION_HOURS=0` mempertahankan masa dedupe sebelumnya; TTL positif hanya aktif setelah kebijakan receiver ditinjau. Retention otomatis default **false**, diaktifkan hanya setelah kebijakan/backup disetujui.
 
 Profile validation: JSON Schema draft-07 via AJV (tanpa regex/format/remote ref/async/uniqueItems; schema max16 KiB dan cache bounded), HL7 types/versions/required fields, custom boolean QuickJS script. Contoh synthetic: `{"hl7":{"messageTypes":["ORU^R01"],"versions":["2.5"],"requiredFields":["MSH.10","PID.3"]}}`. XML entity declaration ditolak; XSD bukan fitur yang telah diimplementasikan.
 
@@ -260,14 +260,14 @@ TLS MLLP opsional: MLLP_TLS_ENABLED + certificate/key/CA files untuk listener, m
 
 Rollback aplikasi: stop inbound baru, rekonsiliasi in-flight deliveries, pertahankan tabel/kolom/history/keyring; rollback konfigurasi lewat revision API. Jangan drop migration tables/columns atau reset database. Binary lama yang mengubah channel langsung tidak boleh dijalankan bersamaan dengan binary V2.
 
-V2 verification: 212 unit/API tests, 13 real disposable PostgreSQL scenarios and 13 browser tests passed; coverage exceeds the initial baseline. Actual encrypted dump/restore and active-delivery SIGTERM passed on synthetic databases. Docker/remote CI/hospital UAT/load/production DR remain unverified. Full evidence and remaining scope are recorded in the V2 report.
+Hasil verifikasi source terbaru tercatat di [manual UI](docs/MIRTH_LITE_UI.md#validasi-dan-batas-verifikasi); status produksi dan kekurangan source tetap dicatat di [readiness matrix](docs/PRODUCTION_READINESS_MATRIX.md).
 
 
-### Development operational controls (schema 5)
+### Development operational controls
 
 Current development includes a secret-preserving successor draft editor, stored-revision synthetic dry-run, separate DNS/TCP/TLS connection probes, canonical JSON idempotency, optional reservation TTL, revision-owned destination circuit tuning and audited idle-only reset. ADMIN settings expose effective configuration and an audited metadata diagnostic download. `npm run docs:check` checks the static OpenAPI structure; Playwright includes Axe accessibility scans.
 
-Apply migration 5 before starting the new backend. `IDEMPOTENCY_RETENTION_HOURS=0` preserves prior dedupe lifetime; enable expiry only after receiver/retention policy review. Expiry releases reservations without deleting messages and holds active/failed deliveries. See [operational controls](docs/OPERATIONAL_CONTROLS.md), [follow-up evidence](docs/GAP_CLOSURE_REPORT_2026.md) and the [remaining gaps](docs/GAP_ANALYSIS_2026.md). Production approval still requires runtime verification and hospital UAT.
+Apply migrations through version 6 before starting the current backend. `IDEMPOTENCY_RETENTION_HOURS=0` preserves prior dedupe lifetime; enable expiry only after receiver/retention policy review. Expiry releases reservations without deleting messages and holds active/failed deliveries. See [operational controls](docs/OPERATIONAL_CONTROLS.md) and [remaining scope](docs/PRODUCTION_READINESS_MATRIX.md#remaining-source-scope). Production approval still requires runtime verification and hospital UAT.
 
 
 ### Development database maintenance

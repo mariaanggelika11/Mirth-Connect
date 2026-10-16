@@ -64,7 +64,7 @@ Management JWT and external source API keys are separate. Source keys/endpoints/
 
 QuickJS runs interpreted JavaScript in a WebAssembly interpreter inside a Node worker. It receives only serialized data and pure helper source. No host callbacks/module loader/Node globals/network helpers are exposed. Interpreter memory/stack/CPU, worker heap, wall-clock and concurrency are bounded. The whole engine still needs deployment resource limits and defense against dependency/runtime vulnerabilities.
 
-HTTP destination requests validate exact host allowlist, pin DNS addresses, reject link-local/metadata destinations and redirects, and cap body/response and request time. PostgreSQL is encrypted with certificate verification in production. MLLP is plaintext and must be enclosed in a protected network/TLS tunnel.
+HTTP destination requests validate exact host allowlist, pin DNS addresses, reject link-local/metadata destinations and redirects, and cap body/response and request time. PostgreSQL is encrypted with certificate verification in production. MLLP supports optional native TLS/mTLS with certificate/hostname verification; production plaintext requires an explicitly approved isolated-network exception. Deployed certificates, renewal and network controls need runtime verification.
 
 ## Operational boundaries
 

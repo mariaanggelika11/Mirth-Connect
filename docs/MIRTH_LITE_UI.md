@@ -4,6 +4,8 @@
 
 Wizard mengikuti **Source → Transformation → Destinations → Review**. Kemampuan engine tetap tersedia. Penyederhanaan mengubah cara konfigurasi ditampilkan dan menambahkan pemetaan field visual pada transformer existing.
 
+Navigasi utama terdiri dari Overview untuk kesehatan/antrean, Channels untuk konfigurasi dan Start/Stop, Messages untuk pencarian dan hasil delivery, serta Settings untuk akun/session dan kontrol ADMIN. Detail pesan terbuka dalam drawer; menutup drawer mempertahankan filter dan halaman. Payload mendukung pencarian, copy, Pretty/Raw dan HL7 Tree sesuai permission.
+
 | Kemampuan inti | Tampilan / implementasi |
 | --- | --- |
 | Channel, Start/Stop | Tetap pada Channels; konfigurasi existing dan tindakan operasi dipertahankan |
@@ -17,6 +19,10 @@ Wizard mengikuti **Source → Transformation → Destinations → Review**. Kema
 | Message monitoring | Inbound Message, Source Processed Message, Outbound Message dan Delivery Result |
 | Inbound/outbound payload | Payload per tahap dan destination snapshot tetap tersimpan; masking/raw permission dan audit tetap berlaku |
 | Riwayat, publish, rollback | Tetap tersedia; summary di UI opsional, sistem menulis keterangan otomatis agar audit trail tidak kosong |
+
+Setelah **Save Channel**, dialog onboarding menyediakan Start channel, API key dan Open Messages. **Test this channel** membuka contoh request dan pengiriman sintetis. API key hanya ditampilkan sekali; rotasi membatalkan key sebelumnya. Endpoint berasal dari backend (`PUBLIC_BASE_URL` / `INBOUND_PATH`); copy membutuhkan HTTPS atau secure localhost dan tetap dapat dilakukan manual bila clipboard ditolak browser.
+
+Untuk perubahan channel existing, Save membuat draft; review dan publish melalui **Revisions** sebelum konfigurasi running berubah. Resend meminta review payload/destination dan konfirmasi, lalu backend memeriksa ulang permission, status dan snapshot. Delivery dengan hasil tidak pasti memerlukan rekonsiliasi operator sebelum dikirim ulang. Riwayat attempt dan dead letter dipertahankan.
 
 ## Mapping tanpa script
 

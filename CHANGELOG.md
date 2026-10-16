@@ -1,5 +1,11 @@
 # Changelog
 
+## Documentation cleanup — 2026-10-16
+
+- Remove ten superseded audit, baseline, plan, implementation and UI/migration reports; preserve their history in Git.
+- Consolidate current UI guidance and remaining source/runtime scope in the Lite UI manual and production readiness matrix; retain security, architecture, operational and development recovery documentation.
+- Repair documentation references and reconcile outdated session, schema, idempotency and metrics instructions. Application code, database and backups are unchanged.
+
 ## Visual transformation and four-step wizard — 2026-10-16
 
 - Use Source → Transformation → Destinations → Review, with visual field mapping, Required/default values, input/output previews and optional scripts.

@@ -1,10 +1,10 @@
-# Operational controls — development schema 5
+# Operational controls
 
 ## Migration and compatibility
 
 Apply `005_operational_controls.sql` through `npm run db:migrate`, never as an ad-hoc partial statement. Migration is additive and transactional; the migrator's existing advisory lock serializes runs. Existing destination policy defaults to `{}` (deployment defaults), legacy reservations keep NULL expiry, and legacy request hashes remain unchanged. New messages store both the old order-sensitive digest and a canonical digest, permitting rollback to the prior application artifact without losing the legacy reader's hash. PostgreSQL tests run the full migration set twice and check existing rows/counts. Backfill/index duration still needs staging/load verification on organization-sized data.
 
-New backend startup and restored-schema verification require version 5. For older backups, first restore to the guarded disposable target using the corresponding prior artifact, then apply migration 5 and verify the upgraded copy. Retain all schema version rows and columns when rolling back application code. Do not run a down migration, clear dedupe metadata, delete evidence, or rewrite Git history.
+Current backend startup and restored-schema verification require versions **1–6**. Migration 006 adds nullable `MessageDestinationLog.http_status` for actual HTTP response metadata. For older backups, first restore to the guarded disposable target using the corresponding prior artifact, then apply the complete migration chain and verify the upgraded copy with the correct keyring. Retain all schema version rows and columns when rolling back application code. See [backup compatibility](BACKUP_RESTORE_RUNBOOK.md). Do not run a down migration, clear dedupe metadata, delete evidence, or rewrite Git history.
 
 ## Draft iteration and revision tests
 
