@@ -39,9 +39,20 @@ export const handleInboundMessage = async (req: Request, res: Response, next: Ne
       'HTTP',
       channel.active_revision,
     );
-    res
-      .status(result.success ? (result.inboundStatus === 'QUEUED' ? 202 : 200) : 502)
-      .json({ success: result.success, result });
+    res.status(result.success ? (result.inboundStatus === 'QUEUED' ? 202 : 200) : 502).json({
+      success: result.success,
+      messageId: result.inboundMessageId,
+      status: result.inboundStatus,
+      ...(result.success === false
+        ? {
+            code: 'MESSAGE_PROCESSING_FAILED',
+            message: 'Message processing did not complete successfully.',
+            requestId: req.requestId,
+            details: [],
+          }
+        : {}),
+      result,
+    });
   } catch (error) {
     if (error instanceof AppError && error.code === 'IDEMPOTENCY_CONFLICT') {
       try {

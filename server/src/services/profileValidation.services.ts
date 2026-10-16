@@ -8,6 +8,7 @@ import { xmlProfileSchema } from '../utils/validator.js';
 import { config } from '../config/env.js';
 import type { z } from 'zod';
 export interface ValidationProfile {
+  basicSyntax?: boolean;
   jsonSchema?: Record<string, unknown>;
   xml?: z.infer<typeof xmlProfileSchema>;
   hl7?: { messageTypes?: string[]; versions?: string[]; requiredFields?: string[] };
@@ -116,6 +117,26 @@ export async function validatePayload(
   type: string,
   profile: ValidationProfile = {},
 ) {
+  if (type === 'JSON' && profile.basicSyntax) {
+    // HTTP and the preview editor parse JSON before this stage. A string here can
+    // be a valid JSON string scalar, so it must not be parsed a second time.
+    try {
+      const encoded = JSON.stringify(payload, (_key, value: unknown) => {
+        if (
+          value === undefined ||
+          typeof value === 'function' ||
+          typeof value === 'symbol' ||
+          (typeof value === 'number' && !Number.isFinite(value))
+        )
+          throw new Error('JSON_VALUE_INVALID');
+        return value;
+      });
+      if (encoded === undefined || Buffer.byteLength(encoded) > config.server.payloadLimit)
+        throw new Error('JSON_LIMIT');
+    } catch {
+      throw new AppError(422, 'JSON_INVALID', 'JSON payload is invalid');
+    }
+  }
   if (type === 'JSON' && profile.jsonSchema && !validator(profile.jsonSchema)(payload))
     throw new AppError(
       422,

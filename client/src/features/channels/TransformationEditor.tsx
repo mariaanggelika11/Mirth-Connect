@@ -4,7 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
 import { ScriptEditorModal } from '../../components/status/ScriptEditorModal';
 import { DataType, type Destination } from '../../types';
-import { DryRunPreview, type DryRunResult } from './DryRunPreview';
+import { DryRunPreview, previewStageLabels, type DryRunResult } from './DryRunPreview';
 import {
   compileFieldMapping,
   readFieldMapping,
@@ -356,6 +356,31 @@ export function TransformationEditor({
                 {result.success ? 'Preview completed' : 'Preview failed'} · {result.elapsedMs} ms.
                 No message was sent.
               </p>
+              {result.source && (
+                <dl className="definition-list" aria-label="Transformation test stages">
+                  <div>
+                    <dt>Validation</dt>
+                    <dd>
+                      {previewStageLabels[result.source.validation] || result.source.validation}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Source filter</dt>
+                    <dd>{previewStageLabels[result.source.filter] || result.source.filter}</dd>
+                  </div>
+                  <div>
+                    <dt>Source transformation</dt>
+                    <dd>
+                      {previewStageLabels[result.source.transformation] ||
+                        result.source.transformation}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Network delivery</dt>
+                    <dd>{result.networkDelivery === 'NOT_SENT' ? 'NOT SENT' : 'Not recorded'}</dd>
+                  </div>
+                </dl>
+              )}
               {!result.accepted && (
                 <p className={result.success ? 'muted' : 'alert error'}>
                   {result.success

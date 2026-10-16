@@ -689,6 +689,11 @@ p {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
 }
+@media (min-width: 761px) {
+  .metric-grid.overview-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
 .metric-card {
   background: white;
   border: 1px solid var(--border-main);

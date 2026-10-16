@@ -8,13 +8,17 @@ const state = vi.hoisted(() => ({
   connect: vi.fn(),
   inputs: {} as Record<string, unknown>,
 }));
-const requestMock = () => ({
-  input(k: string, v: unknown) {
-    state.inputs[k] = v;
-    return this;
-  },
-  query: state.query,
-});
+const requestMock = () => {
+  const inputs: Record<string, unknown> = {};
+  return {
+    input(k: string, v: unknown) {
+      state.inputs[k] = v;
+      inputs[k] = v;
+      return this;
+    },
+    query: (sql: string) => state.query(sql, { ...inputs }),
+  };
+};
 vi.mock('../src/config/db.js', () => ({
   getConnection: async () => ({ request: requestMock }),
   withTransaction: async (fn: (tx: unknown) => Promise<unknown>) => {
@@ -32,6 +36,8 @@ vi.mock('../src/config/db.js', () => ({
 import { withTransaction } from '../src/config/db.js';
 import app from '../src/app.js';
 import { signToken } from '../src/services/auth.services.js';
+import { channelSchema } from '../src/utils/validator.js';
+import { decrypt, encrypt } from '../src/utils/secrets.js';
 const token = signToken({ id: 1, name: 'admin', role: 'ADMIN' });
 const payload = {
   name: 'channel',
@@ -51,6 +57,141 @@ beforeEach(() => {
       return { recordset: [{ id: 1, status: 'STOPPED' }] };
     if (sql.includes('RETURNING id')) return { recordset: [{ id: 1 }] };
     return { recordset: [], rowsAffected: [1] };
+  });
+});
+
+describe('Automatic configuration-area audit on draft creation', () => {
+  const original = channelSchema.parse({
+    name: 'Synthetic existing channel',
+    source: { type: 'HTTP', inboundDataType: 'JSON' },
+    responseScript: 'response = "SYNTHETIC-LEGACY-SOURCE";',
+    processingScript: 'msg.normalized = true;',
+    destinations: [
+      {
+        id: 9,
+        name: 'Synthetic receiver',
+        type: 'REST',
+        endpoint: 'http://user:SYNTHETIC-PASSWORD@localhost:9100/path?token=SYNTHETIC-TOKEN',
+        outboundDataType: 'XML',
+        responseScript: 'response = "SYNTHETIC-LEGACY-DESTINATION";',
+      },
+    ],
+  });
+  function existingConfiguration(failAudit = false) {
+    const destination = original.destinations[0];
+    state.query.mockImplementation(async (sql: string, inputs: Record<string, unknown>) => {
+      if (sql.includes('SELECT id,name,role'))
+        return { recordset: [{ id: 1, role: 'ADMIN', name: 'admin' }] };
+      if (sql.includes('SELECT * FROM "Channels"'))
+        return {
+          recordset: [
+            {
+              id: 1,
+              name: original.name,
+              source_type: original.source.type,
+              inbound_data_type: original.source.inboundDataType,
+              validation_profile: JSON.stringify(original.validationProfile),
+              filter_script: original.filterScript,
+              processing_script: original.processingScript,
+              response_script: original.responseScript,
+              idempotency_mode: original.idempotencyMode,
+            },
+          ],
+        };
+      if (sql.includes('SELECT * FROM "Destinations"'))
+        return {
+          recordset: [
+            {
+              id: destination.id,
+              name: destination.name,
+              type: destination.type,
+              endpoint: encrypt(destination.endpoint),
+              outbound_data_type: destination.outboundDataType,
+              filter_script: destination.filterScript,
+              processing_script: destination.processingScript,
+              response_script: destination.responseScript,
+              template_script: destination.templateScript,
+              is_enabled: destination.isEnabled,
+              retry_enabled: destination.retryEnabled,
+              max_retries: destination.maxRetries,
+              retry_interval_seconds: destination.retryIntervalSeconds,
+              timeout_ms: destination.timeoutMs,
+              delivery_policy: destination.deliveryPolicy,
+            },
+          ],
+        };
+      if (sql.includes('INSERT INTO "AuditLog"') && failAudit && inputs.action === 'SOURCE_UPDATED')
+        throw new Error('SYNTHETIC-PRIVATE database error');
+      return { recordset: [], rowsAffected: [1] };
+    });
+  }
+  const save = (configuration: unknown) =>
+    request(app)
+      .put('/api/channel/1')
+      .set('Authorization', 'Bearer ' + token)
+      .send(configuration);
+  const auditCalls = () =>
+    state.query.mock.calls
+      .filter(([sql]) => sql.includes('INSERT INTO "AuditLog"'))
+      .map(([, inputs]) => inputs as Record<string, unknown>);
+
+  it('records changed areas in the same transaction without leaking hidden configuration', async () => {
+    existingConfiguration();
+    const response = await save({
+      ...original,
+      changeSummary: 'Channel configuration updated',
+      validationProfile: { basicSyntax: true },
+      // Public endpoint re-entry must preserve the existing encrypted credential.
+      destinations: [{ ...original.destinations[0], endpoint: 'http://localhost:9100/path' }],
+    });
+    expect(response.status).toBe(200);
+    expect(state.commit).toHaveBeenCalledOnce();
+    expect(auditCalls().map((call) => call.action)).toEqual([
+      'SOURCE_UPDATED',
+      'CREATE_CHANNEL_DRAFT',
+    ]);
+    expect(
+      auditCalls().every((call) =>
+        Object.keys(call).every((key) =>
+          ['userId', 'action', 'resourceType', 'resourceId', 'requestId', 'ip'].includes(key),
+        ),
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(auditCalls())).not.toContain('SYNTHETIC-');
+    const inserted = state.query.mock.calls.find(([sql]) =>
+      sql.includes('INSERT INTO "ChannelRevisions"'),
+    )?.[1] as Record<string, unknown>;
+    expect(inserted.summary).toBe('Updated source');
+    const snapshot = JSON.parse(decrypt(String(inserted.config)));
+    expect(snapshot.responseScript).toBe(original.responseScript);
+    expect(snapshot.destinations[0].responseScript).toBe(original.destinations[0].responseScript);
+    expect(snapshot.destinations[0].endpoint).toBe(original.destinations[0].endpoint);
+    expect(
+      state.query.mock.calls.filter(([sql]) => sql.includes('SELECT * FROM "Channels"')),
+    ).toHaveLength(1);
+    expect(
+      state.query.mock.calls.filter(([sql]) => sql.includes('SELECT * FROM "Destinations"')),
+    ).toHaveLength(1);
+  });
+
+  it('avoids false area events on unchanged saves and preserves explicit API summaries', async () => {
+    existingConfiguration();
+    const response = await save({ ...original, changeSummary: 'Synthetic administrative reason' });
+    expect(response.status).toBe(200);
+    expect(auditCalls().map((call) => call.action)).toEqual(['CREATE_CHANNEL_DRAFT']);
+    const inserted = state.query.mock.calls.find(([sql]) =>
+      sql.includes('INSERT INTO "ChannelRevisions"'),
+    )?.[1] as Record<string, unknown>;
+    expect(inserted.summary).toBe('Synthetic administrative reason');
+  });
+
+  it('rolls back the draft when an area audit cannot be written', async () => {
+    existingConfiguration(true);
+    const response = await save({ ...original, validationProfile: { basicSyntax: true } });
+    expect(response.status).toBe(500);
+    expect(state.rollback).toHaveBeenCalledOnce();
+    expect(state.commit).not.toHaveBeenCalled();
+    expect(JSON.stringify(response.body)).not.toContain('SYNTHETIC-PRIVATE');
   });
 });
 describe('Channel transaction usage (database session mocked)', () => {

@@ -3,6 +3,7 @@ import { Worker } from 'node:worker_threads';
 import { config } from '../config/env.js';
 import { AppError } from '../utils/errors.js';
 import { readFieldMapping } from '../utils/fieldMapping.js';
+import { readSimpleCondition } from '../utils/simpleCondition.js';
 import { Parser } from 'xml2js';
 let active = 0;
 export async function executeScript(
@@ -20,10 +21,10 @@ export async function executeScript(
   active++;
   gauge('script_workers_active', active);
   try {
-    // Visual mappings normalize XML into JSON before entering the existing isolated worker.
+    // Visual mappings/filters normalize XML before entering the existing isolated worker.
     // Legacy/custom scripts continue to receive their original input unchanged.
     if (
-      readFieldMapping(script) &&
+      (readFieldMapping(script) || readSimpleCondition(script)) &&
       typeof context.msg === 'string' &&
       context.msg.trim().startsWith('<')
     ) {
@@ -47,7 +48,11 @@ export async function executeScript(
           }).parseStringPromise(context.msg),
         };
       } catch {
-        throw new AppError(422, 'FIELD_MAPPING_INPUT_INVALID', 'Invalid XML mapping input');
+        throw new AppError(
+          422,
+          readSimpleCondition(script) ? 'FILTER_INPUT_INVALID' : 'FIELD_MAPPING_INPUT_INVALID',
+          'Invalid XML processing input',
+        );
       }
       if (Buffer.byteLength(JSON.stringify(context)) > config.server.payloadLimit)
         throw new AppError(413, 'SCRIPT_INPUT_LIMIT', 'Script input limit exceeded');

@@ -11,24 +11,16 @@ import { saveDestinations, applyChannelConfiguration } from './channel.services.
 import { validateProfileConfiguration } from './profileValidation.services.js';
 import { validateEndpoint, testConnection } from '../utils/transport.js';
 import { withConnectionProbe } from './connectionProbe.services.js';
+import { automaticChangeSummary, configurationChangeActions } from '../utils/channelChanges.js';
 import type { z } from 'zod';
 export type RevisionConfig = z.infer<typeof channelSchema>;
-export async function readRuntimeConfiguration(
-  tx: DatabaseTransaction,
-  id: number,
-): Promise<RevisionConfig> {
-  const c = (await tx.request().input('id', id).query('SELECT * FROM "Channels" WHERE id=@id'))
-    .recordset[0];
-  if (!c) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
-  const destinations = (
-    await tx
-      .request()
-      .input('id', id)
-      .query('SELECT * FROM "Destinations" WHERE channel_id=@id AND is_deleted=false ORDER BY id')
-  ).recordset;
+function runtimeConfiguration(
+  c: Record<string, unknown>,
+  destinations: Record<string, unknown>[],
+): RevisionConfig {
   return channelSchema.parse({
     name: c.name,
-    validationProfile: JSON.parse(c.validation_profile || '{}'),
+    validationProfile: JSON.parse(String(c.validation_profile || '{}')),
     source: { type: c.source_type, inboundDataType: c.inbound_data_type },
     processingScript: c.processing_script || '',
     responseScript: c.response_script || '',
@@ -38,7 +30,7 @@ export async function readRuntimeConfiguration(
       id: d.id,
       name: d.name,
       type: d.type,
-      endpoint: decrypt(d.endpoint),
+      endpoint: decrypt(String(d.endpoint)),
       outboundDataType: d.outbound_data_type,
       processingScript: d.processing_script || '',
       responseScript: d.response_script || '',
@@ -52,6 +44,21 @@ export async function readRuntimeConfiguration(
       deliveryPolicy: d.delivery_policy || {},
     })),
   });
+}
+export async function readRuntimeConfiguration(
+  tx: DatabaseTransaction,
+  id: number,
+): Promise<RevisionConfig> {
+  const c = (await tx.request().input('id', id).query('SELECT * FROM "Channels" WHERE id=@id'))
+    .recordset[0];
+  if (!c) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
+  const destinations = (
+    await tx
+      .request()
+      .input('id', id)
+      .query('SELECT * FROM "Destinations" WHERE channel_id=@id AND is_deleted=false ORDER BY id')
+  ).recordset;
+  return runtimeConfiguration(c, destinations);
 }
 export async function insertRevision(
   tx: DatabaseTransaction,
@@ -98,6 +105,7 @@ export async function createDraft(
   id: number,
   data: RevisionConfig,
   req: Request,
+  previousChannel: Record<string, unknown>,
 ) {
   const old = (
     await tx
@@ -115,14 +123,13 @@ export async function createDraft(
       return { ...d, endpoint: decrypt(storeEndpoint(d.endpoint, previous?.endpoint)) };
     }),
   };
-  const revision = await insertRevision(
-    tx,
-    id,
-    snapshot,
-    'DRAFT',
-    data.changeSummary || 'Legacy API update: review before publish',
-    req.user?.id,
-  );
+  const actions = configurationChangeActions(runtimeConfiguration(previousChannel, old), snapshot);
+  const summary =
+    !data.changeSummary || data.changeSummary === 'Channel configuration updated'
+      ? automaticChangeSummary(actions)
+      : data.changeSummary;
+  const revision = await insertRevision(tx, id, snapshot, 'DRAFT', summary, req.user?.id);
+  for (const action of actions) await audit(action, req, 'channel', id, tx);
   await audit('CREATE_CHANNEL_DRAFT', req, 'channel', id, tx);
   return revision;
 }

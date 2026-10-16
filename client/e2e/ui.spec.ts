@@ -86,12 +86,35 @@ async function session(page: Page, role: string, view: 'overview' | 'channels' =
           totalReceived: 420,
           totalSent: 400,
           totalErrors: 2,
+          successfulMessages: 390,
+          failedMessages: 2,
+          retryingMessages: 1,
           channelsRunning: 1,
           channelsStopped: 0,
           channelsError: 0,
           messagesToday: 42,
           queuedMessages: 3,
           deadLetterMessages: 0,
+        },
+      });
+    if (url.pathname === '/api/system/configuration')
+      return route.fulfill({
+        json: {
+          success: true,
+          data: {
+            runtime: {
+              node: 'v22.18.0',
+              environment: 'non-production',
+              encryptionKeyVersion: 'v1',
+            },
+            transport: {
+              postgresTlsVerified: true,
+              mllpEnabled: true,
+              mllpTls: true,
+              mllpMutualTls: false,
+            },
+            retention: { enabled: true, messageDays: 30, auditDays: 365 },
+          },
         },
       });
     if (url.pathname === '/api/users')
@@ -242,14 +265,52 @@ test('mobile navigation, overview and messages do not overflow the page', async 
   );
   await page.screenshot({ path: '/private/tmp/mirth-ui-mobile.png', fullPage: true });
 });
-test('overview shows actual metrics and navigates to attention channel', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1000 });
+test('overview shows six real metrics and opens recent failed message', async ({ page }) => {
+  await page.setViewportSize({
+    width: 1440,
+    height: process.env.UI_FINAL_OVERVIEW_SCREENSHOT ? 1200 : 1000,
+  });
   await session(page, 'ADMIN', 'overview');
-  await expect(page.getByRole('button', { name: /Received today.*42/ })).toBeVisible();
-  await expect(page.getByText('Database ready', { exact: true })).toBeVisible();
-  await page.screenshot({ path: '/private/tmp/mirth-ui-overview.png', fullPage: true });
-  await page.getByRole('button', { name: /Test Channel.*No enabled destination/ }).click();
-  await expect(page.getByLabel('Search channels')).toHaveValue('#1');
+  await page.route('**/api/message?**', (route) =>
+    route.fulfill({
+      json: {
+        success: true,
+        data: [
+          {
+            id: 1,
+            timestamp: '2026-10-04T00:00:00Z',
+            channelId: 1,
+            channelName: 'Test Channel',
+            direction: 'IN',
+            status: 'PARTIAL',
+            level: 'ERROR',
+          },
+        ],
+        pagination: { page: 1, pageSize: 5, total: 1 },
+      },
+    }),
+  );
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  for (const label of [
+    'Running Channels',
+    'Stopped Channels',
+    'Messages Today',
+    'Successful',
+    'Failed',
+    'Retrying',
+  ])
+    await expect(page.getByRole('button', { name: new RegExp(label) })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Messages Today.*42/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Successful.*390/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Recent Failures', exact: true })).toBeVisible();
+  await expect(page.getByText('Channel activity', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Test Channel.*Message #1/ })).toBeVisible();
+  await page.screenshot({
+    path: process.env.UI_FINAL_OVERVIEW_SCREENSHOT || '/private/tmp/mirth-ui-overview.png',
+    fullPage: true,
+  });
+  await page.getByRole('button', { name: /Test Channel.*Message #1/ }).click();
+  await expect(page.getByRole('dialog', { name: 'Message #1' })).toBeVisible();
 });
 test('channel wizard prevents accidental loss and requires review before saving', async ({
   page,
@@ -371,7 +432,7 @@ test('duplicate uses a new draft and XML export has no runtime IDs', async ({ pa
 test('viewer settings hides user and audit administration', async ({ page }) => {
   await session(page, 'VIEWER');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(page.getByRole('tab', { name: 'Account & connection' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'System information' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Users', exact: true })).toHaveCount(0);
   await expect(page.getByRole('tab', { name: 'Audit log' })).toHaveCount(0);
 });
@@ -611,9 +672,10 @@ test('admin downloads audited metadata using real diagnostic API contract', asyn
     });
   });
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(
-    page.getByText('Effective security & operations settings', { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText('Runtime information', { exact: true })).toBeVisible();
+  await expect(page.locator('pre')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Download diagnostic metadata' })).toBeHidden();
+  await page.getByText('Diagnostic report', { exact: true }).click();
   await expect(page.getByRole('button', { name: 'Download diagnostic metadata' })).toBeEnabled();
   const report = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download diagnostic metadata' }).click();
@@ -681,4 +743,84 @@ test('stored TEXT revision dry-run preserves JSON-looking text without changing 
   expect(posted).toEqual({ payload: '{"fixture":"synthetic"}' });
   await page.getByLabel('Synthetic revision test payload').fill('Changed synthetic input');
   await expect(page.getByLabel('Revision dry-run result')).toHaveCount(0);
+});
+
+test('settings keeps roles and operational tools available through disclosure', async ({
+  page,
+}) => {
+  await session(page, 'ADMIN');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Browser sessions' })).toBeHidden();
+  await expect(page.getByRole('heading', { name: 'Operational alerts' })).toBeHidden();
+  await page.getByText('Operational tools', { exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Browser sessions' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Operational alerts' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Roles', exact: true }).click();
+  for (const role of ['ADMIN', 'DEVELOPER', 'OPERATOR', 'VIEWER'])
+    await expect(page.getByRole('cell', { name: role, exact: true })).toBeVisible();
+  await expect(page.getByText('Assign or change a role in Users.', { exact: false })).toBeVisible();
+  await page.getByRole('tab', { name: 'System information' }).click();
+  await expect(page.getByText('v22.18.0', { exact: true })).toBeVisible();
+  await page.screenshot({
+    path: process.env.UI_FINAL_SETTINGS_SCREENSHOT || '/private/tmp/mirth-ui-settings.png',
+    fullPage: true,
+  });
+});
+
+test('delivery result shows captured duration and exact attempts without inventing legacy values', async ({
+  page,
+}) => {
+  await session(page, 'VIEWER');
+  await page.route('**/api/message/1?**', (route) =>
+    route.fulfill({
+      json: {
+        success: true,
+        data: {
+          id: 1,
+          channelId: 1,
+          channelName: 'Synthetic delivery',
+          timestamp: '2026-10-04T00:00:00Z',
+          status: 'SUCCESS',
+          direction: 'IN',
+          inboundFormat: 'JSON',
+          payloadAllowed: false,
+          destinationLogs: [
+            {
+              messageId: 2,
+              destinationName: 'Captured destination',
+              outboundFormat: 'XML',
+              status: 'OUT-SENT',
+              httpStatus: 200,
+              durationMs: 0,
+              attemptCount: 2,
+              sentAt: '2026-10-04T00:00:01Z',
+            },
+            {
+              messageId: 3,
+              destinationName: 'Legacy destination',
+              outboundFormat: 'XML',
+              status: 'OUT-SENT',
+              durationMs: null,
+              attemptCount: null,
+              sentAt: '2026-10-04T00:00:01Z',
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.getByRole('button', { name: 'Messages', exact: true }).click();
+  await page.getByRole('button', { name: 'Open message 1', exact: true }).click();
+  const captured = page.locator('.delivery-card').filter({ hasText: 'Captured destination' });
+  await expect(captured).toContainText('HTTP 200');
+  await expect(captured).toContainText('0 ms');
+  await expect(
+    captured
+      .locator('div')
+      .filter({ has: page.locator('dt').filter({ hasText: /^Attempts$/ }) })
+      .last(),
+  ).toContainText('2');
+  const legacy = page.locator('.delivery-card').filter({ hasText: 'Legacy destination' });
+  await expect(legacy.getByText('Not recorded', { exact: true })).toHaveCount(3);
+  await expect(legacy).not.toContainText('HTTP 200');
 });

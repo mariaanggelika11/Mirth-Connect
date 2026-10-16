@@ -68,6 +68,9 @@ describe('Progressive channel configuration', () => {
   });
 
   it('never treats an extended JSON validation profile as the basic preset', () => {
+    expect(validationChoice({ basicSyntax: true })).toBe('BASIC');
+    expect(validationChoice({ basicSyntax: false })).toBe('CUSTOM');
+    expect(validationChoice({ basicSyntax: true, xml: { root: 'Patient' } })).toBe('CUSTOM');
     expect(validationChoice({ jsonSchema: { type: 'object' } })).toBe('BASIC_JSON');
     expect(validationChoice({ jsonSchema: { type: 'object', required: ['message'] } })).toBe(
       'CUSTOM',
@@ -100,9 +103,13 @@ describe('Progressive channel configuration', () => {
   it('keeps custom profile text intact while users choose no additional or basic validation', () => {
     const customText = '{"jsonSchema":{"type":"object","required":["message"]}}';
     expect(selectedValidationProfile('NONE', customText)).toEqual({});
+    expect(selectedValidationProfile('BASIC', customText)).toEqual({ basicSyntax: true });
     expect(selectedValidationProfile('BASIC_JSON', customText)).toEqual({
       jsonSchema: { type: 'object' },
     });
+    const basicSyntax = selectedValidationProfile('BASIC', customText);
+    basicSyntax.basicSyntax = false;
+    expect(selectedValidationProfile('BASIC', customText)).toEqual({ basicSyntax: true });
     expect(selectedValidationProfile('CUSTOM', customText)).toEqual(JSON.parse(customText));
     const basic = selectedValidationProfile('BASIC_JSON', customText);
     (basic.jsonSchema as Record<string, unknown>).type = 'string';

@@ -16,6 +16,9 @@ Errors return success=false, code, safe message and requestId; central handler a
 | CHANNEL_HAS_REVISIONS / CHANNEL_HAS_MESSAGES | 409; evidence must be retained |
 | PAYLOAD_SCHEMA_REJECTED / HL7_PROFILE_REJECTED / PAYLOAD_VALIDATION_REJECTED | 422; channel profile rejected payload |
 | INVALID_JSON_SCHEMA / UNSUPPORTED_JSON_SCHEMA | 400; schema invalid or unsupported costly/reference keywords |
+| INVALID_JSON | 400; incoming JSON text cannot be parsed |
+| JSON_INVALID | 422; basic validation received a non-JSON value or exceeded the payload limit |
+| MESSAGE_PROCESSING_FAILED | 502; persisted processing outcome is failed/partial; messageId/status and the legacy result remain available for reconciliation |
 | ENCRYPTION_KEY_UNAVAILABLE | 500; current/previous keyring cannot authenticate record |
 | INBOUND_CAPACITY | 503 + Retry-After; bounded source capacity reached |
 | DELIVERY_LEASE_LOST | 409; old worker cannot overwrite a new delivery claim |
@@ -45,6 +48,8 @@ Follow-up operational control errors:
 | INVALID_XML_PROFILE | 400 | Profile uses unsupported literal path/rule structure |
 | XML_INVALID | 422 | Malformed/non-string XML or structural/size limits exceeded |
 | XML_PROFILE_REJECTED | 422 | Root, required text path or allowed-value rule rejected payload |
+| XML_ENTITIES_DENIED | 422 | XML DTD/entity declarations are denied |
+| FILTER_INPUT_INVALID / FIELD_MAPPING_INPUT_INVALID | 422 | Generated filter/mapping XML input is invalid or exceeds structural limits |
 | SCRIPT_MEMORY_LIMIT | 422 | QuickJS memory exhaustion; exception content is not returned |
 
 Canonical-key conflicts continue to use IDEMPOTENCY_CONFLICT. XML rules use literal dotted element names; XPath expressions/attributes/XSD are not implemented.

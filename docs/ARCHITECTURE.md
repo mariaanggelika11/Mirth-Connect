@@ -42,6 +42,8 @@ Frontend domain types have one definition in `client/src/types/`, exported throu
 
 `TransformationEditor` uses the pure `utils/fieldMapping.ts` compiler shared with the server. Versioned mapping metadata lives in the existing source-transformer script, so export/import and revision snapshots retain it. Custom scripts require explicit replacement. `preview-transformation` runs the same processing pipeline with connection validation disabled and no network operations; full dry-run and explicit destination probes retain their own validation. See [Lite UI behavior and limits](MIRTH_LITE_UI.md).
 
+`utils/simpleCondition.ts` compiles the Field/Operator/Value builder into the existing source or destination filter script, with canonical versioned metadata. It uses bounded own-property paths and data literals, without evaluation of field/value expressions. Only intact generated mapping/filter scripts receive bounded XML normalization; legacy scripts retain their original input. `validationProfile.basicSyntax` selects format-appropriate basic validation; legacy JSON-object presets and custom profiles remain readable. These UI features reuse the existing pipeline stages.
+
 Use TypeScript strict checking, separate `import type` statements, and explicit `_` prefixes for intentionally unused handler parameters. Unused variables/parameters and explicit `any` fail checks. Prettier supplies the repository's formatting rules. Run `npm run format` for formatting, and `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`, `npm run build`, and `npm run test:e2e` before submitting changes. Real PostgreSQL verification uses only a newly created `mirth_test_*` schema via `npm run test:sql`.
 
 ## Message reliability
@@ -52,11 +54,15 @@ Each outbound record stores a final serialized payload and encrypted connector s
 
 Atomic DB operations: channel + related destinations + audit; outbound attempt status + log; token revocation + logout audit. An ACK is generated only after required persistence finishes. Exactly-once delivery across independent databases/transports is not promised: downstream needs HL7 control-ID deduplication or REST Idempotency-Key support.
 
+Migration 007 adds nullable integer `MessageDestinationLog.request_duration_ms`. The engine records actual transport duration before response scripts and result persistence; admission waits have no transport duration. Monitor `durationMs` exposes this value, while `attemptCount` counts recorded attempts over the complete outbound history and remains unknown if legacy timing is incomplete. HTTP status also comes from the captured response. Historical values are never inferred from timestamps or retry counters.
+
 ## State compatibility
 
 Channel status keeps RUNNING/STOPPED/ERROR; PAUSED is added. Legacy IN/OUT direction and OUT-SENT/OUT-ERROR remain. Inbound final state: RECEIVED, SUCCESS, PARTIAL, FAILED, FILTERED, QUEUED or IN-ERROR. Outbound work: PROCESSING, OUT-SENT, OUT-ERROR, FILTERED, QUEUED, RETRYING, DEAD_LETTER.
 
 Removed destinations are retired, their foreign keys/history remain, and queued jobs become dead letters. Historical channel deletion is refused until messages are resolved/retained successfully and purged. Failure history is not silently erased to make updates succeed.
+
+Current startup and restore verification require migrations 001–007. Existing filter/transformer/response scripts, validation profiles, routing and multiple destinations remain in runtime tables and encrypted revisions. Draft saves classify changed source/transformation/destination/name areas into action-only audit events inside the existing transaction; active configuration changes only on publish. Binary rollback requires a compatible published configuration, particularly for generated XML conditions that require the new normalizer. Preserve the additive schema, data, keys and history; see [upgrade compatibility](MIRTH_LITE_UI.md#database-upgrade-dan-compatibility).
 
 ## Security boundaries
 
@@ -74,7 +80,9 @@ Retention uses bounded batches of resolved messages and independent audit retent
 
 ## Verification boundaries
 
-Automated API/channel/worker tests mock database sessions; a separate PostgreSQL adapter test verifies binding and same-client transaction behavior. REST/MLLP tests use real loopback sockets. Browser tests use explicit synthetic fixtures. `npm run test:sql` validates native PostgreSQL on a newly created `mirth_test_*` schema which is deleted afterward. The latest run passed 19 scenarios, including visual mapping preview versus the actual HTTP payload and repeat migrations through schema 6. Compiled runtime startup/drain was also verified on disposable PostgreSQL. Docker image, hospital-specific HL7 profiles, load and disaster recovery still require deployment validation.
+Automated unit/API verification passed 332 tests in 28 suites; 53 browser scenarios passed with synthetic fixtures. Coverage was 81.90% statements, 78.61% branches, 83.63% functions and 82.96% lines. API tests mock database sessions; REST/MLLP tests use real loopback sockets.
+
+`npm run test:sql` passed 19 native PostgreSQL 18.4 scenarios on a newly created `mirth_test_*` schema, including repeat migrations through schema 7, the requested Siti Aminah JSON→XML fixture delivered to a real local HTTP receiver, persisted inbound/source/outbound payloads, actual HTTP/timing metadata and valid ORM filtering without delivery. Compiled runtime startup, health/readiness, protected metrics and SIGTERM during active work also passed on disposable PostgreSQL. A fresh schema-7 native backup/restore drill was not run because `pg_dump`/`pg_restore` were unavailable. Docker image, hospital-specific HL7 profiles, load and disaster recovery still require deployment validation.
 
 
 ## V2 runtime boundaries

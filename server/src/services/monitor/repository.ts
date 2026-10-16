@@ -2,6 +2,9 @@ import { getConnection } from '../../config/db.js';
 import { AppError } from '../../utils/errors.js';
 import type { MonitorRow, DestinationLogRow } from './mapping.js';
 import type { MonitorQuery } from './query.js';
+// Compute before pagination so every visible attempt has the same complete-history count.
+// Admission waits were historically stored as OUT-ERROR; they are not network attempts.
+const attemptCountSql = `CASE WHEN COUNT(*) FILTER(WHERE l.request_duration_ms IS NULL AND l.status<>'QUEUED' AND NOT(l.status='OUT-ERROR' AND l.http_status IS NULL AND l.ack_code IS NULL AND COALESCE(l.response_text,'') IN ('DESTINATION_CIRCUIT_OPEN','DELIVERY_CAPACITY','DELIVERY_ALREADY_ACTIVE'))) OVER(PARTITION BY l.message_id)=0 THEN NULLIF(COUNT(*) FILTER(WHERE l.request_duration_ms IS NOT NULL) OVER(PARTITION BY l.message_id),0) ELSE NULL END attempt_count`;
 export async function listMessages(q: MonitorQuery) {
   const pool = await getConnection();
   const r = pool
@@ -15,7 +18,7 @@ export async function listMessages(q: MonitorQuery) {
     .input('to', q.dateTo ? new Date(q.dateTo) : null)
     .input('offset', (q.page - 1) * q.pageSize)
     .input('size', q.pageSize);
-  const where = `(@channel::bigint IS NULL OR m.channel_id=@channel) AND (@direction='ALL' OR m.direction=@direction) AND (@group::text IS NULL OR (@group='errors' AND m.status IN ('IN-ERROR','OUT-ERROR','DEAD_LETTER')) OR (@group='pending' AND m.status IN ('QUEUED','RETRYING'))) AND (@status::text IS NULL OR m.status=@status) AND (@search::text IS NULL OR c.name LIKE @search OR CAST(m.id AS text) LIKE @search) AND (@from::timestamptz IS NULL OR m.created_at>=@from) AND (@to::timestamptz IS NULL OR m.created_at<=@to)`;
+  const where = `(@channel::bigint IS NULL OR m.channel_id=@channel) AND (@direction='ALL' OR m.direction=@direction) AND (@group::text IS NULL OR (@group='errors' AND m.status IN ('IN-ERROR','OUT-ERROR','DEAD_LETTER','FAILED','PARTIAL')) OR (@group='pending' AND m.status IN ('QUEUED','RETRYING'))) AND (@status::text IS NULL OR m.status=@status) AND (@search::text IS NULL OR c.name LIKE @search OR CAST(m.id AS text) LIKE @search) AND (@from::timestamptz IS NULL OR m.created_at>=@from) AND (@to::timestamptz IS NULL OR m.created_at<=@to)`;
   const result = await r.query(
     `SELECT COUNT(*) total FROM "Messages" m LEFT JOIN "Channels" c ON c.id=m.channel_id WHERE ${where}; SELECT m.id,m.channel_id,m.direction,m.status,m.created_at,m.updated_at,m.correlation_id,m.retry_count,m.last_error,m.next_retry_at,c.name channel_name FROM "Messages" m LEFT JOIN "Channels" c ON c.id=m.channel_id WHERE ${where} ORDER BY m.created_at DESC,m.id DESC LIMIT @size OFFSET @offset;`,
   );
@@ -28,7 +31,7 @@ export async function listMessages(q: MonitorQuery) {
           .request()
           .input('ids', ids.join(','))
           .query<DestinationLogRow>(
-            `WITH latest AS (SELECT l.id,l.message_id,l.destination_id,l.status,l.http_status,l.sent_at,ROW_NUMBER() OVER(PARTITION BY l.message_id ORDER BY l.id DESC) rn FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id WHERE o.inbound_message_id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[])) OR o.id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[]))) SELECT l.*,d.name destination_name,o.inbound_message_id,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING' AND d.is_enabled=true AND d.is_deleted=false) retry_eligible FROM latest l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE l.rn=1 ORDER BY l.id DESC`,
+            `WITH latest AS (SELECT l.id,l.message_id,l.destination_id,l.status,l.http_status,l.request_duration_ms,l.sent_at,${attemptCountSql},ROW_NUMBER() OVER(PARTITION BY l.message_id ORDER BY l.id DESC) rn FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id WHERE o.inbound_message_id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[])) OR o.id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[]))) SELECT l.*,d.name destination_name,o.inbound_message_id,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING' AND d.is_enabled=true AND d.is_deleted=false) retry_eligible FROM latest l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE l.rn=1 ORDER BY l.id DESC`,
           )
       ).recordset
     : [];
@@ -56,7 +59,7 @@ export async function listDeliveryLogs(id: number, logPage: number, logPageSize:
       .input('offset', (logPage - 1) * logPageSize)
       .input('limit', logPageSize + 1)
       .query<DestinationLogRow>(
-        `SELECT l.*,o.transport_config,d.name destination_name,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING' AND d.is_enabled=true AND d.is_deleted=false) retry_eligible FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE o.inbound_message_id=@id OR o.id=@id ORDER BY l.id DESC LIMIT @limit OFFSET @offset`,
+        `SELECT l.*,${attemptCountSql},o.transport_config,d.name destination_name,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING' AND d.is_enabled=true AND d.is_deleted=false) retry_eligible FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE o.inbound_message_id=@id OR o.id=@id ORDER BY l.id DESC LIMIT @limit OFFSET @offset`,
       )
   ).recordset;
   return logs;
@@ -67,7 +70,7 @@ export async function messageStats(today: Date) {
     .request()
     .input('today', today)
     .query(
-      `SELECT COUNT(*) "totalMessages",COUNT(*) FILTER(WHERE direction='IN' AND created_at>=@today) "messagesToday",COUNT(*) FILTER(WHERE direction='OUT' AND status IN ('QUEUED','RETRYING')) "queuedMessages",COUNT(*) FILTER(WHERE direction='OUT' AND status='DEAD_LETTER') "deadLetterMessages",COALESCE(SUM(CASE WHEN direction='IN' THEN 1 ELSE 0 END),0) "totalReceived",COALESCE(SUM(CASE WHEN direction='OUT' AND status='OUT-SENT' THEN 1 ELSE 0 END),0) "totalSent",COALESCE(SUM(CASE WHEN status IN ('IN-ERROR','OUT-ERROR','DEAD_LETTER') THEN 1 ELSE 0 END),0) "totalErrors",(SELECT COUNT(*) FROM "Channels" WHERE status='RUNNING') "channelsRunning",(SELECT COUNT(*) FROM "Channels" WHERE status='STOPPED') "channelsStopped",(SELECT COUNT(*) FROM "Channels" WHERE status='ERROR') "channelsError" FROM "Messages"`,
+      `SELECT COUNT(*) "totalMessages",COUNT(*) FILTER(WHERE direction='IN' AND status='SUCCESS') "successfulMessages",COUNT(*) FILTER(WHERE direction='IN' AND status IN ('FAILED','PARTIAL','IN-ERROR')) "failedMessages",COUNT(*) FILTER(WHERE direction='OUT' AND status IN ('QUEUED','RETRYING')) "retryingMessages",COUNT(*) FILTER(WHERE direction='IN' AND created_at>=@today) "messagesToday",COUNT(*) FILTER(WHERE direction='OUT' AND status IN ('QUEUED','RETRYING')) "queuedMessages",COUNT(*) FILTER(WHERE direction='OUT' AND status='DEAD_LETTER') "deadLetterMessages",COALESCE(SUM(CASE WHEN direction='IN' THEN 1 ELSE 0 END),0) "totalReceived",COALESCE(SUM(CASE WHEN direction='OUT' AND status='OUT-SENT' THEN 1 ELSE 0 END),0) "totalSent",COALESCE(SUM(CASE WHEN status IN ('IN-ERROR','OUT-ERROR','DEAD_LETTER') THEN 1 ELSE 0 END),0) "totalErrors",(SELECT COUNT(*) FROM "Channels" WHERE status='RUNNING') "channelsRunning",(SELECT COUNT(*) FROM "Channels" WHERE status='STOPPED') "channelsStopped",(SELECT COUNT(*) FROM "Channels" WHERE status='ERROR') "channelsError" FROM "Messages"`,
     );
   return result.recordset[0];
 }

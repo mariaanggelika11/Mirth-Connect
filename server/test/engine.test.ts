@@ -229,6 +229,53 @@ describe('Engine aggregation and durable retry policy', () => {
     expect(mock.inputs.httpStatus).toBeNull();
     expect(mock.inputs.response).toBe('ECONNREFUSED');
   });
+  it('captures transport duration without including response scripts or persistence', async () => {
+    let clock = 100;
+    const timer = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    try {
+      mock.send.mockImplementationOnce(async () => {
+        clock += 25;
+        return 'ok';
+      });
+      mock.script.mockImplementationOnce(async () => {
+        clock += 500;
+        return 'ok';
+      });
+      await processRetry({
+        ...row,
+        transport_config: encrypt(JSON.stringify({ ...dest, response_script: 'return response;' })),
+      });
+      expect(mock.inputs.requestDurationMs).toBe(25);
+    } finally {
+      timer.mockRestore();
+    }
+  });
+  it('captures failed transport duration while retaining the safe error code', async () => {
+    let clock = 200;
+    const timer = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    try {
+      mock.send.mockImplementationOnce(async () => {
+        clock += 17;
+        throw new AppError(504, 'DESTINATION_TIMEOUT', 'Synthetic transport timeout');
+      });
+      await processRetry(row);
+      expect(mock.inputs.requestDurationMs).toBe(17);
+      expect(mock.inputs.response).toBe('DESTINATION_TIMEOUT');
+      expect(mock.inputs.httpStatus).toBeNull();
+    } finally {
+      timer.mockRestore();
+    }
+  });
+  it('does not invent request timing when the circuit prevents transport', async () => {
+    mock.query.mockImplementation(async (sql: string) => ({
+      recordset: sql.includes('SELECT *,open_until') ? [{ is_open: true }] : [],
+      rowsAffected: [1],
+    }));
+    await processRetry(row);
+    expect(mock.send).not.toHaveBeenCalled();
+    expect(mock.inputs.requestDurationMs).toBeNull();
+    expect(mock.inputs.response).toBe('DESTINATION_CIRCUIT_OPEN');
+  });
   it('retry failure becomes dead letter after max retries', async () => {
     mock.send.mockRejectedValue(new Error('patient data should be private'));
     await processRetry({ ...row, retry_count: 2 });

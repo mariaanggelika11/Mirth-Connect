@@ -22,6 +22,7 @@ import {
 } from '../src/services/messageProcessor.services.js';
 import { sample } from './fixtures.js';
 import { compileFieldMapping, readFieldMapping } from '../src/utils/fieldMapping.js';
+import { compileSimpleCondition } from '../src/utils/simpleCondition.js';
 import bcrypt from 'bcrypt';
 import request from 'supertest';
 import { config } from '../src/config/env.js';
@@ -95,6 +96,11 @@ before(async () => {
           new URL('../migrations/006_delivery_http_status.sql', import.meta.url),
           'utf8',
         ),
+      );
+    await tx
+      .request()
+      .batch(
+        await readFile(new URL('../migrations/007_delivery_timing.sql', import.meta.url), 'utf8'),
       );
   });
   const userId = (
@@ -308,11 +314,16 @@ test('real PostgreSQL: migration repeats without duplicate versions or data loss
           'utf8',
         ),
       );
+    await tx
+      .request()
+      .batch(
+        await readFile(new URL('../migrations/007_delivery_timing.sql', import.meta.url), 'utf8'),
+      );
   });
   assert.equal(
     (await pool.request().query('SELECT count(*) total FROM "SchemaMigrations"')).recordset[0]
       .total,
-    6,
+    7,
   );
   assert.equal(
     (await pool.request().query('SELECT count(*) total FROM "Channels"')).recordset[0].total,
@@ -992,7 +1003,7 @@ test('real PostgreSQL: protected diagnostic bundle has metadata only and reports
   const auth = await syntheticAdminAuth();
   const diagnostic = await request(app).get('/api/system/diagnostics').set('Authorization', auth);
   assert.equal(diagnostic.status, 200);
-  assert.deepEqual(diagnostic.body.schemaVersions, [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(diagnostic.body.schemaVersions, [1, 2, 3, 4, 5, 6, 7]);
   assert.ok(diagnostic.body.databasePool.database_pool_total > 0);
   const body = JSON.stringify(diagnostic.body);
   for (const value of [
@@ -1131,10 +1142,11 @@ test('real PostgreSQL: visual field mappings preserve routing and final outbound
     name: 'Visual mapping integration ' + suffix,
     source: { type: 'HTTP', inboundDataType: 'JSON' },
     processingScript,
+    validationProfile: { basicSyntax: true },
     filterScript: 'return true;',
     destinations: [
       {
-        name: 'Mapped XML receiver',
+        name: 'PATIENT_XML_RECEIVER',
         type: 'REST',
         endpoint: `http://127.0.0.1:${port}`,
         outboundDataType: 'XML',
@@ -1167,7 +1179,21 @@ test('real PostgreSQL: visual field mappings preserve routing and final outbound
     ).status,
     200,
   );
-  const input = { patient_id: 'SYNTHETIC-MAPPED-001', name: 'SYNTHETIC EXAMPLE' };
+  // The patient-shaped values below are the explicitly requested synthetic acceptance fixture.
+  const input = {
+    patient_id: 'RM-000123',
+    name: 'Siti Aminah',
+    gender: 'F',
+    date_of_birth: '1993-08-17',
+  };
+  const expectedXml = [
+    '<Patient>',
+    '  <PatientID>RM-000123</PatientID>',
+    '  <PatientName>Siti Aminah</PatientName>',
+    '  <Gender>F</Gender>',
+    '  <BirthDate>1993-08-17</BirthDate>',
+    '</Patient>',
+  ].join('\n');
   const before = received;
   const preview = await request(app)
     .post('/api/channel/preview-transformation')
@@ -1181,11 +1207,11 @@ test('real PostgreSQL: visual field mappings preserve routing and final outbound
     .set('X-API-Key', credential.body.data.apiKey)
     .send(input);
   assert.equal(delivered.status, 200);
+  assert.equal(delivered.body.status, 'SUCCESS');
+  assert.equal(delivered.body.messageId, delivered.body.result.inboundMessageId);
   assert.equal(received, before + 1);
   assert.equal(receivedBodies.at(-1), preview.body.results[0].finalPayload);
-  assert.match(receivedBodies.at(-1)!, /<PatientID>SYNTHETIC-MAPPED-001<\/PatientID>/);
-  assert.match(receivedBodies.at(-1)!, /<Gender>U<\/Gender>/);
-  assert.match(receivedBodies.at(-1)!, /<BirthDate>2000-01-01<\/BirthDate>/);
+  assert.equal(receivedBodies.at(-1), expectedXml);
   assert.equal(preview.body.results[1].routed, false);
   const detail = await request(app)
     .get(`/api/message/${delivered.body.result.inboundMessageId}?raw=true`)
@@ -1196,8 +1222,8 @@ test('real PostgreSQL: visual field mappings preserve routing and final outbound
     Patient: {
       PatientID: input.patient_id,
       PatientName: input.name,
-      Gender: 'U',
-      BirthDate: '2000-01-01',
+      Gender: input.gender,
+      BirthDate: input.date_of_birth,
     },
   });
   const xmlAttempt = detail.body.data.destinationLogs.find(
@@ -1206,6 +1232,9 @@ test('real PostgreSQL: visual field mappings preserve routing and final outbound
   );
   assert.ok(xmlAttempt);
   assert.equal(xmlAttempt.httpStatus, 200);
+  assert.equal(xmlAttempt.destinationName, 'PATIENT_XML_RECEIVER');
+  assert.equal(xmlAttempt.attemptCount, 1);
+  assert.ok(Number.isFinite(xmlAttempt.durationMs) && xmlAttempt.durationMs >= 0);
   assert.equal(xmlAttempt.outboundData, receivedBodies.at(-1));
   const channel = (await request(app).get('/api/channel').set('Authorization', auth)).body.find(
     (entry: { id: number }) => entry.id === id,
@@ -1221,6 +1250,50 @@ test('real PostgreSQL: visual field mappings preserve routing and final outbound
   assert.equal(failed.body.code, 'SCRIPT_EXECUTION_FAILED');
   assert.equal(received, before + 1);
   assert.ok(!JSON.stringify(failed.body).includes('SYNTHETIC MISSING REQUIRED'));
+
+  const filteredConfiguration = {
+    ...configuration,
+    name: 'Simple filter integration ' + suffix,
+    filterScript: compileSimpleCondition({
+      version: 1,
+      field: 'message_type',
+      operator: 'eq',
+      value: 'ADT',
+    }),
+  };
+  const filteredChannel = await request(app)
+    .post('/api/channel')
+    .set('Authorization', auth)
+    .send(filteredConfiguration);
+  assert.equal(filteredChannel.status, 201);
+  const filteredId = filteredChannel.body.channelId;
+  const filteredKey = await request(app)
+    .put(`/api/channel/${filteredId}/credential`)
+    .set('Authorization', auth);
+  assert.equal(filteredKey.status, 200);
+  assert.equal(
+    (
+      await request(app)
+        .put(`/api/channel/${filteredId}/status`)
+        .set('Authorization', auth)
+        .send({ status: 'RUNNING' })
+    ).status,
+    200,
+  );
+  const filtered = await request(app)
+    .post(`/api/message/inbound/${filteredId}`)
+    .set('X-API-Key', filteredKey.body.data.apiKey)
+    .send({ ...input, message_type: 'ORM' });
+  assert.equal(filtered.status, 200);
+  assert.equal(filtered.body.status, 'FILTERED');
+  assert.deepEqual(filtered.body.result.outboundResults, []);
+  assert.equal(received, before + 1);
+  const filterDetail = await request(app)
+    .get(`/api/message/${filtered.body.messageId}?raw=true`)
+    .set('Authorization', auth);
+  assert.equal(filterDetail.status, 200);
+  assert.equal(filterDetail.body.data.status, 'FILTERED');
+  assert.deepEqual(filterDetail.body.data.destinationLogs, []);
 });
 
 test('real PostgreSQL: key rotation failure rolls back all records and new keyring reads rotated snapshots', async () => {

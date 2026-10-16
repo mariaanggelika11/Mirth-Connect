@@ -213,6 +213,7 @@ async function saveChannel(req: Request, res: Response, next: NextFunction, crea
     validateProfileConfiguration(data.validationProfile);
     const id = await withTransaction(async (tx) => {
       let id = Number(req.params.id);
+      let previousChannel: Record<string, unknown> | undefined;
       if (create) {
         id = (
           await tx
@@ -232,12 +233,13 @@ async function saveChannel(req: Request, res: Response, next: NextFunction, crea
           await tx
             .request()
             .input('id', id)
-            .query('SELECT id FROM "Channels" WHERE id=@id FOR UPDATE')
+            .query('SELECT * FROM "Channels" WHERE id=@id FOR UPDATE')
         ).recordset[0];
         if (!found) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
+        previousChannel = found;
       }
       if (!create) {
-        const revision = await createDraft(tx, id, data, req);
+        const revision = await createDraft(tx, id, data, req, previousChannel!);
         return { id, revision, draft: true };
       }
       await applyChannelConfiguration(tx, id, data);

@@ -5,7 +5,56 @@ import {
 } from '../src/services/profileValidation.services.js';
 import { sample } from './fixtures.js';
 import { buildAck, readAck, parseSegments } from '../src/utils/hl7Converer.js';
+import { channelSchema } from '../src/utils/validator.js';
 describe('Per-channel synthetic healthcare profiles', () => {
+  it('supports basic syntax for JSON data, XML and HL7 without adding a custom schema', async () => {
+    const profile = { basicSyntax: true };
+    expect(
+      channelSchema.parse({
+        name: 'Synthetic basic validation',
+        source: { type: 'HTTP', inboundDataType: 'JSON' },
+        validationProfile: profile,
+        destinations: [],
+      }).validationProfile,
+    ).toEqual(profile);
+    for (const payload of [{ message_type: 'ADT' }, ['synthetic'], 'valid scalar', 0, false, null])
+      await expect(validatePayload(payload, 'JSON', profile)).resolves.toBeUndefined();
+    await expect(
+      validatePayload('<Patient><ID>synthetic</ID></Patient>', 'XML', profile),
+    ).resolves.toBeUndefined();
+    await expect(validatePayload(sample, 'HL7V2', profile)).resolves.toBeUndefined();
+  });
+  it('rejects invalid basic syntax before filtering and never echoes payload', async () => {
+    for (const payload of [undefined, NaN, Infinity, { value: undefined }, { value: 1n }])
+      await expect(validatePayload(payload, 'JSON', { basicSyntax: true })).rejects.toMatchObject({
+        code: 'JSON_INVALID',
+        message: 'JSON payload is invalid',
+      });
+    await expect(
+      validatePayload('<Patient>synthetic', 'XML', { basicSyntax: true }),
+    ).rejects.toMatchObject({ code: 'XML_INVALID' });
+    await expect(
+      validatePayload('PID|synthetic', 'HL7V2', { basicSyntax: true }),
+    ).rejects.toMatchObject({ code: 'INVALID_HL7' });
+  });
+  it('combines basic syntax with existing schema, profile and sandbox validation', async () => {
+    await expect(
+      validatePayload({}, 'JSON', {
+        basicSyntax: true,
+        jsonSchema: {
+          type: 'object',
+          properties: { patient_id: { type: 'string' } },
+          required: ['patient_id'],
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'PAYLOAD_SCHEMA_REJECTED' });
+    await expect(
+      validatePayload('<Other/>', 'XML', { basicSyntax: true, xml: { root: 'Patient' } }),
+    ).rejects.toMatchObject({ code: 'XML_PROFILE_REJECTED' });
+    await expect(
+      validatePayload(sample, 'HL7V2', { basicSyntax: true, script: 'return false;' }),
+    ).rejects.toMatchObject({ code: 'PAYLOAD_VALIDATION_REJECTED' });
+  });
   for (const type of ['ADT^A01', 'ADT^A08', 'ADT^A40', 'ORM^O01', 'ORU^R01'])
     it('validates synthetic ' + type, async () => {
       const raw = sample.replace('ORU^R01', type).replace('ADT^A01', type);

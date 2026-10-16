@@ -14,6 +14,7 @@ export async function recordAttempt(
   delay: number | null,
   retryCount: number,
   httpStatus: number | null = null,
+  requestDurationMs: number | null = null,
 ) {
   await withTransaction(async (tx) => {
     const written = await tx
@@ -57,8 +58,9 @@ export async function recordAttempt(
       .input('ack', ackCode)
       .input('control', controlId)
       .input('httpStatus', httpStatus)
+      .input('requestDurationMs', requestDurationMs)
       .query(
-        `INSERT INTO "MessageDestinationLog"(message_id,destination_id,status,response_text,request_data,outbound_data,ack_code,message_control_id,http_status,sent_at) VALUES(@id,@dest,@status,@response,@request,@outbound,@ack,@control,@httpStatus,CURRENT_TIMESTAMP)`,
+        `INSERT INTO "MessageDestinationLog"(message_id,destination_id,status,response_text,request_data,outbound_data,ack_code,message_control_id,http_status,request_duration_ms,sent_at) VALUES(@id,@dest,@status,@response,@request,@outbound,@ack,@control,@httpStatus,@requestDurationMs,CURRENT_TIMESTAMP)`,
       );
   });
   logger.info(

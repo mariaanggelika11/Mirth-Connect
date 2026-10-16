@@ -8,6 +8,18 @@ import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { StatusBadge, EmptyState, formatTime } from '../../components/ui/OperationalUI';
 import { PayloadViewer } from './PayloadViewer';
+function deliveryDuration(value?: number | null) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value < 1000
+      ? `${value} ms`
+      : `${Number((value / 1000).toFixed(3))} seconds`
+    : 'Not recorded';
+}
+function deliveryAttempts(value?: number | null) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : 'Not recorded';
+}
 export default function LogDetailModal({
   log: initialLog,
   onClose,
@@ -190,6 +202,14 @@ export default function LogDetailModal({
                                 ? `ACK ${dest.ackCode}`
                                 : 'Not recorded'}
                           </dd>
+                        </div>
+                        <div>
+                          <dt>Duration</dt>
+                          <dd>{deliveryDuration(dest.durationMs)}</dd>
+                        </div>
+                        <div>
+                          <dt>Attempts</dt>
+                          <dd>{deliveryAttempts(dest.attemptCount)}</dd>
                         </div>
                       </dl>
                       <small>{formatTime(dest.sentAt)}</small>
@@ -453,6 +473,14 @@ export default function LogDetailModal({
                           <dd>ACK {dest.ackCode}</dd>
                         </div>
                       )}
+                      <div>
+                        <dt>Duration</dt>
+                        <dd>{deliveryDuration(dest.durationMs)}</dd>
+                      </div>
+                      <div>
+                        <dt>Attempts</dt>
+                        <dd>{deliveryAttempts(dest.attemptCount)}</dd>
+                      </div>
                     </dl>
                     {dest.snapshotCaptured === false && (
                       <p className="muted">
@@ -497,6 +525,16 @@ export default function LogDetailModal({
                       </div>
                       <StatusBadge status={dest.status} />
                     </div>
+                    <dl className="definition-list">
+                      <div>
+                        <dt>Duration</dt>
+                        <dd>{deliveryDuration(dest.durationMs)}</dd>
+                      </div>
+                      <div>
+                        <dt>Attempts</dt>
+                        <dd>{deliveryAttempts(dest.attemptCount)}</dd>
+                      </div>
+                    </dl>
                     {canResend &&
                       dest.canResend === true &&
                       ['OUT-ERROR', 'DEAD_LETTER'].includes(dest.status) &&

@@ -29,12 +29,12 @@ export interface DryRunResult {
 function payloadText(value: unknown) {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 }
-const stageLabels: Record<string, string> = {
+export const previewStageLabels: Record<string, string> = {
   PASSED: 'Passed',
   ACCEPTED: 'Accepted',
   FILTERED: 'Filtered',
   PASS_THROUGH: 'Pass-through',
-  TRANSFORMED: 'Custom transformation applied',
+  TRANSFORMED: 'Transformed',
   SKIPPED: 'Skipped',
   APPLIED: 'Applied',
   CONVERTED: 'Converted',
@@ -63,15 +63,17 @@ export function DryRunPreview({ result }: { result: DryRunResult }) {
           <dl className="definition-list">
             <div>
               <dt>Source validation</dt>
-              <dd>{stageLabels[result.source.validation] || result.source.validation}</dd>
+              <dd>{previewStageLabels[result.source.validation] || result.source.validation}</dd>
             </div>
             <div>
               <dt>Source filter</dt>
-              <dd>{stageLabels[result.source.filter] || result.source.filter}</dd>
+              <dd>{previewStageLabels[result.source.filter] || result.source.filter}</dd>
             </div>
             <div>
               <dt>Source transformation</dt>
-              <dd>{stageLabels[result.source.transformation] || result.source.transformation}</dd>
+              <dd>
+                {previewStageLabels[result.source.transformation] || result.source.transformation}
+              </dd>
             </div>
           </dl>
           {result.source.code && (
@@ -116,7 +118,7 @@ export function DryRunPreview({ result }: { result: DryRunResult }) {
                       {Object.entries(destination.stages).map(([name, status]) => (
                         <div key={name}>
                           <dt>{name.charAt(0).toUpperCase() + name.slice(1)}</dt>
-                          <dd>{stageLabels[status] || status}</dd>
+                          <dd>{previewStageLabels[status] || status}</dd>
                         </div>
                       ))}
                     </dl>

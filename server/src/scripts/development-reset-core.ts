@@ -44,7 +44,7 @@ export async function inspectResetDatabase(client: Client, schema: string) {
       `SELECT version FROM ${quoteIdentifier(schema)}."SchemaMigrations" ORDER BY version`,
     )
   ).rows.map((r) => Number(r.version));
-  if (!versions.includes(1) || versions.some((v) => v > 6))
+  if (!versions.includes(1) || versions.some((v) => v > 7))
     throw new Error('UNSUPPORTED_RESET_SCHEMA_VERSION');
   const counts: Record<string, number> = {},
     fingerprints: Record<string, string> = {};
@@ -105,6 +105,7 @@ export async function resetToSingleAdmin(client: Client, schema: string, usernam
     '004_operational_alerts.sql',
     '005_operational_controls.sql',
     '006_delivery_http_status.sql',
+    '007_delivery_timing.sql',
   ])
     await client.query(
       await readFile(new URL('../../migrations/' + file, import.meta.url), 'utf8'),
@@ -119,7 +120,7 @@ export async function resetToSingleAdmin(client: Client, schema: string, usernam
     throw new Error('LOGIN_PRESERVATION_VERIFICATION_FAILED');
   const after = await inspectResetDatabase(client, schema);
   if (
-    after.versions.join(',') !== '1,2,3,4,5,6' ||
+    after.versions.join(',') !== '1,2,3,4,5,6,7' ||
     operationalTables.some((t) => after.counts[t] !== 0)
   )
     throw new Error('RESET_POSTCHECK_FAILED');

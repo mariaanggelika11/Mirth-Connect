@@ -1488,10 +1488,24 @@
         "operationId": "post__api_inbound__channelId_",
         "responses": {
           "200": {
-            "description": "Success; see route-specific legacy envelope."
+            "description": "Persisted processing result with success, messageId, status and the unchanged legacy result envelope. Valid source-filtered messages return 200 with status FILTERED and no delivery.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundResponse"
+                }
+              }
+            }
           },
           "202": {
-            "description": "Durably queued; delivery/retry pending"
+            "description": "Durably queued; delivery/retry pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Safe validation error",
@@ -1516,7 +1530,14 @@
             "description": "Management/authentication rate limit"
           },
           "502": {
-            "description": "Persisted delivery failed/partial"
+            "description": "Persisted failed/partial processing outcome. Includes safe MESSAGE_PROCESSING_FAILED code, message, requestId and empty details; messageId/status and complete legacy result are retained.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundResponse"
+                }
+              }
+            }
           },
           "503": {
             "description": "Database or capacity unavailable"
@@ -1579,10 +1600,24 @@
         "operationId": "post__api_message_inbound__channelId_",
         "responses": {
           "200": {
-            "description": "Success; see route-specific legacy envelope."
+            "description": "Persisted processing result with success, messageId, status and the unchanged legacy result envelope. Valid source-filtered messages return 200 with status FILTERED and no delivery.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundResponse"
+                }
+              }
+            }
           },
           "202": {
-            "description": "Durably queued; delivery/retry pending"
+            "description": "Durably queued; delivery/retry pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundResponse"
+                }
+              }
+            }
           },
           "400": {
             "description": "Safe validation error",
@@ -1607,7 +1642,14 @@
             "description": "Management/authentication rate limit"
           },
           "502": {
-            "description": "Persisted delivery failed/partial"
+            "description": "Persisted failed/partial processing outcome. Includes safe MESSAGE_PROCESSING_FAILED code, message, requestId and empty details; messageId/status and complete legacy result are retained.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundResponse"
+                }
+              }
+            }
           },
           "503": {
             "description": "Database or capacity unavailable"
@@ -1793,7 +1835,68 @@
         "operationId": "get__api_message_stats",
         "responses": {
           "200": {
-            "description": "Success; see route-specific legacy envelope."
+            "description": "Live aggregate counts. Successful/Failed refer to inbound message outcomes across retained history; Retrying counts outbound deliveries in QUEUED or RETRYING, including admission waits and retry work. messagesToday counts inbound records since dateFrom or server local midnight. Existing counters remain backward compatible.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "totalMessages": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "successfulMessages": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "failedMessages": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "retryingMessages": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "messagesToday": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "queuedMessages": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "deadLetterMessages": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "totalReceived": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "totalSent": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "totalErrors": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "channelsRunning": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "channelsStopped": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "channelsError": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Safe validation error",
@@ -3875,6 +3978,10 @@
               "script": {
                 "type": "string",
                 "maxLength": 65536
+              },
+              "basicSyntax": {
+                "type": "boolean",
+                "description": "Enable format-appropriate basic syntax validation. HTTP and preview clients parse JSON once before the pipeline; valid JSON string scalars remain strings. XML and HL7 syntax/security checks apply even without additional profile rules. Mapping required/default checks run during transformation after source filtering."
               }
             },
             "additionalProperties": false
@@ -4070,7 +4177,8 @@
           "filterScript": {
             "default": "",
             "type": "string",
-            "maxLength": 65536
+            "maxLength": 65536,
+            "description": "Optional sandboxed boolean filter. Simple Field/Operator/Value conditions compile into an intact canonical MIRTH_SIMPLE_CONDITION_V1 script stored in this existing field. Supported operators: eq, neq, contains, startsWith, exists, notExists, gt, gte, lt, lte. Text operators compare string representations of scalar values; numeric operators accept only finite numbers/nonempty numeric strings. Missing/non-scalar values do not satisfy comparisons, including neq. Presence operators test own-property path existence, including existing null/empty values. Unrecognized/custom/legacy scripts are preserved; no separate condition API or database field."
           }
         },
         "required": [
@@ -4163,7 +4271,8 @@
           "filterScript": {
             "default": "",
             "type": "string",
-            "maxLength": 65536
+            "maxLength": 65536,
+            "description": "Optional sandboxed boolean filter. Simple Field/Operator/Value conditions compile into an intact canonical MIRTH_SIMPLE_CONDITION_V1 script stored in this existing field. Supported operators: eq, neq, contains, startsWith, exists, notExists, gt, gte, lt, lte. Text operators compare string representations of scalar values; numeric operators accept only finite numbers/nonempty numeric strings. Missing/non-scalar values do not satisfy comparisons, including neq. Presence operators test own-property path existence, including existing null/empty values. Unrecognized/custom/legacy scripts are preserved; no separate condition API or database field."
           },
           "isEnabled": {
             "default": true,
@@ -4544,6 +4653,22 @@
           },
           "responseText": {
             "description": "Delivery response body or safe diagnostic code; omitted without message:payload. Redacted unless administrator raw access is explicitly requested and audited."
+          },
+          "durationMs": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Actual duration in milliseconds of this captured transport attempt, excluding database acquisition and result persistence. Null/absent for legacy or unattempted work; never inferred from timestamps."
+          },
+          "attemptCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "Exact transport attempt count across the complete saved history of this outbound message, including retries. Null/absent when historical attempt metadata is incomplete. Admission waits do not count as attempts."
           }
         }
       },
@@ -4646,6 +4771,98 @@
           "type"
         ],
         "additionalProperties": false
+      },
+      "InboundResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "messageId",
+          "status",
+          "result"
+        ],
+        "description": "Standard HTTP envelope with additive messageId/status aliases. The complete legacy result and any result.response generated by a legacy source response script remain available. SUCCESS denotes all configured deliveries accepted by their transports; it does not prove downstream business processing. FILTERED denotes a valid message excluded by source selection. Failed persisted outcomes also include the standard safe code/message/requestId/details fields while retaining the complete legacy result.",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "messageId": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string",
+            "examples": [
+              "SUCCESS",
+              "FILTERED",
+              "QUEUED",
+              "PARTIAL",
+              "FAILED"
+            ]
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "success": {
+                "type": "boolean"
+              },
+              "inboundMessageId": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "inboundStatus": {
+                "type": "string"
+              },
+              "duplicate": {
+                "type": "boolean"
+              },
+              "response": {},
+              "outboundResults": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            },
+            "additionalProperties": true
+          },
+          "code": {
+            "const": "MESSAGE_PROCESSING_FAILED"
+          },
+          "message": {
+            "const": "Message processing did not complete successfully."
+          },
+          "requestId": {
+            "type": "string",
+            "description": "Server request ID matching X-Request-Id."
+          },
+          "details": {
+            "type": "array",
+            "maxItems": 0,
+            "items": {}
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "success": {
+                  "const": false
+                }
+              },
+              "required": [
+                "success"
+              ]
+            },
+            "then": {
+              "required": [
+                "code",
+                "message",
+                "requestId",
+                "details"
+              ]
+            }
+          }
+        ]
       }
     }
   }

@@ -53,6 +53,8 @@ Atur `PUBLIC_BASE_URL=https://connect.bulmar.tech` pada server di balik reverse 
 
 Wizard channel memakai **Source → Transformation → Destinations → Review**. Mapping field visual mendukung Required, default value dan preview; filter, script, routing, multi destination, retry dan timeout tetap tersedia melalui Advanced. Panduan terbaru dan bukti pengujian tersedia di [Mirth Connect Lite UI](docs/MIRTH_LITE_UI.md).
 
+Source dan destination filter menyediakan builder **Field / Operator / Value**; aturan dikompilasi ke filter sandbox existing. Basic validation mengikuti format JSON/XML/HL7 dan disimpan sebagai `validationProfile.basicSyntax`; custom profile/script lama tetap tersedia. Overview menampilkan status operasional, sementara Settings mengelompokkan Users, Roles, Audit log dan System information.
+
 ## Database setup dan migration
 
 Buat database kosong melalui PostgreSQL administrator, misalnya:
@@ -72,7 +74,7 @@ Migration `001_engine.sql` membuat tabel yang belum ada, menambah field engine, 
 
 `bootstrap:admin` meminta username, nama, dan password tersembunyi (minimal 12 karakter). Tidak memakai admin/password default. Gunakan account migration dengan izin DDL, lalu account runtime dengan hak minimum yang diperlukan. Aplikasi tidak menjalankan migration secara otomatis.
 
-Build terbaru memerlukan migration **001–006**. Migration 006 menambah nullable HTTP status pada log delivery tanpa mengubah data lama. Jalankan preflight, backup dan migration sebelum restart; lihat [compatibility dan rollback](docs/MIRTH_LITE_UI.md#migration-006-dan-compatibility).
+Build terbaru memerlukan migration **001–007**. Migration 006 menambah nullable HTTP status; 007 menambah nullable integer `MessageDestinationLog.request_duration_ms` untuk durasi transport aktual. Baris historis tetap dipertahankan tanpa nilai pengganti. Jalankan preflight, backup dan migration sebelum restart; lihat [compatibility dan rollback](docs/MIRTH_LITE_UI.md#database-upgrade-dan-compatibility).
 
 ## Run development / production
 
@@ -126,7 +128,7 @@ curl -X POST http://localhost:9000/api/inbound/1 \
   --data '{"sample":"synthetic integration test"}'
 ```
 
-Set `CONNECTOR_KEY` di terminal dari hasil rotasi, bukan dari source. Production API harus diakses lewat HTTPS. HTTP success 200 berarti delivery selesai; 202 berarti sudah tercatat durably dan retry dijadwalkan. Error memiliki `success`, `code`, `message`, `requestId`. Route success legacy seperti login/list channel mempertahankan format agar kompatibel.
+Set `CONNECTOR_KEY` di terminal dari hasil rotasi, bukan dari source. Production API harus diakses lewat HTTPS. HTTP 200 mengembalikan hasil pemrosesan; periksa `status`: SUCCESS berarti transport menerima delivery, FILTERED berarti source filter mengecualikan pesan tanpa delivery. HTTP 202 berarti pekerjaan sudah tercatat durably dan masih antre. Respons mempunyai alias `messageId`/`status` serta `result` existing, termasuk custom source response legacy. Error memiliki `success`, `code`, `message`, `requestId`. Route success legacy seperti login/list channel mempertahankan format agar kompatibel.
 
 REST destination mempunyai timeout dan limit response, tanpa redirect/proxy environment. Hanya 2xx sukses. Header correlation dan `Idempotency-Key` stabil membantu deduplikasi downstream; destination tetap harus menerapkannya. Credential URL/query dienkripsi; list mengembalikan URL yang dimask dan `credentialConfigured`. Perubahan URL yang menyimpan credential meminta re-entry, agar credential tidak hilang tanpa diketahui.
 
@@ -158,6 +160,8 @@ Script berjalan di QuickJS WebAssembly dalam worker terpisah, dengan input/outpu
 
 Transformer/template harus mengembalikan JSON/string yang valid; filter mengembalikan boolean; response script mengembalikan response. Script async/network tidak didukung. Tinjau script existing terhadap perubahan parser MSH dan repeated fields.
 
+Simple condition dan mapping menyimpan metadata versi dalam script canonical yang sama dengan pipeline existing. Path menggunakan own properties dan menolak prototype access; nilai diperlakukan sebagai data. Operator numerik memerlukan angka berhingga; field yang hilang tidak memenuhi comparison, termasuk not-equal. XML dinormalisasi dengan parser terbatas hanya untuk script visual canonical; custom script lama tetap menerima bentuk input sebelumnya. Required/default mapping diperiksa setelah source filter, sehingga pesan valid yang difilter tidak dipaksa menjalani transformation.
+
 ## Retry, monitoring dan retention
 
 Outbound dicatat sebelum send, beserta payload final dan snapshot connector terenkripsi. Retry exponential mempunyai `retry_count`, `next_retry_at`, lease dan diagnostic error code; worker mengambil due work dari SQL tanpa sleep yang memblokir request. Retry memakai snapshot dan final payload, tidak menjalankan transformer/template ulang. Maksimum retry menghasilkan DEAD_LETTER. Manual resend memerlukan OPERATOR/ADMIN dan running channel.
@@ -165,6 +169,8 @@ Outbound dicatat sebelum send, beserta payload final dan snapshot connector tere
 Crash setelah network send bisa membuat hasil delivery ambigu. Lease yang expired ditandai `DELIVERY_OUTCOME_UNKNOWN`/DEAD_LETTER dan perlu rekonsiliasi operator; tidak dikirim ulang otomatis. Ini bukan jaminan exactly-once lintas sistem.
 
 Monitor: `GET /api/message?page=1&pageSize=50&channelId=1&direction=IN&status=SUCCESS&search=example&dateFrom=2026-10-01T00:00:00Z`. Maksimum pageSize 100; payload tidak masuk list. Detail `/api/message/:id?logPage=1` menampilkan lima destination results per page dengan permission payload. Retry history dapat ditelusuri per page. `GET /api/audit?page=1` khusus ADMIN.
+
+Messages memisahkan Inbound message, Source processed message, Outbound message dan Delivery result. HTTP status dan `durationMs` berasal dari attempt aktual; `attemptCount` memakai seluruh history yang lengkap. Metadata lama atau pekerjaan yang belum dikirim ditampilkan sebagai **Not recorded**, tanpa menebak dari timestamp atau retry counter.
 
 Maintenance menghapus batch pesan SUCCESS/FILTERED/RECEIVED yang melewati retention dan tidak mempunyai outstanding/failed child. Unresolved errors/dead letters tidak dipurge otomatis; harus direkonsiliasi. Audit memakai retention terpisah. Atur retention sesuai kebijakan organisasi dan regulasi yang berlaku, serta sediakan backup/restore teruji.
 
@@ -187,7 +193,7 @@ Uji PostgreSQL **sungguhan**, memakai environment test yang menunjuk database di
 ENV_FILE=/secure/mirth-test.env PG_SCHEMA=mirth_test_$(date +%s) LOG_LEVEL=silent npm run test:sql
 ```
 
-Path environment tersebut adalah placeholder; isi dengan konfigurasi test terpisah dari `.env` aplikasi. Script menolak schema `public`, membuat schema baru, menjalankan migration dan 19 skenario synthetic, lalu menghapus schema tersebut. Pengguna DB memerlukan izin CREATE schema. Login/channel/transport/monitor/logout, rollback, concurrent retry/dedupe, idempotent migration, retention dan visual mapping sudah diuji pada PostgreSQL nyata. Tabel `public` tidak dipakai oleh test ini.
+Path environment tersebut adalah placeholder; isi dengan konfigurasi test terpisah dari `.env` aplikasi. Script menolak schema `public`, membuat schema baru, menjalankan migration dan 19 skenario synthetic, lalu menghapus schema tersebut. Pengguna DB memerlukan izin CREATE schema. PostgreSQL 18.4 sudah menguji migration 001–007 berulang, login/channel/transport/monitor/logout, rollback, concurrent retry/dedupe, retention dan fixture JSON→XML yang diminta terhadap HTTP receiver nyata. Tabel `public` tidak dipakai oleh test ini.
 
 Local receiver harness (synthetic data saja):
 
@@ -230,7 +236,7 @@ Compose ini development, DB eksternal, port host loopback. Container/migration b
 
 Konfigurasi backend sekarang memakai `DATABASE_URL`, bukan `SQL_*`. URL lokal ditujukan ke **MiniMirthDev**, bukan database lain pada server yang sama. `server/.env` tidak dibaca. Gunakan `PG_SSL=true` dengan verifikasi sertifikat untuk production; konfigurasi development lokal mengikuti koneksi PostgreSQL yang diberikan.
 
-Migration mempertahankan nama tabel mixed-case, ID, password hash dan timestamp existing tanpa konversi timezone otomatis. Migrator memakai transaksi dan advisory lock. Jalankan seluruh migration 001–006 melalui `npm run db:migrate`; ikuti [deployment dan rollback](docs/OPERATIONAL_CONTROLS.md#deployment-and-rollback) serta [backup/restore](docs/BACKUP_RESTORE_RUNBOOK.md). Tidak ada username/password default atau credential database dalam source.
+Migration mempertahankan nama tabel mixed-case, ID, password hash dan timestamp existing tanpa konversi timezone otomatis. Migrator memakai transaksi dan advisory lock. Jalankan seluruh migration 001–007 melalui `npm run db:migrate`; ikuti [deployment dan rollback](docs/OPERATIONAL_CONTROLS.md#deployment-and-rollback) serta [backup/restore](docs/BACKUP_RESTORE_RUNBOOK.md). Tidak ada username/password default atau credential database dalam source.
 
 ## UI / UX workspace
 
@@ -244,6 +250,8 @@ Status pengujian dan pekerjaan tersisa dirangkum dalam [readiness matrix](docs/P
 Sebelum upgrade: backup terenkripsi teruji, review konfigurasi keyring/TLS/allowlist, dan jalankan di database disposable/staging terlebih dahulu. Node 24 dipakai CI/container (minimum package tetap 22.18+). Jalankan `npm ci`, `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run test:coverage`, `npm run build`. Dengan database disposable dipilih secara eksplisit, jalankan `npm run db:migrate -- --dry-run`, `npm run db:migrate` dua kali, lalu SQL/browser tests. Production migration memerlukan `MIGRATION_BACKUP_CONFIRMED=true`; migrator tidak dipanggil otomatis saat startup.
 
 Migration 002 menambah session/revision/reconciliation/profile; 003 menambah delivery slot/circuit state dan lease owner; 004 menambah inbox alert, pending notification, cooldown dan acknowledgement. Existing channel menjadi revision awal. PUT `/api/channel/:id` **menyimpan draft**; publish melalui `POST /api/channel/:id/revisions/:revision/publish` dengan expectedActiveRevision dan changeSummary. Rollback membuat publish baru. UI Revisions menyediakan review/compare/publish/rollback; summary opsional di UI diisi otomatis untuk audit. Validation dan scripting berada di Advanced, sementara Transformation menyediakan mapping dan preview tanpa network. Channel dengan revision history ditolak oleh DELETE; stop untuk retire. Perubahan ini memerlukan penyesuaian automation lama yang mengandalkan update langsung.
+
+Penyimpanan draft biasa menghasilkan audit area yang berubah: `SOURCE_UPDATED`, `TRANSFORMATION_UPDATED`, `DESTINATION_UPDATED`, atau `CHANNEL_UPDATED` untuk nama. Event hanya berisi metadata aksi dan tetap diikuti `CREATE_CHANNEL_DRAFT`; konfigurasi aktif berubah setelah publish. Custom summary API tetap didukung.
 
 Browser memakai `/api/auth/browser/login`, refresh cookie HttpOnly/SameSite=Strict/Secure production, CSRF dan token rotation/reuse detection; access token hanya di memori. Session localStorage lama dibuang, sehingga pengguna perlu login ulang. Endpoint Bearer `/api/auth/login` tetap tersedia untuk automation. UI refresh diserialisasi melalui Web Locks bila browser mendukungnya. Settings menampilkan/revoke session sendiri. Role dibaca dari SQL pada setiap request.
 
@@ -259,7 +267,7 @@ TLS MLLP opsional: MLLP_TLS_ENABLED + certificate/key/CA files untuk listener, m
 
 `npm run secrets:rotate -- --dry-run`, `npm run secrets:rotate` menggunakan current + previous keyring; baca runbook sebelum mengganti key. `db:backup`, `db:restore`, `db:verify-restore` memakai environment backup eksplisit, file terenkripsi/checksum dan restore **hanya empty local disposable database**. Production recovery tetap proses administrator. `/metrics` membutuhkan ADMIN dan diblok proxy public; webhook alert opsional punya cooldown/recovery persisten di SQL, dengan fallback memory saat database unavailable. Detail batasannya di runbook alerting.
 
-Rollback aplikasi: stop inbound baru, rekonsiliasi in-flight deliveries, pertahankan tabel/kolom/history/keyring; rollback konfigurasi lewat revision API. Jangan drop migration tables/columns atau reset database. Binary lama yang mengubah channel langsung tidak boleh dijalankan bersamaan dengan binary V2.
+Rollback aplikasi: stop inbound baru, rekonsiliasi in-flight deliveries, pertahankan tabel/kolom/history/keyring; rollback konfigurasi lewat revision API. Sebelum downgrade binary, publish revision yang kompatibel: simple condition pada XML memerlukan normalisasi yang tersedia di binary baru. Jangan drop migration tables/columns atau reset database. Binary lama yang mengubah channel langsung tidak boleh dijalankan bersamaan dengan binary V2.
 
 Hasil verifikasi source terbaru tercatat di [manual UI](docs/MIRTH_LITE_UI.md#validasi-dan-batas-verifikasi); status produksi dan kekurangan source tetap dicatat di [readiness matrix](docs/PRODUCTION_READINESS_MATRIX.md).
 
@@ -268,7 +276,7 @@ Hasil verifikasi source terbaru tercatat di [manual UI](docs/MIRTH_LITE_UI.md#va
 
 Current development includes a secret-preserving successor draft editor, stored-revision synthetic dry-run, separate DNS/TCP/TLS connection probes, canonical JSON idempotency, optional reservation TTL, revision-owned destination circuit tuning and audited idle-only reset. ADMIN settings expose effective configuration and an audited metadata diagnostic download. `npm run docs:check` checks the static OpenAPI structure; Playwright includes Axe accessibility scans.
 
-Apply migrations through version 6 before starting the current backend. `IDEMPOTENCY_RETENTION_HOURS=0` preserves prior dedupe lifetime; enable expiry only after receiver/retention policy review. Expiry releases reservations without deleting messages and holds active/failed deliveries. See [operational controls](docs/OPERATIONAL_CONTROLS.md) and [remaining scope](docs/PRODUCTION_READINESS_MATRIX.md#remaining-source-scope). Production approval still requires runtime verification and hospital UAT.
+Apply migrations through version 7 before starting the current backend. `IDEMPOTENCY_RETENTION_HOURS=0` preserves prior dedupe lifetime; enable expiry only after receiver/retention policy review. Expiry releases reservations without deleting messages and holds active/failed deliveries. See [operational controls](docs/OPERATIONAL_CONTROLS.md) and [remaining scope](docs/PRODUCTION_READINESS_MATRIX.md#remaining-source-scope). Production approval still requires runtime verification and hospital UAT.
 
 
 ### Development database maintenance

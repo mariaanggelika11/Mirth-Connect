@@ -2,6 +2,9 @@ export interface MonitorStats {
   totalReceived: number;
   totalSent: number;
   totalErrors: number;
+  successfulMessages?: number;
+  failedMessages?: number;
+  retryingMessages?: number;
   channelsRunning: number;
   channelsStopped: number;
   channelsError: number;
@@ -25,6 +28,8 @@ export interface DestinationLog {
   destinationId?: number;
   ackCode?: string;
   httpStatus?: number;
+  durationMs?: number | null;
+  attemptCount?: number | null;
   destinationName: string;
   outboundFormat?: string;
   connectorType?: string;

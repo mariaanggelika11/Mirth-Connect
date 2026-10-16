@@ -74,6 +74,7 @@ export const destinationSchema = z.object({
 export const channelSchema = z.object({
   validationProfile: z
     .object({
+      basicSyntax: z.boolean().optional(),
       jsonSchema: z.record(z.string(), z.unknown()).optional(),
       xml: xmlProfileSchema.optional(),
       hl7: z

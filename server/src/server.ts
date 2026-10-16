@@ -44,7 +44,7 @@ try {
   const pool = await getConnection();
   startupStage = 'migration';
   const ready = (
-    await pool.request().query('SELECT version FROM "SchemaMigrations" WHERE version=6')
+    await pool.request().query('SELECT version FROM "SchemaMigrations" WHERE version=7')
   ).recordset;
   if (!ready.length)
     throw new AppError(503, 'MIGRATION_REQUIRED', 'Database migrations are required');

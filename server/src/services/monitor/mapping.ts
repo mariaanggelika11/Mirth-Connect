@@ -31,6 +31,8 @@ export interface DestinationLogRow {
   sent_at: Date;
   ack_code: string;
   http_status?: number | null;
+  request_duration_ms?: number | null;
+  attempt_count?: number | string | null;
   message_control_id: string;
   request_data: string;
   outbound_data: string;
@@ -83,6 +85,18 @@ export function logRow(row: DestinationLogRow, payload: boolean) {
     sentAt: row.sent_at,
     ackCode: row.ack_code,
     httpStatus: row.http_status ?? undefined,
+    durationMs:
+      typeof row.request_duration_ms === 'number' &&
+      Number.isFinite(row.request_duration_ms) &&
+      row.request_duration_ms >= 0
+        ? row.request_duration_ms
+        : null,
+    attemptCount:
+      row.attempt_count != null &&
+      Number.isSafeInteger(Number(row.attempt_count)) &&
+      Number(row.attempt_count) > 0
+        ? Number(row.attempt_count)
+        : null,
     messageControlId: payload && row.message_control_id ? '[REDACTED]' : undefined,
     canResend: row.retry_eligible === true,
     ...(payload

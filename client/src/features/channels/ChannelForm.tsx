@@ -19,6 +19,7 @@ import { DataType } from '../../types';
 import { TransformationEditor } from './TransformationEditor';
 import { FilterEditor } from './FilterEditor';
 import { readFieldMapping } from '../../../../server/src/utils/fieldMapping';
+import { readSimpleCondition } from '../../../../server/src/utils/simpleCondition';
 import { SourceEndpoint } from './SourceEndpoint';
 import type { DryRunResult } from './DryRunPreview';
 import { useAuth } from '../../contexts/AuthContext';
@@ -64,6 +65,10 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
   const { can } = useAuth();
   const canViewRaw = can('message:raw');
   const [transformationValid, setTransformationValid] = useState(true);
+  const [sourceFilterValid, setSourceFilterValid] = useState(true);
+  const [destinationFilterValidity, setDestinationFilterValidity] = useState<boolean[]>([]);
+  const [destinationKeys, setDestinationKeys] = useState<number[]>([]);
+  const nextDestinationKey = useRef(0);
   const [sourceConfiguration, setSourceConfiguration] = useState<{
     baseUrl: string;
     path: string;
@@ -94,6 +99,10 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     sample,
     rawPreview,
     canViewRaw,
+    sourceFilterValid,
+    filterEnabled,
+    destinationFilterValidity,
+    transformationValid,
   });
   const currentPreviewContext = useRef(previewContext);
   currentPreviewContext.current = previewContext;
@@ -115,6 +124,9 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       setTestResult(null);
       setRawPreview(false);
       setTransformationValid(true);
+      setSourceFilterValid(true);
+      setDestinationFilterValidity(value.destinations.map(() => true));
+      setDestinationKeys(value.destinations.map(() => nextDestinationKey.current++));
       setSample(syntheticSample(value.source.inboundDataType));
     } else {
       setKey('');
@@ -147,7 +159,11 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
   }, [canViewRaw]);
   useEffect(() => setKey(''), [step, draft.source.type]);
   const dirty =
-    JSON.stringify(draft) !== baseline || profileText !== profileBaseline || !transformationValid;
+    JSON.stringify(draft) !== baseline ||
+    profileText !== profileBaseline ||
+    !transformationValid ||
+    (filterEnabled && !sourceFilterValid) ||
+    destinationFilterValidity.includes(false);
   const closeAndClear = () => {
     setKey('');
     setTestResult(null);
@@ -173,8 +189,35 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       destinations: d.destinations.map((v, i) => (i === index ? { ...v, ...values } : v)),
     }));
   }
+  function unfinishedFilter() {
+    if (filterEnabled && !sourceFilterValid) {
+      setStep(0);
+      setError('Complete the source filter condition or choose another filter mode.');
+      return true;
+    }
+    const index = destinationFilterValidity.findIndex((valid) => !valid);
+    if (index >= 0) {
+      setStep(2);
+      setError(
+        `Complete the filter condition for destination ${index + 1}, or choose another filter mode.`,
+      );
+      return true;
+    }
+    return false;
+  }
+  function navigate(targetStep: number) {
+    if (targetStep !== step && unfinishedFilter()) return;
+    if (targetStep > 1 && !transformationValid) {
+      setStep(1);
+      setError('Complete or remove the unfinished field mapping.');
+      return;
+    }
+    setStep(targetStep);
+    setError('');
+  }
   function next() {
     setError('');
+    if (unfinishedFilter()) return;
     if (!draft.name.trim()) {
       setStep(0);
       setError('Give this channel a name before continuing.');
@@ -192,6 +235,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
   }
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    if (unfinishedFilter()) return;
     if (step < 3) {
       next();
       return;
@@ -250,6 +294,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     }
   }
   async function previewOutput() {
+    if (unfinishedFilter()) return;
     const context = previewContext;
     setTesting(true);
     setTestResult(null);
@@ -304,15 +349,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                 type="button"
                 disabled={saving || rotating}
                 className={step === i ? 'active' : step > i ? 'complete' : ''}
-                onClick={() => {
-                  if (i > 1 && !transformationValid) {
-                    setStep(1);
-                    setError('Complete or remove the unfinished field mapping.');
-                    return;
-                  }
-                  setStep(i);
-                  setError('');
-                }}
+                onClick={() => navigate(i)}
                 aria-current={step === i ? 'step' : undefined}
               >
                 <span>{step > i ? <Check size={13} /> : i + 1}</span>
@@ -332,232 +369,257 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                 credentials before saving.
               </p>
             )}
-            {step === 0 && (
-              <div className="form-section">
-                <div className="section-intro">
-                  <h3>Connect the sending system</h3>
-                </div>
+            <div
+              className="form-section"
+              style={{ display: step === 0 ? 'block' : 'none' }}
+              aria-hidden={step !== 0}
+            >
+              <div className="section-intro">
+                <h3>Connect the sending system</h3>
+              </div>
+              <label className="field">
+                <span>
+                  Channel name <span className="required">*</span>
+                </span>
+                <input
+                  autoComplete="off"
+                  value={draft.name}
+                  maxLength={150}
+                  placeholder="e.g. JSON_TO_XML_PATIENT"
+                  onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+                />
+              </label>
+              <div className="form-grid">
                 <label className="field">
-                  <span>
-                    Channel name <span className="required">*</span>
-                  </span>
-                  <input
-                    autoComplete="off"
-                    value={draft.name}
-                    maxLength={150}
-                    placeholder="e.g. JSON_TO_XML_PATIENT"
-                    onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-                  />
+                  <span>Source connector</span>
+                  <select
+                    value={draft.source.type}
+                    disabled={saving || rotating}
+                    onChange={(e) =>
+                      setDraft((d) => ({ ...d, source: { ...d.source, type: e.target.value } }))
+                    }
+                  >
+                    <option value="HTTP">HTTP receiver</option>
+                    <option value="HL7">HL7 / MLLP listener</option>
+                  </select>
                 </label>
-                <div className="form-grid">
-                  <label className="field">
-                    <span>Source connector</span>
-                    <select
-                      value={draft.source.type}
-                      disabled={saving || rotating}
-                      onChange={(e) =>
-                        setDraft((d) => ({ ...d, source: { ...d.source, type: e.target.value } }))
-                      }
-                    >
-                      <option value="HTTP">HTTP receiver</option>
-                      <option value="HL7">HL7 / MLLP listener</option>
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>Inbound format</span>
-                    <select
-                      value={draft.source.inboundDataType}
-                      onChange={(e) => {
-                        setDraft((d) => ({
-                          ...d,
-                          source: { ...d.source, inboundDataType: e.target.value as DataType },
-                        }));
-                        setSample(syntheticSample(e.target.value as DataType));
-                        if (validation === 'BASIC_JSON' && e.target.value !== DataType.JSON)
-                          chooseValidation('NONE');
-                      }}
-                    >
-                      {dataOptions.map((format) => (
-                        <option key={format}>{format}</option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                {draft.source.type === 'HTTP' && (
-                  <>
-                    {initialData?.source.type === 'HTTP' ? (
-                      <SourceEndpoint channel={initialData} />
-                    ) : (
-                      <div className="field">
-                        <span>Source endpoint</span>
-                        <code className="code-box break-anywhere">
-                          {sourceConfiguration
-                            ? `${sourceConfiguration.baseUrl}${sourceConfiguration.path}/{channelId}`
-                            : 'Assigned after Save'}
-                        </code>
-                        <small>A channel ID is assigned when you save.</small>
+                <label className="field">
+                  <span>Inbound format</span>
+                  <select
+                    value={draft.source.inboundDataType}
+                    onChange={(e) => {
+                      setDraft((d) => ({
+                        ...d,
+                        source: { ...d.source, inboundDataType: e.target.value as DataType },
+                      }));
+                      setSample(syntheticSample(e.target.value as DataType));
+                    }}
+                  >
+                    {dataOptions.map((format) => (
+                      <option key={format}>{format}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {draft.source.type === 'HTTP' && (
+                <>
+                  {initialData?.source.type === 'HTTP' ? (
+                    <SourceEndpoint channel={initialData} />
+                  ) : (
+                    <div className="field">
+                      <span>Source endpoint</span>
+                      <code className="code-box break-anywhere">
+                        {sourceConfiguration
+                          ? `${sourceConfiguration.baseUrl}${sourceConfiguration.path}/{channelId}`
+                          : 'Assigned after Save'}
+                      </code>
+                      <small>A channel ID is assigned when you save.</small>
+                    </div>
+                  )}
+                  <section className="source-authentication" aria-label="Source authentication">
+                    <div>
+                      <strong>Source API key</strong>
+                      <p className="muted">
+                        API key digunakan oleh sistem sumber untuk mengirim data ke channel.
+                      </p>
+                      <p className="muted">
+                        {!initialData
+                          ? 'Create the source access key after saving.'
+                          : initialData.apiKeyConfigured === true
+                            ? 'API key configured'
+                            : initialData.apiKeyConfigured === false
+                              ? 'No API key configured'
+                              : 'Create or rotate the key used by the sending system.'}
+                      </p>
+                    </div>
+                    {initialData && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        disabled={rotating}
+                        onClick={() => setConfirmKey(true)}
+                      >
+                        Create / rotate source API key
+                      </Button>
+                    )}
+                    {key && (
+                      <div className="alert success break-anywhere">
+                        <strong>Copy this key now. It is shown only once.</strong>
+                        <code>{key}</code>
+                        <CopySourceKey value={key} />
                       </div>
                     )}
-                    <section className="source-authentication" aria-label="Source authentication">
-                      <div>
-                        <strong>Source API key</strong>
-                        <p className="muted">
-                          {!initialData
-                            ? 'Create the source access key after saving.'
-                            : initialData.apiKeyConfigured === true
-                              ? 'API key configured'
-                              : initialData.apiKeyConfigured === false
-                                ? 'No API key configured'
-                                : 'Create or rotate the key used by the sending system.'}
-                        </p>
-                      </div>
-                      {initialData && (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          disabled={rotating}
-                          onClick={() => setConfirmKey(true)}
-                        >
-                          Create / rotate source API key
-                        </Button>
-                      )}
-                      {key && (
-                        <div className="alert success break-anywhere">
-                          <strong>Copy this key now. It is shown only once.</strong>
-                          <code>{key}</code>
-                          <CopySourceKey value={key} />
-                        </div>
-                      )}
-                    </section>
-                  </>
-                )}
-                {draft.source.type === 'HL7' && (
-                  <div className="field">
-                    <span>Source endpoint</span>
-                    <code>
-                      {initialData?.source.type === 'HL7'
-                        ? initialData.source.endpoint
-                        : 'Uses the configured MLLP listener'}
-                    </code>
-                    <small>Access is controlled by the listener network and TLS settings.</small>
-                  </div>
-                )}
-                <details className="advanced-section">
+                  </section>
+                </>
+              )}
+              {draft.source.type === 'HL7' && (
+                <div className="field">
+                  <span>Source endpoint</span>
+                  <code>
+                    {initialData?.source.type === 'HL7'
+                      ? initialData.source.endpoint
+                      : 'Uses the configured MLLP listener'}
+                  </code>
+                  <small>Access is controlled by the listener network and TLS settings.</small>
+                </div>
+              )}
+              <details className="advanced-section">
+                <summary>
+                  <span>Advanced source settings</span>
+                  {customSource && <span className="configured-hint">Configured</span>}
+                </summary>
+                <details className="advanced-section" aria-label="Source validation settings">
                   <summary>
-                    <span>Advanced source settings</span>
-                    {customSource && <span className="configured-hint">Configured</span>}
+                    Validation
+                    {validation !== 'NONE' && <small> · Configured</small>}
                   </summary>
-                  <section className="form-section">
+                  <fieldset className="validation-options">
+                    <legend>Message validation</legend>
                     <label className="check-field">
                       <input
-                        type="checkbox"
-                        checked={filterEnabled}
-                        onChange={(e) => {
-                          setFilterEnabled(e.target.checked);
-                          if (!e.target.checked) setRetainedFilter(draft.filterScript || '');
-                          setDraft((d) => ({
-                            ...d,
-                            filterScript: e.target.checked ? retainedFilter : '',
-                          }));
-                        }}
+                        type="radio"
+                        name="message-validation"
+                        checked={validation === 'NONE'}
+                        onChange={() => chooseValidation('NONE')}
                       />
-                      Enable source filter
+                      No additional validation
                     </label>
-                    {filterEnabled ? (
-                      <FilterEditor
-                        kind="source"
-                        value={draft.filterScript || ''}
-                        onChange={(script) => {
-                          setRetainedFilter(script);
-                          setDraft((d) => ({ ...d, filterScript: script }));
-                        }}
+                    <label className="check-field">
+                      <input
+                        type="radio"
+                        name="message-validation"
+                        checked={validation === 'BASIC' || validation === 'BASIC_JSON'}
+                        onChange={() => chooseValidation('BASIC')}
                       />
-                    ) : (
-                      <p className="muted">All messages are accepted.</p>
+                      Basic validation
+                    </label>
+                    <label className="check-field">
+                      <input
+                        type="radio"
+                        name="message-validation"
+                        checked={validation === 'CUSTOM'}
+                        onChange={() => chooseValidation('CUSTOM')}
+                      />
+                      Custom validation schema
+                    </label>
+                    {validation === 'CUSTOM' && (
+                      <label className="field">
+                        <span>Custom validation schema</span>
+                        <textarea
+                          aria-label="Custom validation schema editor"
+                          rows={5}
+                          className="code-input"
+                          value={profileText}
+                          onChange={(e) => {
+                            setProfileText(e.target.value);
+                            try {
+                              setDraft((d) => ({
+                                ...d,
+                                validationProfile: selectedValidationProfile(
+                                  'CUSTOM',
+                                  e.target.value,
+                                ),
+                              }));
+                            } catch {
+                              /* Validate on Test or Save. */
+                            }
+                          }}
+                        />
+                      </label>
                     )}
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() =>
-                        setEditor({
-                          field: 'processingScript',
-                          title: 'Advanced source transformer',
-                        })
-                      }
-                    >
-                      <Code2 size={14} />
-                      Advanced source transformer
-                    </Button>
-                    {draft.responseScript?.trim() && (
-                      <small>Existing source response script is retained.</small>
-                    )}
-                    <details className="advanced-section">
-                      <summary>
-                        Advanced validation
-                        {validation !== 'NONE' && (
-                          <span className="configured-hint">Configured</span>
-                        )}
-                      </summary>
-                      <fieldset className="validation-options">
-                        <legend>Message validation</legend>
-                        <label className="check-field">
-                          <input
-                            type="radio"
-                            name="message-validation"
-                            checked={validation === 'NONE'}
-                            onChange={() => chooseValidation('NONE')}
-                          />
-                          No additional validation
-                        </label>
-                        <label className="check-field">
-                          <input
-                            type="radio"
-                            name="message-validation"
-                            checked={validation === 'BASIC_JSON'}
-                            disabled={draft.source.inboundDataType !== DataType.JSON}
-                            onChange={() => chooseValidation('BASIC_JSON')}
-                          />
-                          Basic JSON validation
-                        </label>
-                        <label className="check-field">
-                          <input
-                            type="radio"
-                            name="message-validation"
-                            checked={validation === 'CUSTOM'}
-                            onChange={() => chooseValidation('CUSTOM')}
-                          />
-                          Custom validation schema
-                        </label>
-                        {validation === 'CUSTOM' && (
-                          <label className="field">
-                            <span>Custom validation profile (JSON)</span>
-                            <textarea
-                              rows={5}
-                              className="code-input"
-                              value={profileText}
-                              onChange={(e) => {
-                                setProfileText(e.target.value);
-                                try {
-                                  setDraft((d) => ({
-                                    ...d,
-                                    validationProfile: selectedValidationProfile(
-                                      'CUSTOM',
-                                      e.target.value,
-                                    ),
-                                  }));
-                                } catch {
-                                  /* Validate on Test or Save. */
-                                }
-                              }}
-                            />
-                          </label>
-                        )}
-                      </fieldset>
-                    </details>
-                  </section>
+                  </fieldset>
                 </details>
-              </div>
-            )}
+                <details className="advanced-section" aria-label="Source filter settings">
+                  <summary>Source filter{filterEnabled && <small> · Configured</small>}</summary>
+                  <p className="muted">Choose which valid messages this channel processes.</p>
+                  <label className="check-field">
+                    <input
+                      type="checkbox"
+                      checked={filterEnabled}
+                      onChange={(e) => {
+                        setFilterEnabled(e.target.checked);
+                        if (!e.target.checked) setRetainedFilter(draft.filterScript || '');
+                        setDraft((d) => ({
+                          ...d,
+                          filterScript: e.target.checked ? retainedFilter : '',
+                        }));
+                      }}
+                    />
+                    Enable source filter
+                  </label>
+                  {!filterEnabled && <p className="muted">All valid messages are accepted.</p>}
+                  <div
+                    style={{ display: filterEnabled ? 'block' : 'none' }}
+                    aria-hidden={!filterEnabled}
+                  >
+                    <FilterEditor
+                      kind="source"
+                      value={filterEnabled ? draft.filterScript || '' : retainedFilter}
+                      onChange={(script) => {
+                        setRetainedFilter(script);
+                        setDraft((d) => ({ ...d, filterScript: script }));
+                      }}
+                      onValidityChange={(valid) => {
+                        setSourceFilterValid(valid);
+                        if (!valid) setTestResult(null);
+                      }}
+                    />
+                  </div>
+                </details>
+                <details className="advanced-section" aria-label="Source transformer settings">
+                  <summary>
+                    Source transformer
+                    {draft.processingScript?.trim() && <small> · Configured</small>}
+                  </summary>
+                  <p>
+                    <strong>Source transformation:</strong>{' '}
+                    {fieldMapping
+                      ? `${fieldMapping.rows.length} field mappings configured in Transformation`
+                      : draft.processingScript?.trim()
+                        ? 'Custom transformation configured'
+                        : 'No transformation'}
+                  </p>
+                  <p className="muted">
+                    Change or normalize the message before destination processing.
+                  </p>
+                  {fieldMapping && (
+                    <p className="muted">This is the same mapping shown in Transformation.</p>
+                  )}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      setEditor({ field: 'processingScript', title: 'Source transformation' })
+                    }
+                  >
+                    <Code2 size={14} /> Configure transformation
+                  </Button>
+                </details>
+                {draft.responseScript?.trim() && (
+                  <small>Legacy custom source response is active.</small>
+                )}
+              </details>
+            </div>
             <div style={{ display: step === 1 ? 'block' : 'none' }} aria-hidden={step !== 1}>
               <TransformationEditor
                 inboundFormat={draft.source.inboundDataType || DataType.JSON}
@@ -587,58 +649,70 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                 }}
               />
             </div>
-            {step === 2 && (
-              <div className="form-section">
-                <div className="section-intro">
-                  <h3>Where should messages go?</h3>
-                  <p>Destinations run in the order shown below.</p>
-                </div>
-                {draft.destinations.map((dest, index) => (
-                  <DestinationEditor
-                    key={dest.id ?? index}
-                    dest={dest}
-                    index={index}
-                    inboundFormat={draft.source.inboundDataType}
-                    onChange={(values) => changeDestination(index, values)}
-                    onRemove={() =>
-                      setDraft((d) => ({
-                        ...d,
-                        destinations: d.destinations.filter((_, i) => i !== index),
-                      }))
-                    }
-                    onEditScript={setEditor}
-                  />
-                ))}
-                {!draft.destinations.length && (
-                  <p className="muted">
-                    This channel will receive messages without outbound delivery. Add a destination
-                    when ready.
-                  </p>
-                )}
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() =>
+            <div
+              className="form-section"
+              style={{ display: step === 2 ? 'block' : 'none' }}
+              aria-hidden={step !== 2}
+            >
+              <div className="section-intro">
+                <h3>Where should messages go?</h3>
+                <p>Destinations run in the order shown below.</p>
+              </div>
+              {draft.destinations.map((dest, index) => (
+                <DestinationEditor
+                  key={destinationKeys[index] ?? dest.id ?? index}
+                  dest={dest}
+                  index={index}
+                  inboundFormat={draft.source.inboundDataType}
+                  onChange={(values) => changeDestination(index, values)}
+                  onRemove={() => {
+                    setDestinationFilterValidity((values) => values.filter((_, i) => i !== index));
+                    setDestinationKeys((values) => values.filter((_, i) => i !== index));
                     setDraft((d) => ({
                       ...d,
-                      destinations: [
-                        ...d.destinations,
-                        {
-                          ...newDestination(),
-                          outboundDataType:
-                            d.destinations[0]?.outboundDataType ||
-                            d.source.inboundDataType ||
-                            DataType.JSON,
-                        },
-                      ],
-                    }))
-                  }
-                >
-                  <Plus size={16} />
-                  Add Destination
-                </Button>
-              </div>
-            )}
+                      destinations: d.destinations.filter((_, i) => i !== index),
+                    }));
+                  }}
+                  onEditScript={setEditor}
+                  onFilterValidityChange={(valid) => {
+                    setDestinationFilterValidity((values) =>
+                      values.map((value, i) => (i === index ? valid : value)),
+                    );
+                    if (!valid) setTestResult(null);
+                  }}
+                />
+              ))}
+              {!draft.destinations.length && (
+                <p className="muted">
+                  This channel will receive messages without outbound delivery. Add a destination
+                  when ready.
+                </p>
+              )}
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setDestinationFilterValidity((values) => [...values, true]);
+                  setDestinationKeys((values) => [...values, nextDestinationKey.current++]);
+                  setDraft((d) => ({
+                    ...d,
+                    destinations: [
+                      ...d.destinations,
+                      {
+                        ...newDestination(),
+                        outboundDataType:
+                          d.destinations[0]?.outboundDataType ||
+                          d.source.inboundDataType ||
+                          DataType.JSON,
+                      },
+                    ],
+                  }));
+                }}
+              >
+                <Plus size={16} />
+                Add Destination
+              </Button>
+            </div>
             {step === 3 && (
               <div className="form-section">
                 <div className="section-intro">
@@ -689,6 +763,49 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                       {draft.source.type} / {draft.source.inboundDataType}
                     </dd>
                   </div>
+                </dl>
+                <section className="form-section" aria-label="Source processing summary">
+                  <h3>Source processing</h3>
+                  <dl className="definition-list">
+                    <div>
+                      <dt>Validation</dt>
+                      <dd>
+                        {validation === 'NONE'
+                          ? 'Parsing only'
+                          : validation === 'CUSTOM'
+                            ? 'Custom schema'
+                            : validation === 'BASIC_JSON'
+                              ? 'Basic (existing JSON object schema)'
+                              : 'Basic'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Filter</dt>
+                      <dd>
+                        {!draft.filterScript?.trim()
+                          ? 'Off'
+                          : readSimpleCondition(draft.filterScript)
+                            ? 'Simple condition'
+                            : /^return\s+true\s*;?$/.test(draft.filterScript.trim())
+                              ? 'Accept all messages'
+                              : /^return\s+false\s*;?$/.test(draft.filterScript.trim())
+                                ? 'Filter all messages'
+                                : 'Custom condition'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Transformer</dt>
+                      <dd>
+                        {fieldMapping
+                          ? `${fieldMapping.rows.length} field mappings (configured in Transformation)`
+                          : draft.processingScript?.trim()
+                            ? 'Custom transformation'
+                            : 'None (pass-through)'}
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+                <dl className="definition-list">
                   <div>
                     <dt>Transformation</dt>
                     <dd>
@@ -744,7 +861,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                   type="button"
                   variant="secondary"
                   disabled={saving || rotating}
-                  onClick={() => setStep((s) => s - 1)}
+                  onClick={() => navigate(step - 1)}
                 >
                   <ArrowLeft size={14} />
                   Back

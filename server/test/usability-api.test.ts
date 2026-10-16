@@ -189,6 +189,104 @@ describe('Authoritative source URLs and legacy inbound compatibility', () => {
       .send({ fixture: true });
     expect(bearer.status).toBe(200);
   });
+  it('adds simple response aliases while retaining the complete legacy result', async () => {
+    const legacyResult = {
+      success: true,
+      inboundMessageId: 42,
+      inboundStatus: 'SUCCESS',
+      response: 'SYNTHETIC LEGACY SOURCE RESPONSE',
+      outboundResults: [{ destinationId: 9, status: 'OUT-SENT' }],
+    };
+    state.process.mockResolvedValue(legacyResult);
+    const response = await request(app)
+      .post('/api/message/inbound/7')
+      .set('X-API-Key', 'synthetic-channel-key')
+      .send({ fixture: true });
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      success: true,
+      messageId: 42,
+      status: 'SUCCESS',
+      result: legacyResult,
+    });
+  });
+  for (const inboundStatus of ['FAILED', 'PARTIAL', 'IN-ERROR'])
+    it(`returns the safe error contract for persisted ${inboundStatus} without changing legacy results`, async () => {
+      const legacyResult = {
+        success: false,
+        inboundMessageId: 42,
+        inboundStatus,
+        response: 'Synthetic legacy source response',
+        outboundResults: [{ destinationId: 9, status: 'OUT-ERROR' }],
+      };
+      state.process.mockResolvedValue(legacyResult);
+      const response = await request(app)
+        .post('/api/message/inbound/7')
+        .set('X-API-Key', 'synthetic-channel-key')
+        .send({ name: 'SYNTHETIC-PRIVATE-PATIENT' });
+      expect(response.status).toBe(502);
+      expect(response.body).toEqual({
+        success: false,
+        messageId: 42,
+        status: inboundStatus,
+        code: 'MESSAGE_PROCESSING_FAILED',
+        message: 'Message processing did not complete successfully.',
+        requestId: response.headers['x-request-id'],
+        details: [],
+        result: legacyResult,
+      });
+      expect(response.body.requestId).toEqual(expect.any(String));
+      expect(response.body.message).not.toContain('SYNTHETIC-PRIVATE');
+    });
+  for (const [inboundStatus, expectedStatus] of [
+    ['FILTERED', 200],
+    ['QUEUED', 202],
+  ] as const)
+    it(`preserves the successful ${inboundStatus} envelope without error fields`, async () => {
+      const legacyResult = {
+        success: true,
+        inboundMessageId: 42,
+        inboundStatus,
+        outboundResults: [],
+      };
+      state.process.mockResolvedValue(legacyResult);
+      const response = await request(app)
+        .post('/api/message/inbound/7')
+        .set('X-API-Key', 'synthetic-channel-key')
+        .send({ fixture: true });
+      expect(response.status).toBe(expectedStatus);
+      expect(response.body).toEqual({
+        success: true,
+        messageId: 42,
+        status: inboundStatus,
+        result: legacyResult,
+      });
+    });
+  it('rejects malformed JSON before the engine and accepts parsed string scalars', async () => {
+    const invalid = await request(app)
+      .post('/api/message/inbound/7')
+      .set('X-API-Key', 'synthetic-channel-key')
+      .set('Content-Type', 'application/json')
+      .send('{"SYNTHETIC-PRIVATE":');
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.code).toBe('INVALID_JSON');
+    expect(state.process).not.toHaveBeenCalled();
+    expect(JSON.stringify(invalid.body)).not.toContain('SYNTHETIC-PRIVATE');
+    const scalar = await request(app)
+      .post('/api/message/inbound/7')
+      .set('X-API-Key', 'synthetic-channel-key')
+      .set('Content-Type', 'application/json')
+      .send('"valid scalar"');
+    expect(scalar.status).toBe(200);
+    expect(state.process).toHaveBeenLastCalledWith(
+      7,
+      'valid scalar',
+      expect.any(String),
+      undefined,
+      'HTTP',
+      1,
+    );
+  });
 });
 
 describe('Explicit destination connection probes', () => {

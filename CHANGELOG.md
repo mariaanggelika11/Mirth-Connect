@@ -1,5 +1,16 @@
 # Changelog
 
+## Final simplification and Mirth-style flow — 2026-10-16
+
+- Retain Source → Transformation → Destinations → Review, visual mapping and the complete source/destination pipeline. Add format-aware Basic validation, a Field/Operator/Value filter builder and explicit transformer configuration through Advanced.
+- Separate destination filter, transformer and delivery settings. Remove response-script editors from new-channel UI while preserving legacy responses, validation profiles, filters, transformers, routing, retry and multiple destinations in configuration and runtime. Generate draft audit summaries automatically.
+- Simplify Overview to six real metrics and Recent Failures. Keep Users, Roles, Audit and System information in Settings; retain sessions, operational alerts and diagnostic export through disclosures instead of raw runtime JSON.
+- Preserve redaction and audited raw access. Show actual HTTP status, captured transport duration and exact complete-history attempts in Messages; unknown legacy or mixed-history values remain unrecorded. Add nullable request duration in migration 007; admission/backpressure events are excluded from delivery counts.
+- Add safe code/message/requestId/details fields to persisted failed HTTP results while preserving the complete legacy result; verify FAILED/PARTIAL/IN-ERROR, FILTERED 200 and QUEUED 202 responses.
+- Verify 332 unit/API tests across 28 suites, 53 browser tests, 19 native PostgreSQL tests, and compiled isolated-runtime health/readiness, metrics authorization and active-delivery SIGTERM. Typecheck, lint, formatting, build, OpenAPI structural checks and targeted source secret scan pass. Coverage rises to 81.90% statements, 78.61% branches, 83.63% functions and 82.96% lines.
+- Apply migration 007 to MiniMirthDev after preflight; verify schema 1–7 and unchanged counts of 1 user, 1 channel, 1 destination, 2 messages and 1 destination log. Rebuilt development health/readiness return 200 and SIGTERM exits 0 without a payload send; the environment file is unchanged. No production data changes. A fresh native schema-7 backup/restore drill remains unverified because PostgreSQL client utilities are unavailable; production readiness remains incomplete.
+- Verification is for the development working tree based on `a43c693`; see [the audit](docs/UI_SIMPLIFICATION_AUDIT.md), [manual and upgrade guidance](docs/MIRTH_LITE_UI.md#database-upgrade-dan-compatibility), and [readiness matrix](docs/PRODUCTION_READINESS_MATRIX.md).
+
 ## Remove endpoint copy and request examples — 2026-10-16
 
 - Remove Copy endpoint, curl/Postman request examples and placeholder instructions from the shared endpoint display; retain the source URL and one-time API-key copy.

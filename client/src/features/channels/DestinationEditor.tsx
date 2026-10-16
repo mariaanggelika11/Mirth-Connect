@@ -12,6 +12,7 @@ interface Props {
   onChange: (values: Partial<Destination>) => void;
   onRemove: () => void;
   onEditScript: (editor: ChannelScriptEditor) => void;
+  onFilterValidityChange?: (valid: boolean) => void;
   inboundFormat?: string;
 }
 const dataOptions = Object.values(DataType);
@@ -29,6 +30,7 @@ export function DestinationEditor({
   onChange,
   onRemove,
   onEditScript,
+  onFilterValidityChange,
   inboundFormat,
 }: Props) {
   const [probing, setProbing] = useState(false);
@@ -185,43 +187,64 @@ export function DestinationEditor({
           <span>Advanced destination settings</span>
           {advancedConfigured && <small> · Configured</small>}
         </summary>
-        <details className="advanced-section" aria-label="Destination message processing">
+        <details className="advanced-section" aria-label="Destination filter settings">
           <summary>
-            Message processing{processingConfigured && <small> · Configured</small>}
+            Destination filter{dest.filterScript?.trim() && <small> · Configured</small>}
           </summary>
           <FilterEditor
             kind="destination"
             value={dest.filterScript || ''}
             onChange={(script) => onChange({ filterScript: script })}
+            onValidityChange={onFilterValidityChange}
           />
+        </details>
+        <details className="advanced-section" aria-label="Destination transformer settings">
+          <summary>
+            Destination transformer
+            {(dest.processingScript?.trim() || dest.templateScript?.trim()) && (
+              <small> · Configured</small>
+            )}
+          </summary>
+          <p className="muted">
+            {dest.processingScript?.trim()
+              ? 'Custom transformation configured'
+              : 'No additional transformation'}
+          </p>
           <div className="heading-actions">
-            {(['processingScript', 'templateScript'] as const).map((field) => (
-              <Button
-                key={field}
-                type="button"
-                variant="secondary"
-                onClick={() =>
-                  onEditScript({
-                    destination: index,
-                    field,
-                    title:
-                      field === 'processingScript'
-                        ? 'Destination transformer'
-                        : 'Destination template',
-                  })
-                }
-              >
-                <Code2 size={14} />
-                {field === 'processingScript'
-                  ? dest.processingScript
-                    ? 'Edit destination transformation'
-                    : 'Add destination transformation'
-                  : dest.templateScript
-                    ? 'Edit template'
-                    : 'Add template'}
-              </Button>
-            ))}
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() =>
+                onEditScript({
+                  destination: index,
+                  field: 'processingScript',
+                  title: 'Destination transformer',
+                })
+              }
+            >
+              <Code2 size={14} />
+              Configure transformation
+            </Button>
           </div>
+          <details className="advanced-section">
+            <summary>
+              Advanced template{dest.templateScript?.trim() && <small> · Configured</small>}
+            </summary>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() =>
+                onEditScript({
+                  destination: index,
+                  field: 'templateScript',
+                  title: 'Destination template',
+                })
+              }
+            >
+              <Code2 size={14} />
+              {dest.templateScript ? 'Edit template' : 'Add template'}
+            </Button>
+          </details>
         </details>
         <details className="advanced-section" aria-label="Delivery settings">
           <summary>Delivery settings{deliveryConfigured && <small> · Configured</small>}</summary>
@@ -312,23 +335,7 @@ export function DestinationEditor({
             </div>
           </details>
         </details>
-        <details className="advanced-section" aria-label="Destination response processing">
-          <summary>Response processing{responseConfigured && <small> · Configured</small>}</summary>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() =>
-              onEditScript({
-                destination: index,
-                field: 'responseScript',
-                title: 'Destination response',
-              })
-            }
-          >
-            <Code2 size={14} />
-            {dest.responseScript ? 'Edit response script' : 'Configure custom response'}
-          </Button>
-        </details>
+        {responseConfigured && <small>Legacy custom destination response is active.</small>}
       </details>
     </section>
   );

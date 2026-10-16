@@ -45,10 +45,11 @@ export interface ChannelScriptEditor {
   title: string;
 }
 
-export type MessageValidation = 'NONE' | 'BASIC_JSON' | 'CUSTOM';
+export type MessageValidation = 'NONE' | 'BASIC' | 'BASIC_JSON' | 'CUSTOM';
 export const basicJsonProfile = { jsonSchema: { type: 'object' } };
 export function validationChoice(profile: Record<string, unknown> = {}): MessageValidation {
   if (!Object.keys(profile).length) return 'NONE';
+  if (Object.keys(profile).length === 1 && profile.basicSyntax === true) return 'BASIC';
   const schema = profile.jsonSchema;
   return Object.keys(profile).length === 1 &&
     schema !== null &&
@@ -63,6 +64,7 @@ export function selectedValidationProfile(
   customText: string,
 ): Record<string, unknown> {
   if (choice === 'NONE') return {};
+  if (choice === 'BASIC') return { basicSyntax: true };
   if (choice === 'BASIC_JSON') return structuredClone(basicJsonProfile);
   const profile: unknown = JSON.parse(customText);
   if (!profile || typeof profile !== 'object' || Array.isArray(profile))

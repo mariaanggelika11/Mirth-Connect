@@ -64,7 +64,7 @@ try {
     (await client.query('SELECT version FROM "SchemaMigrations" ORDER BY version')).rows.map(
       (r) => r.version,
     ),
-    [1, 2, 3, 4, 5, 6],
+    [1, 2, 3, 4, 5, 6, 7],
   );
   assert.equal(
     Number((await client.query('SELECT count(*) total FROM "ChannelRevisions"')).rows[0].total),

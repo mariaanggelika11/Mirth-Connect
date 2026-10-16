@@ -2,7 +2,7 @@ import { AlertPanel } from './AlertPanel';
 import { SessionPanel } from './SessionPanel';
 import { RuntimeSettingsPanel } from './RuntimeSettingsPanel';
 import { useCallback, useEffect, useState } from 'react';
-import { ShieldCheck, Users, History, UserRound } from 'lucide-react';
+import { ShieldCheck, Users, History, Monitor, KeyRound } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { API_BASE_URL } from '../../services/api';
 import {
@@ -23,9 +23,25 @@ import {
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 const roles = ['ADMIN', 'DEVELOPER', 'OPERATOR', 'VIEWER'];
+const roleCapabilities = [
+  {
+    role: 'ADMIN',
+    access: 'Manage users, roles, channels, audit, raw payload and operational tools.',
+  },
+  {
+    role: 'DEVELOPER',
+    access: 'Configure channels and transformations, operate channels and view redacted payloads.',
+  },
+  {
+    role: 'OPERATOR',
+    access:
+      'Start and stop channels, review redacted payloads, resend and reconcile failed deliveries.',
+  },
+  { role: 'VIEWER', access: 'View channel status and message metadata.' },
+];
 export default function SettingsPage() {
   const { role, name, can } = useAuth();
-  const [tab, setTab] = useState('account'),
+  const [tab, setTab] = useState('system'),
     [page, setPage] = useState(1),
     [users, setUsers] = useState<User[]>([]),
     [audits, setAudits] = useState<AuditEntry[]>([]),
@@ -45,7 +61,7 @@ export default function SettingsPage() {
         setUsers(await fetchUsers(page));
       } else if (tab === 'audit') {
         setAudits(await fetchAudit(page));
-      } else {
+      } else if (tab === 'system') {
         await checkReadiness();
         setReady(true);
       }
@@ -60,8 +76,8 @@ export default function SettingsPage() {
     void load();
   }, [load]);
   useEffect(() => {
-    if (!can('user:manage') && tab !== 'account') {
-      setTab('account');
+    if (!can('user:manage') && ['users', 'audit'].includes(tab)) {
+      setTab('system');
       setUsers([]);
       setAudits([]);
     }
@@ -106,7 +122,8 @@ export default function SettingsPage() {
       />
       <div className="tabs" role="tablist" aria-label="Settings sections">
         {[
-          { id: 'account', label: 'Account & connection', icon: UserRound },
+          { id: 'system', label: 'System information', icon: Monitor },
+          { id: 'roles', label: 'Roles', icon: KeyRound },
           ...(can('user:manage')
             ? [
                 { id: 'users', label: 'Users', icon: Users },
@@ -139,11 +156,8 @@ export default function SettingsPage() {
           {notice}
         </div>
       )}
-      {tab === 'account' ? (
+      {tab === 'system' ? (
         <div className="settings-grid">
-          <SessionPanel />
-          {can('audit:read') && <AlertPanel />}
-          {can('audit:read') && <RuntimeSettingsPanel />}
           <section className="card-bw settings-panel">
             <ShieldCheck size={25} className="accent" />
             <h2>Your account</h2>
@@ -195,7 +209,47 @@ export default function SettingsPage() {
               server.
             </p>
           </section>
+          {can('audit:read') && <RuntimeSettingsPanel />}
+          <details className="advanced-section settings-operational-tools">
+            <summary>Operational tools</summary>
+            <SessionPanel />
+            {can('audit:read') && <AlertPanel />}
+          </details>
         </div>
+      ) : tab === 'roles' ? (
+        <section className="card-bw">
+          <div className="panel-heading">
+            <div>
+              <h2>Workspace roles</h2>
+              <p>Access follows the role assigned to each user.</p>
+            </div>
+          </div>
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Role</th>
+                  <th>Access</th>
+                </tr>
+              </thead>
+              <tbody>
+                {roleCapabilities.map(({ role: label, access }) => (
+                  <tr key={label}>
+                    <td>
+                      <span className="role-badge">{label}</span>
+                    </td>
+                    <td>{access}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {can('user:manage') && (
+            <p className="settings-panel muted">
+              Assign or change a role in Users. Role changes are audited.
+            </p>
+          )}
+        </section>
       ) : (
         <section className="card-bw">
           <div className="panel-heading">

@@ -54,6 +54,14 @@ try {
           'utf8',
         ),
       );
+    await tx
+      .request()
+      .batch(
+        await readFile(
+          new URL('../../migrations/007_delivery_timing.sql', import.meta.url),
+          'utf8',
+        ),
+      );
     const channels = (
       await tx
         .request()

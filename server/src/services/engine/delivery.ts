@@ -53,19 +53,29 @@ export async function attempt(message: StoredMessage, dest: Destination, retryCo
   }
   let response = '',
     httpStatus: number | null = null,
+    requestDurationMs: number | null = null,
     status: OutboundStatus = 'OUT-SENT',
     error: string | null = null,
     delay: number | null = null;
   try {
-    response = await deliver(
-      dest,
-      JSON.parse(message.transformed_payload),
-      message.channel_id,
-      message.correlation_id,
-      (responseStatus) => {
-        httpStatus = responseStatus;
-      },
-    );
+    const payload = JSON.parse(message.transformed_payload);
+    const requestStarted = performance.now();
+    try {
+      response = await deliver(
+        dest,
+        payload,
+        message.channel_id,
+        message.correlation_id,
+        (responseStatus) => {
+          httpStatus = responseStatus;
+        },
+      );
+    } finally {
+      requestDurationMs = Math.min(
+        2147483647,
+        Math.max(0, Math.round(performance.now() - requestStarted)),
+      );
+    }
     if (dest.response_script?.trim()) {
       try {
         response = String(
@@ -99,7 +109,17 @@ export async function attempt(message: StoredMessage, dest: Destination, retryCo
   }
   // Persisting the delivery result is mandatory: DB failure propagates instead of emitting a false ACK.
   try {
-    await recordAttempt(message, dest, status, response, error, delay, retryCount, httpStatus);
+    await recordAttempt(
+      message,
+      dest,
+      status,
+      response,
+      error,
+      delay,
+      retryCount,
+      httpStatus,
+      requestDurationMs,
+    );
   } finally {
     await releaseDelivery(
       message.id,
