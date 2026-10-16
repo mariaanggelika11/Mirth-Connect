@@ -128,6 +128,12 @@ export async function createDraft(
     !data.changeSummary || data.changeSummary === 'Channel configuration updated'
       ? automaticChangeSummary(actions)
       : data.changeSummary;
+  await tx
+    .request()
+    .input('id', id)
+    .query(
+      "UPDATE \"ChannelRevisions\" SET state='ARCHIVED' WHERE channel_id=@id AND state='DRAFT'",
+    );
   const revision = await insertRevision(tx, id, snapshot, 'DRAFT', summary, req.user?.id);
   for (const action of actions) await audit(action, req, 'channel', id, tx);
   await audit('CREATE_CHANNEL_DRAFT', req, 'channel', id, tx);
@@ -158,13 +164,19 @@ export function safeRevision(data: RevisionConfig) {
 export const listRevisions = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const pool = await getConnection();
+    const current = (
+      await pool
+        .request()
+        .input('id', Number(req.params.id))
+        .query('SELECT active_revision FROM "Channels" WHERE id=@id')
+    ).recordset[0];
     const rows = await pool
       .request()
       .input('id', Number(req.params.id))
       .query(
-        'SELECT revision,state,checksum,change_summary,created_by,created_at,published_at FROM "ChannelRevisions" WHERE channel_id=@id ORDER BY revision DESC LIMIT 100',
+        `SELECT revision,CASE WHEN state='DRAFT' AND revision<(SELECT MAX(revision) FROM "ChannelRevisions" WHERE channel_id=@id AND state='DRAFT') THEN 'SUPERSEDED' ELSE state END state,checksum,change_summary,created_by,created_at,published_at FROM "ChannelRevisions" WHERE channel_id=@id ORDER BY revision DESC LIMIT 100`,
       );
-    res.json({ success: true, data: rows.recordset });
+    res.json({ success: true, data: rows.recordset, activeRevision: current?.active_revision });
   } catch (error) {
     next(error);
   }
@@ -195,7 +207,9 @@ export const publishRevision = async (req: Request, res: Response, next: NextFun
         await tx
           .request()
           .input('id', id)
-          .query('SELECT id,active_revision FROM "Channels" WHERE id=@id FOR UPDATE')
+          .query(
+            'SELECT id,active_revision FROM "Channels" WHERE id=@id AND status<>\'ARCHIVED\' FOR UPDATE',
+          )
       ).recordset[0];
       if (!c) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
       if (req.body.expectedActiveRevision !== c.active_revision)
@@ -218,8 +232,27 @@ export const publishRevision = async (req: Request, res: Response, next: NextFun
       const rollback = req.path.endsWith('/rollback');
       if (!rollback && row.state !== 'DRAFT')
         throw new AppError(409, 'REVISION_ALREADY_PUBLISHED', 'Revision already published');
+      if (
+        !rollback &&
+        (
+          await tx
+            .request()
+            .input('id', id)
+            .input('revision', requested)
+            .query(
+              `SELECT revision FROM "ChannelRevisions" WHERE channel_id=@id AND state='DRAFT' AND revision>@revision LIMIT 1`,
+            )
+        ).recordset.length
+      )
+        throw new AppError(
+          409,
+          'DRAFT_SUPERSEDED',
+          'A newer draft exists. Review the latest draft before publishing',
+        );
       if (rollback && row.state !== 'PUBLISHED')
         throw new AppError(409, 'ROLLBACK_UNAVAILABLE', 'Rollback requires a published revision');
+      if (rollback && requested === c.active_revision)
+        throw new AppError(409, 'ROLLBACK_UNAVAILABLE', 'This revision is already active');
       const data = channelSchema.parse(JSON.parse(decrypt(row.configuration)));
       validateProfileConfiguration(data.validationProfile);
       // Preserve historical destination IDs so saved deliveries keep their FK links.
@@ -229,24 +262,46 @@ export const publishRevision = async (req: Request, res: Response, next: NextFun
         .query(
           'UPDATE "Destinations" SET is_deleted=false WHERE channel_id=@id AND is_deleted=true',
         );
+      // Older published snapshots could omit destination IDs. Reuse a matching connector
+      // deterministically, including retired ones, without rewriting historical snapshots.
+      if (data.destinations.some((d) => !d.id)) {
+        const existing = (await readRuntimeConfiguration(tx, id)).destinations;
+        const identity = (destination: RevisionConfig['destinations'][number]) => {
+          const value: Partial<RevisionConfig['destinations'][number]> = { ...destination };
+          delete value.id;
+          delete value.isEnabled; // Retirement disables a connector without changing its configuration.
+          return JSON.stringify(value);
+        };
+        const used = new Set(data.destinations.flatMap((d) => (d.id ? [d.id] : [])));
+        data.destinations = data.destinations.map((destination) => {
+          if (destination.id) return destination;
+          const match = existing.find(
+            (candidate) =>
+              candidate.id &&
+              !used.has(candidate.id) &&
+              identity(candidate) === identity(destination),
+          );
+          if (!match?.id) return destination;
+          used.add(match.id);
+          return { ...destination, id: match.id };
+        });
+      }
       await applyChannelConfiguration(tx, id, data);
       await saveDestinations(tx, id, data.destinations);
       const revision = await insertRevision(
         tx,
         id,
-        data,
+        await readRuntimeConfiguration(tx, id),
         'PUBLISHED',
         req.body.changeSummary,
         req.user?.id,
       );
-      if (!rollback)
-        await tx
-          .request()
-          .input('id', id)
-          .input('revision', requested)
-          .query(
-            'UPDATE "ChannelRevisions" SET state=\'ARCHIVED\' WHERE channel_id=@id AND revision=@revision',
-          );
+      await tx
+        .request()
+        .input('id', id)
+        .query(
+          "UPDATE \"ChannelRevisions\" SET state='ARCHIVED' WHERE channel_id=@id AND state='DRAFT'",
+        );
       await audit(rollback ? 'ROLLBACK_CHANNEL' : 'PUBLISH_CHANNEL', req, 'channel', id, tx);
       return revision;
     });
@@ -309,7 +364,7 @@ export const editDraft = async (req: Request, res: Response, next: NextFunction)
         await tx
           .request()
           .input('id', id)
-          .query('SELECT id FROM "Channels" WHERE id=@id FOR UPDATE')
+          .query('SELECT id FROM "Channels" WHERE id=@id AND status<>\'ARCHIVED\' FOR UPDATE')
       ).recordset[0];
       if (!channel) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
       const row = (
@@ -344,9 +399,9 @@ export const editDraft = async (req: Request, res: Response, next: NextFunction)
       await tx
         .request()
         .input('id', id)
-        .input('revision', requested)
+        .input('successor', successor)
         .query(
-          'UPDATE "ChannelRevisions" SET state=\'ARCHIVED\' WHERE channel_id=@id AND revision=@revision',
+          "UPDATE \"ChannelRevisions\" SET state='ARCHIVED' WHERE channel_id=@id AND state='DRAFT' AND revision<>@successor",
         );
       await audit('EDIT_CHANNEL_DRAFT', req, 'channel', id, tx);
       return successor;

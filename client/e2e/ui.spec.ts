@@ -52,13 +52,20 @@ test('revision review, compare and publish are permission-aware and functional',
   await page.getByLabel('More actions for Test Channel').click();
   await page.getByRole('button', { name: 'Revisions', exact: true }).click();
   await expect(page.getByText('Active revision: 1.', { exact: false })).toBeVisible();
+  await expect(page.getByText('Revision 2 · DRAFT', { exact: true })).toBeVisible();
+  if (process.env.UI_REVISION_SCREENSHOT)
+    await page.screenshot({ path: process.env.UI_REVISION_SCREENSHOT, fullPage: true });
   await page.getByLabel('Compare revision 2').check();
   await page.getByLabel('Compare revision 1').check();
   await page.getByRole('button', { name: 'Compare selected revisions' }).click();
   await expect(page.locator('pre').filter({ hasText: 'Before synthetic' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
+  await page.getByText('Optional change note', { exact: true }).click();
   await page.getByLabel('Publish / rollback summary').fill('Synthetic reviewed activation');
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Publish draft', exact: true })).toBeVisible();
+  expect(publishBody).toBeUndefined();
+  await page.getByRole('button', { name: 'Confirm publish', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(publishBody).toEqual({
     changeSummary: 'Synthetic reviewed activation',
@@ -71,6 +78,131 @@ const token =
   '.' +
   Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url') +
   '.test-signature';
+test('rollback requires confirmation, hides active rollback and preserves the published history model', async ({
+  page,
+}) => {
+  await session(page, 'ADMIN');
+  await page.route('**/api/channel', (r) =>
+    r.fulfill({ json: [{ ...channel, activeRevision: 3 }] }),
+  );
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await page.route('**/api/channel/1/revisions', (r) =>
+    r.fulfill({
+      json: {
+        data: [
+          { revision: 3, state: 'PUBLISHED', change_summary: 'Active configuration' },
+          { revision: 2, state: 'ARCHIVED', change_summary: 'Superseded draft' },
+          { revision: 1, state: 'PUBLISHED', change_summary: 'Original configuration' },
+        ],
+      },
+    }),
+  );
+  let rollbacks = 0;
+  await page.route('**/api/channel/1/revisions/1/rollback', (r) => {
+    rollbacks++;
+    expect(r.request().postDataJSON().expectedActiveRevision).toBe(3);
+    return r.fulfill({ json: { success: true, activeRevision: 4 } });
+  });
+  await page.getByLabel('More actions for Test Channel').click();
+  await page.getByRole('button', { name: 'Revisions', exact: true }).click();
+  await expect(page.getByLabel('Synthetic revision test payload')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Rollback', exact: true })).toHaveCount(1);
+  await page.getByRole('button', { name: 'Rollback', exact: true }).click();
+  const confirmation = page.getByRole('dialog', { name: 'Rollback channel', exact: true });
+  await expect(confirmation).toContainText('creates a new published revision');
+  expect(rollbacks).toBe(0);
+  await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click();
+  expect(rollbacks).toBe(0);
+  await page.getByRole('button', { name: 'Rollback', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm rollback', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('status')).toContainText('Revision 4 is now active');
+  expect(rollbacks).toBe(1);
+});
+
+test('unused duplicate deletion confirms once and removes the row', async ({ page }) => {
+  await session(page, 'ADMIN');
+  let deleted = false;
+  await page.route('**/api/channel/1', (r) => {
+    expect(r.request().method()).toBe('DELETE');
+    deleted = true;
+    return r.fulfill({ json: { success: true } });
+  });
+  await page.route('**/api/channel', (r) => r.fulfill({ json: deleted ? [] : [channel] }));
+  await page.getByLabel('More actions for Test Channel').click();
+  await page.getByRole('button', { name: 'Delete channel', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Delete Channel' })).toContainText(
+    'configuration revisions will also be removed',
+  );
+  expect(deleted).toBe(false);
+  await page.getByRole('button', { name: 'Confirm Delete', exact: true }).click();
+  await expect(page.getByText('No channels found', { exact: true })).toBeVisible();
+  expect(deleted).toBe(true);
+});
+test('saved draft is directly discoverable and editing active configuration warns before replacement', async ({
+  page,
+}) => {
+  await session(page, 'DEVELOPER');
+  await page.route('**/api/channel', (r) =>
+    r.fulfill({ json: [{ ...channel, draftRevision: 2 }] }),
+  );
+  await page.route('**/api/channel/1/revisions', (r) =>
+    r.fulfill({
+      json: {
+        activeRevision: 1,
+        data: [{ revision: 2, state: 'DRAFT', change_summary: 'Pending synthetic mapping' }],
+      },
+    }),
+  );
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Review draft 2', exact: true })).toBeVisible();
+  await page.getByLabel('More actions for Test Channel').click();
+  await page.getByRole('button', { name: 'Edit channel', exact: true }).click();
+  const warning = page.getByRole('dialog', { name: 'This channel has a saved draft', exact: true });
+  await expect(warning).toContainText('saving will replace the pending draft');
+  await warning.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit channel', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Review draft 2', exact: true }).click();
+  await expect(
+    page.getByRole('dialog', { name: 'Revisions · Test Channel', exact: true }),
+  ).toContainText('Pending synthetic mapping');
+});
+
+test('used channel offers archive and archived filter preserves read-only history', async ({
+  page,
+}) => {
+  await session(page, 'ADMIN');
+  let archived = false;
+  await page.route('**/api/channel*', (r) => {
+    const url = new URL(r.request().url());
+    return r.fulfill({
+      json:
+        !archived || url.searchParams.get('includeArchived') === 'true'
+          ? [{ ...channel, received: 1, status: archived ? 'ARCHIVED' : 'STOPPED' }]
+          : [],
+    });
+  });
+  await page.route('**/api/channel/1/archive', (r) => {
+    archived = true;
+    return r.fulfill({ json: { success: true } });
+  });
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await page.getByLabel('More actions for Test Channel').click();
+  await expect(page.getByRole('button', { name: 'Delete channel', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Archive channel', exact: true }).click();
+  expect(archived).toBe(false);
+  await page
+    .getByRole('dialog', { name: 'Archive Channel', exact: true })
+    .getByRole('button', { name: 'Archive channel', exact: true })
+    .click();
+  await expect(page.getByText('No channels found', { exact: true })).toBeVisible();
+  await page.getByLabel('Channel status', { exact: true }).selectOption('ARCHIVED');
+  await expect(page.getByText('Test Channel', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start channel', exact: true })).toHaveCount(0);
+  await page.getByLabel('More actions for Test Channel').click();
+  await expect(page.getByRole('button', { name: 'Edit channel', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'View messages', exact: true })).toBeVisible();
+});
 async function session(page: Page, role: string, view: 'overview' | 'channels' = 'channels') {
   await page.route('**/health', (r) => r.fulfill({ json: { status: 'ok' } }));
   await page.route('**/ready', (r) => r.fulfill({ json: { status: 'ready' } }));
@@ -528,6 +660,7 @@ test('draft iteration, stored dry-run and handshake probe use functional APIs wi
   await page.getByRole('button', { name: 'Edit draft 2' }).click();
   await page.getByLabel('Draft channel name').fill('Edited synthetic draft');
   await page.getByLabel('Draft destination 1 timeout').fill('2.345');
+  await page.getByText('Optional change note', { exact: true }).click();
   await page.getByLabel('Publish / rollback summary').fill('Synthetic reviewed edit');
   await page.getByRole('button', { name: 'Save successor draft' }).click();
   await expect(page.getByRole('button', { name: 'Edit draft 3' })).toBeVisible();
@@ -569,6 +702,7 @@ test('draft conflict keeps the editor open and exposes the server error', async 
   await page.getByLabel('More actions for Test Channel').click();
   await page.getByRole('button', { name: 'Revisions', exact: true }).click();
   await page.getByRole('button', { name: 'Edit draft 2' }).click();
+  await page.getByText('Optional change note', { exact: true }).click();
   await page.getByLabel('Publish / rollback summary').fill('Synthetic conflicting edit');
   await page.getByRole('button', { name: 'Save successor draft' }).click();
   await expect(page.getByRole('alert')).toContainText('Draft changed');

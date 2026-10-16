@@ -568,8 +568,20 @@
             "description": "Database or capacity unavailable"
           }
         },
-        "parameters": [],
-        "x-required-permission": "channel:read"
+        "parameters": [
+          {
+            "name": "includeArchived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Opt in to archived channel history. Default channel list excludes ARCHIVED."
+          }
+        ],
+        "x-required-permission": "channel:read",
+        "description": "Default list excludes archived channels; includeArchived=true includes preserved history. Rows expose hasMessages (retained evidence), activeRevision, and optional draftRevision so the UI can offer Archive versus Delete and direct draft review without exposing credentials."
       },
       "post": {
         "summary": "Create stopped channel and initial published snapshot",
@@ -679,7 +691,7 @@
         }
       },
       "delete": {
-        "summary": "Delete only evidence-free legacy channel; revision history causes conflict",
+        "summary": "Delete a stopped channel without retained messages; unused revisions are removed transactionally",
         "operationId": "delete__api_channel__id_",
         "responses": {
           "200": {
@@ -722,7 +734,8 @@
             }
           }
         ],
-        "x-required-permission": "channel:delete"
+        "x-required-permission": "channel:delete",
+        "description": "ADMIN (channel:delete) only. Revision history alone does not block deletion. Any retained inbound/outbound message prevents permanent deletion. Requires STOPPED. Audit records are preserved. Use POST /api/channel/{id}/archive for channels with message history."
       }
     },
     "/api/channel/{id}/status": {
@@ -889,7 +902,8 @@
             }
           }
         ],
-        "x-required-permission": "channel:write"
+        "x-required-permission": "channel:write",
+        "description": "Returns sanitized revision metadata and the current activeRevision. Older legacy competing drafts are reported as SUPERSEDED without rewriting stored history. Only the newest draft can publish. Published snapshots preserve destination identity, including safe connector reuse when old snapshots omitted IDs."
       }
     },
     "/api/channel/{id}/revisions/{revision}": {
@@ -1177,7 +1191,8 @@
               }
             }
           }
-        }
+        },
+        "description": " Activation locks the channel and checks expectedActiveRevision. It captures actual persisted destination IDs in a new immutable published snapshot and archives pending drafts. Only the newest draft may publish; rollback accepts a prior published revision and rejects the already active revision. Archived channels cannot activate."
       }
     },
     "/api/channel/{id}/revisions/{revision}/rollback": {
@@ -1244,7 +1259,8 @@
               }
             }
           }
-        }
+        },
+        "description": " Activation locks the channel and checks expectedActiveRevision. It captures actual persisted destination IDs in a new immutable published snapshot and archives pending drafts. Only the newest draft may publish; rollback accepts a prior published revision and rejects the already active revision. Archived channels cannot activate."
       }
     },
     "/api/channel/{id}/revisions/{revision}/archive": {
@@ -3823,6 +3839,55 @@
           }
         },
         "description": "The channel wizard calls this from Review & Test after Source, Transformation and Destinations are complete. Runs the same isolated source and destination filter/transform/template/conversion pipeline as dry-run. For API compatibility, empty destination names and endpoints remain permitted. DNS, sockets, host allowlist and delivery are not tested. Channel save/full dry-run still requires valid connection settings. Synthetic payloads only; normal redaction and audited administrator raw access apply. Invalid configuration identifies the affected setting; failed stages include safe code/message metadata."
+      }
+    },
+    "/api/channel/{id}/archive": {
+      "post": {
+        "summary": "Archive a stopped channel without deleting message, revision or audit history",
+        "operationId": "archive_channel",
+        "responses": {
+          "200": {
+            "description": "Success; see route-specific legacy envelope."
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "CHANNEL_RUNNING or CHANNEL_HAS_PENDING_WORK; stop and reconcile pending work first"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "x-required-permission": "channel:delete",
+        "description": "Requires channel:delete (ADMIN), STOPPED and no IN-PROCESS/PROCESSING/QUEUED/RETRYING messages or unexpired message lease. Persists ARCHIVED using the existing status column. Archived channels cannot be started, edited or published; inspect history with includeArchived=true. No data is deleted."
       }
     }
   },

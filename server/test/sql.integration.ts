@@ -1432,6 +1432,287 @@ test('real PostgreSQL: multipart XML import persists stopped revisions and rejec
   );
 });
 
+test('real PostgreSQL: single latest draft, canonical destination IDs and rollback preserve immutable history', async () => {
+  const auth = await syntheticAdminAuth();
+  const configuration = {
+    name: 'Synthetic lifecycle',
+    source: { type: 'HTTP', inboundDataType: 'JSON' },
+    destinations: [{ name: 'Original', type: 'REST', endpoint: 'http://localhost:9100' }],
+  };
+  const created = await request(app)
+    .post('/api/channel')
+    .set('Authorization', auth)
+    .send(configuration);
+  assert.equal(created.status, 201);
+  const id = created.body.channelId;
+  const draft = await request(app)
+    .put(`/api/channel/${id}`)
+    .set('Authorization', auth)
+    .send({ ...configuration, name: 'Older draft' });
+  const newer = await request(app)
+    .put(`/api/channel/${id}`)
+    .set('Authorization', auth)
+    .send({
+      ...configuration,
+      name: 'Latest draft',
+      destinations: [{ name: 'New destination', type: 'REST', endpoint: 'http://localhost:9200' }],
+    });
+  assert.equal(newer.status, 200);
+  const states = (
+    await pool
+      .request()
+      .input('id', id)
+      .query('SELECT revision,state FROM "ChannelRevisions" WHERE channel_id=@id ORDER BY revision')
+  ).recordset;
+  assert.equal(states.filter((r) => r.state === 'DRAFT').length, 1);
+  assert.equal(states.find((r) => r.revision === draft.body.revision)?.state, 'ARCHIVED');
+  // Reproduce legacy databases that already contain competing drafts without rewriting history on read.
+  await pool
+    .request()
+    .input('id', id)
+    .input('revision', draft.body.revision)
+    .query(
+      'UPDATE "ChannelRevisions" SET state=\'DRAFT\' WHERE channel_id=@id AND revision=@revision',
+    );
+  const legacyList = await request(app)
+    .get(`/api/channel/${id}/revisions`)
+    .set('Authorization', auth);
+  assert.equal(legacyList.body.activeRevision, 1);
+  assert.equal(
+    legacyList.body.data.find((r: { revision: number }) => r.revision === draft.body.revision)
+      .state,
+    'SUPERSEDED',
+  );
+  assert.equal(
+    (
+      await request(app)
+        .post(`/api/channel/${id}/revisions/${draft.body.revision}/publish`)
+        .set('Authorization', auth)
+        .send({ expectedActiveRevision: 1, changeSummary: 'Stale draft' })
+    ).status,
+    409,
+  );
+  const published = await request(app)
+    .post(`/api/channel/${id}/revisions/${newer.body.revision}/publish`)
+    .set('Authorization', auth)
+    .send({ expectedActiveRevision: 1, changeSummary: 'Reviewed latest draft' });
+  assert.equal(published.status, 200);
+  const active = published.body.activeRevision;
+  const snapshot = (
+    await pool
+      .request()
+      .input('id', id)
+      .input('revision', active)
+      .query(
+        'SELECT configuration FROM "ChannelRevisions" WHERE channel_id=@id AND revision=@revision',
+      )
+  ).recordset[0];
+  assert.ok(JSON.parse(decrypt(snapshot.configuration)).destinations[0].id > 0);
+  const beforeCount = (
+    await pool
+      .request()
+      .input('id', id)
+      .query('SELECT count(*) total FROM "Destinations" WHERE channel_id=@id')
+  ).recordset[0].total;
+  const rolled = await request(app)
+    .post(`/api/channel/${id}/revisions/1/rollback`)
+    .set('Authorization', auth)
+    .send({ expectedActiveRevision: active, changeSummary: 'Restore original' });
+  assert.equal(rolled.status, 200);
+  const again = await request(app)
+    .post(`/api/channel/${id}/revisions/${active}/rollback`)
+    .set('Authorization', auth)
+    .send({
+      expectedActiveRevision: rolled.body.activeRevision,
+      changeSummary: 'Restore published change',
+    });
+  assert.equal(again.status, 200);
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', id)
+        .query('SELECT count(*) total FROM "Destinations" WHERE channel_id=@id')
+    ).recordset[0].total,
+    beforeCount,
+  );
+  const same = await request(app)
+    .post(`/api/channel/${id}/revisions/${again.body.activeRevision}/rollback`)
+    .set('Authorization', auth)
+    .send({ expectedActiveRevision: again.body.activeRevision, changeSummary: 'Already active' });
+  assert.equal(same.status, 409);
+  assert.equal(same.body.code, 'ROLLBACK_UNAVAILABLE');
+  const legacy = JSON.parse(decrypt(snapshot.configuration));
+  for (const destination of legacy.destinations) delete destination.id;
+  const legacyText = JSON.stringify(legacy);
+  await pool
+    .request()
+    .input('id', id)
+    .input('configuration', encrypt(legacyText))
+    .input('checksum', createHash('sha256').update(legacyText).digest('hex'))
+    .query(
+      `INSERT INTO "ChannelRevisions"(channel_id,revision,state,configuration,checksum,change_summary) VALUES(@id,100,'PUBLISHED',@configuration,@checksum,'Synthetic legacy ID-less snapshot')`,
+    );
+  let expected = again.body.activeRevision;
+  for (const target of [100, 1, 100]) {
+    const restored = await request(app)
+      .post(`/api/channel/${id}/revisions/${target}/rollback`)
+      .set('Authorization', auth)
+      .send({
+        expectedActiveRevision: expected,
+        changeSummary: 'Verify legacy rollback connector identity',
+      });
+    assert.equal(restored.status, 200, JSON.stringify(restored.body));
+    expected = restored.body.activeRevision;
+  }
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', id)
+        .query('SELECT count(*) total FROM "Destinations" WHERE channel_id=@id')
+    ).recordset[0].total,
+    beforeCount,
+  );
+  const copy = await request(app)
+    .post('/api/channel')
+    .set('Authorization', auth)
+    .send({ ...configuration, name: 'Unused copy' });
+  assert.equal(
+    (await request(app).delete(`/api/channel/${copy.body.channelId}`).set('Authorization', auth))
+      .status,
+    200,
+  );
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', copy.body.channelId)
+        .query('SELECT count(*) total FROM "ChannelRevisions" WHERE channel_id=@id')
+    ).recordset[0].total,
+    0,
+  );
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', id)
+        .query('SELECT count(*) total FROM "Channels" WHERE id=@id')
+    ).recordset[0].total,
+    1,
+  );
+});
+
+test('real PostgreSQL: archive retains messages/revisions, hides channel and blocks reactivation; pending work blocks archive', async () => {
+  const auth = await syntheticAdminAuth();
+  const configuration = {
+    name: 'Synthetic archived history',
+    source: { type: 'HTTP', inboundDataType: 'JSON' },
+    destinations: [],
+  };
+  const created = await request(app)
+    .post('/api/channel')
+    .set('Authorization', auth)
+    .send(configuration);
+  const id = created.body.channelId;
+  assert.equal(
+    (
+      await request(app)
+        .put(`/api/channel/${id}/status`)
+        .set('Authorization', auth)
+        .send({ status: 'RUNNING' })
+    ).status,
+    200,
+  );
+  const processed = await processInboundMessage(id, { fixture: 'synthetic' });
+  assert.ok(processed.inboundMessageId);
+  await request(app)
+    .put(`/api/channel/${id}/status`)
+    .set('Authorization', auth)
+    .send({ status: 'STOPPED' });
+  assert.equal(
+    (await request(app).delete(`/api/channel/${id}`).set('Authorization', auth)).body.code,
+    'CHANNEL_HAS_MESSAGES',
+  );
+  await pool
+    .request()
+    .input('id', processed.inboundMessageId)
+    .query(
+      "UPDATE \"Messages\" SET status='IN-PROCESS',lease_until=CURRENT_TIMESTAMP+INTERVAL '1 minute' WHERE id=@id",
+    );
+  assert.equal(
+    (await request(app).post(`/api/channel/${id}/archive`).set('Authorization', auth)).body.code,
+    'CHANNEL_HAS_PENDING_WORK',
+  );
+  await pool
+    .request()
+    .input('id', processed.inboundMessageId)
+    .query('UPDATE "Messages" SET status=\'SUCCESS\',lease_until=NULL WHERE id=@id');
+  assert.equal(
+    (await request(app).post(`/api/channel/${id}/archive`).set('Authorization', auth)).status,
+    200,
+  );
+  const listed = await request(app).get('/api/channel').set('Authorization', auth);
+  assert.ok(!listed.body.some((c: { id: number }) => c.id === id));
+  const archived = await request(app)
+    .get('/api/channel?includeArchived=true')
+    .set('Authorization', auth);
+  assert.ok(
+    archived.body.some(
+      (c: { id: number; status: string }) => c.id === id && c.status === 'ARCHIVED',
+    ),
+  );
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', id)
+        .query('SELECT count(*) total FROM "Messages" WHERE channel_id=@id')
+    ).recordset[0].total,
+    1,
+  );
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', id)
+        .query('SELECT count(*) total FROM "ChannelRevisions" WHERE channel_id=@id')
+    ).recordset[0].total,
+    1,
+  );
+  assert.equal(
+    (
+      await request(app)
+        .put(`/api/channel/${id}/status`)
+        .set('Authorization', auth)
+        .send({ status: 'RUNNING' })
+    ).status,
+    404,
+  );
+  assert.equal(
+    (await request(app).put(`/api/channel/${id}`).set('Authorization', auth).send(configuration))
+      .status,
+    404,
+  );
+  assert.equal(
+    (
+      await request(app)
+        .post(`/api/channel/${id}/revisions/1/rollback`)
+        .set('Authorization', auth)
+        .send({ expectedActiveRevision: 1, changeSummary: 'Must not activate archived channel' })
+    ).status,
+    404,
+  );
+  assert.equal(
+    (
+      await request(app)
+        .get(`/api/message/${processed.inboundMessageId}`)
+        .set('Authorization', auth)
+    ).status,
+    200,
+  );
+});
+
 test('real PostgreSQL: key rotation failure rolls back all records and new keyring reads rotated snapshots', async () => {
   const id = (
     await pool

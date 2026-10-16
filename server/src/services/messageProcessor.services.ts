@@ -111,6 +111,22 @@ async function processInboundCore(
     }
   }
   const reserved = await withTransaction(async (tx) => {
+    // Serialize acceptance against stop/delete/archive/publish. A snapshot alone is not a reservation.
+    const current = (
+      await tx
+        .request()
+        .input('id', channelId)
+        .query('SELECT * FROM "Channels" WHERE id=@id FOR SHARE')
+    ).recordset[0] as Channel | undefined;
+    if (!current) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
+    if (current.status !== 'RUNNING')
+      throw new AppError(409, 'CHANNEL_STOPPED', 'Channel is not running');
+    if (current.active_revision !== channel.active_revision)
+      throw new AppError(
+        409,
+        'CHANNEL_REVISION_CHANGED',
+        'Channel revision changed before acceptance; retry with the current configuration',
+      );
     if (dedupe) {
       await tx
         .request()

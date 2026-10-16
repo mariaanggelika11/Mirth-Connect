@@ -1,8 +1,11 @@
 import { api } from './api';
 import type { Channel, ChannelFormData, ChannelStatus } from '../types';
 
-export const fetchChannels = async (): Promise<Channel[]> => {
-  const { data } = await api.get('/channel');
+export const fetchChannels = async (includeArchived = false): Promise<Channel[]> => {
+  const { data } = await api.get(
+    '/channel',
+    includeArchived ? { params: { includeArchived: true } } : undefined,
+  );
   return data;
 };
 
@@ -25,6 +28,7 @@ export const deleteChannel = async (id: number) => {
   const { data } = await api.delete(`/channel/${id}`);
   return data;
 };
+export const archiveChannel = async (id: number) => api.post(`/channel/${id}/archive`);
 
 export async function rotateSourceCredential(id: number): Promise<string> {
   const { data } = await api.put<{ data: { apiKey: string } }>('/channel/' + id + '/credential');

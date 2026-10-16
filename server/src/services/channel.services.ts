@@ -32,6 +32,8 @@ interface ChannelRow {
   received: number;
   sent: number;
   errors: number;
+  retained_messages?: number;
+  draft_revision?: number;
 }
 interface DestinationRow extends Destination {
   sent: number;
@@ -48,9 +50,11 @@ export const getAllChannels = async (req: Request, res: Response, next: NextFunc
   try {
     const mayConfigure = !!req.user && hasPermission(req.user.role, 'channel:write');
     const pool = await getConnection();
-    const result = await pool.request().query(`
-      SELECT c.*,COALESCE(x.received,0) received,COALESCE(x.sent,0) sent,COALESCE(x.errors,0) errors FROM "Channels" c
-      LEFT JOIN (SELECT channel_id,SUM(CASE WHEN direction='IN' THEN 1 ELSE 0 END) received,SUM(CASE WHEN direction='OUT' AND status='OUT-SENT' THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status IN ('IN-ERROR','OUT-ERROR','DEAD_LETTER') THEN 1 ELSE 0 END) errors FROM "Messages" GROUP BY channel_id) x ON x.channel_id=c.id ORDER BY c.created_at DESC;
+    const result = await pool
+      .request()
+      .input('includeArchived', req.query.includeArchived === 'true').query(`
+      SELECT c.*,(SELECT MAX(revision) FROM "ChannelRevisions" r WHERE r.channel_id=c.id AND state='DRAFT') draft_revision,COALESCE(x.retained_messages,0) retained_messages,COALESCE(x.received,0) received,COALESCE(x.sent,0) sent,COALESCE(x.errors,0) errors FROM "Channels" c
+      LEFT JOIN (SELECT channel_id,COUNT(*) retained_messages,SUM(CASE WHEN direction='IN' THEN 1 ELSE 0 END) received,SUM(CASE WHEN direction='OUT' AND status='OUT-SENT' THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status IN ('IN-ERROR','OUT-ERROR','DEAD_LETTER') THEN 1 ELSE 0 END) errors FROM "Messages" GROUP BY channel_id) x ON x.channel_id=c.id WHERE (@includeArchived=true OR c.status<>'ARCHIVED') ORDER BY c.created_at DESC;
       SELECT d.*,r.failure_count,CASE WHEN r.open_until>CURRENT_TIMESTAMP THEN 'OPEN' WHEN r.probe_until>CURRENT_TIMESTAMP THEN 'HALF_OPEN' ELSE 'CLOSED' END circuit_state,COALESCE(x.sent,0) sent,COALESCE(x.errors,0) errors FROM "Destinations" d LEFT JOIN "DestinationRuntime" r ON r.destination_id=d.id
       LEFT JOIN (SELECT destination_id,SUM(CASE WHEN status='OUT-SENT' THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status='OUT-ERROR' THEN 1 ELSE 0 END) errors FROM "MessageDestinationLog" GROUP BY destination_id) x ON x.destination_id=d.id WHERE d.is_deleted=false ORDER BY d.id;
     `);
@@ -85,6 +89,8 @@ export const getAllChannels = async (req: Request, res: Response, next: NextFunc
     res.json(
       sets[0].map((c) => ({
         id: c.id,
+        hasMessages: Number(c.retained_messages || 0) > 0,
+        draftRevision: c.draft_revision || undefined,
         name: c.name,
         status: c.status,
         activeRevision: (c as ChannelRow & { active_revision?: number }).active_revision || 0,
@@ -233,7 +239,7 @@ async function saveChannel(req: Request, res: Response, next: NextFunction, crea
           await tx
             .request()
             .input('id', id)
-            .query('SELECT * FROM "Channels" WHERE id=@id FOR UPDATE')
+            .query('SELECT * FROM "Channels" WHERE id=@id AND status<>\'ARCHIVED\' FOR UPDATE')
         ).recordset[0];
         if (!found) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
         previousChannel = found;
@@ -282,20 +288,8 @@ export const deleteChannel = async (req: Request, res: Response, next: NextFunct
           .query('SELECT id,status FROM "Channels" WHERE id=@id FOR UPDATE')
       ).recordset[0];
       if (!found) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
-      if (found.status === 'RUNNING')
+      if (found.status !== 'STOPPED')
         throw new AppError(409, 'CHANNEL_RUNNING', 'Stop the channel before deleting');
-      const revisions = (
-        await tx
-          .request()
-          .input('id', found.id)
-          .query('SELECT revision FROM "ChannelRevisions" WHERE channel_id=@id LIMIT 1')
-      ).recordset;
-      if (revisions.length)
-        throw new AppError(
-          409,
-          'CHANNEL_HAS_REVISIONS',
-          'Channel has revision history; stop the channel to retire it',
-        );
       const messages = (
         await tx
           .request()
@@ -306,17 +300,60 @@ export const deleteChannel = async (req: Request, res: Response, next: NextFunct
         throw new AppError(
           409,
           'CHANNEL_HAS_MESSAGES',
-          'Channel has retained messages; wait for retention cleanup before deleting',
+          'Channel has message history. Archive it to preserve messages and revisions',
         );
       await tx
         .request()
         .input('id', found.id)
         .query(
-          'DELETE FROM "Destinations" WHERE channel_id=@id; DELETE FROM "Channels" WHERE id=@id;',
+          'DELETE FROM "ChannelRevisions" WHERE channel_id=@id; DELETE FROM "DestinationRuntime" WHERE destination_id IN (SELECT id FROM "Destinations" WHERE channel_id=@id); DELETE FROM "Destinations" WHERE channel_id=@id; DELETE FROM "Channels" WHERE id=@id;',
         );
       await audit('DELETE_CHANNEL', req, 'channel', found.id, tx);
     });
     res.json({ success: true, message: 'Channel deleted successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+export const archiveChannel = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await withTransaction(async (tx) => {
+      const id = Number(req.params.id);
+      const channel = (
+        await tx
+          .request()
+          .input('id', id)
+          .query('SELECT id,status FROM "Channels" WHERE id=@id FOR UPDATE')
+      ).recordset[0];
+      if (!channel) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
+      if (channel.status !== 'STOPPED')
+        throw new AppError(409, 'CHANNEL_RUNNING', 'Stop the channel before archiving');
+      const work = (
+        await tx
+          .request()
+          .input('id', id)
+          .query(
+            `SELECT id FROM "Messages" WHERE channel_id=@id AND (status IN ('IN-PROCESS','PROCESSING','QUEUED','RETRYING') OR lease_until>CURRENT_TIMESTAMP) LIMIT 1`,
+          )
+      ).recordset;
+      if (work.length)
+        throw new AppError(
+          409,
+          'CHANNEL_HAS_PENDING_WORK',
+          'Channel has pending work. Resolve queued or active messages before archiving',
+        );
+      await tx
+        .request()
+        .input('id', id)
+        .query(
+          'UPDATE "Channels" SET status=\'ARCHIVED\',updated_at=CURRENT_TIMESTAMP WHERE id=@id',
+        );
+      await audit('ARCHIVE_CHANNEL', req, 'channel', id, tx);
+    });
+    res.json({
+      success: true,
+      message: 'Channel archived; message and revision history preserved',
+    });
   } catch (error) {
     next(error);
   }
@@ -328,7 +365,9 @@ export const updateChannelStatus = async (req: Request, res: Response, next: Nex
         .request()
         .input('id', Number(req.params.id))
         .input('status', req.body.status)
-        .query('UPDATE "Channels" SET status=@status,updated_at=CURRENT_TIMESTAMP WHERE id=@id');
+        .query(
+          'UPDATE "Channels" SET status=@status,updated_at=CURRENT_TIMESTAMP WHERE id=@id AND status<>\'ARCHIVED\'',
+        );
       if (!r.rowsAffected[0]) throw new AppError(404, 'CHANNEL_NOT_FOUND', 'Channel not found');
       await audit(
         req.body.status === 'RUNNING' ? 'START_CHANNEL' : 'STOP_CHANNEL',

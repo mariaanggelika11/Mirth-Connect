@@ -79,6 +79,26 @@ beforeEach(() => {
   mock.send.mockResolvedValue('ok');
 });
 describe('Engine aggregation and durable retry policy', () => {
+  it.each([
+    { next: [], code: 'CHANNEL_NOT_FOUND' },
+    { next: [{ ...channel, status: 'STOPPED', active_revision: 1 }], code: 'CHANNEL_STOPPED' },
+    { next: [{ ...channel, status: 'ARCHIVED', active_revision: 1 }], code: 'CHANNEL_STOPPED' },
+    { next: [{ ...channel, active_revision: 2 }], code: 'CHANNEL_REVISION_CHANGED' },
+  ])('rejects changed channel before accepting a stale snapshot: $code', async ({ next, code }) => {
+    let reads = 0;
+    mock.query.mockImplementation(async (sql: string) => ({
+      recordset: sql.includes('SELECT * FROM "Channels"')
+        ? ++reads === 1
+          ? [{ ...channel, active_revision: 1 }]
+          : next
+        : [],
+    }));
+    await expect(processInboundMessage(1, { fixture: true })).rejects.toMatchObject({ code });
+    expect(mock.query.mock.calls.some(([sql]) => sql.includes('INSERT INTO "Messages"'))).toBe(
+      false,
+    );
+    expect(mock.send).not.toHaveBeenCalled();
+  });
   for (const code of ['INVALID_ACK', 'DELIVERY_OUTCOME_UNKNOWN', 'ERR_BAD_RESPONSE'])
     it(
       'quarantines ambiguous ' + code + ' instead of automatically repeating delivery',

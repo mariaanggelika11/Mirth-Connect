@@ -262,6 +262,113 @@ describe('Channel transaction usage (database session mocked)', () => {
     expect(res.status).toBe(409);
     expect(state.rollback).toHaveBeenCalledOnce();
   });
+  it('deletes a stopped unused channel including its initial revision and preserves the audit', async () => {
+    const res = await request(app)
+      .delete('/api/channel/1')
+      .set('Authorization', 'Bearer ' + token);
+    expect(res.status).toBe(200);
+    expect(state.commit).toHaveBeenCalledOnce();
+    expect(state.inputs.action).toBe('DELETE_CHANNEL');
+    expect(
+      state.query.mock.calls.some(([sql]) => sql.includes('DELETE FROM "ChannelRevisions"')),
+    ).toBe(true);
+  });
+  it('refuses permanent deletion when message history exists', async () => {
+    state.query.mockImplementation(async (sql: string) => ({
+      recordset: sql.includes('SELECT id,name,role')
+        ? [{ id: 1, role: 'ADMIN' }]
+        : sql.includes('SELECT id,status')
+          ? [{ id: 1, status: 'STOPPED' }]
+          : sql.includes('SELECT id FROM "Messages"')
+            ? [{ id: 9 }]
+            : [],
+    }));
+    const res = await request(app)
+      .delete('/api/channel/1')
+      .set('Authorization', 'Bearer ' + token);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('CHANNEL_HAS_MESSAGES');
+    expect(state.query.mock.calls.some(([sql]) => sql.includes('DELETE FROM'))).toBe(false);
+  });
+  it('archives a stopped channel without deleting history and audits it', async () => {
+    const res = await request(app)
+      .post('/api/channel/1/archive')
+      .set('Authorization', 'Bearer ' + token);
+    expect(res.status).toBe(200);
+    expect(state.inputs.action).toBe('ARCHIVE_CHANNEL');
+    expect(state.query.mock.calls.some(([sql]) => sql.includes('DELETE FROM'))).toBe(false);
+  });
+  it('refuses archiving a channel with pending work', async () => {
+    state.query.mockImplementation(async (sql: string) => ({
+      recordset: sql.includes('SELECT id,name,role')
+        ? [{ id: 1, role: 'ADMIN' }]
+        : sql.includes('SELECT id,status')
+          ? [{ id: 1, status: 'STOPPED' }]
+          : sql.includes('SELECT id FROM "Messages"')
+            ? [{ id: 9 }]
+            : [],
+    }));
+    const res = await request(app)
+      .post('/api/channel/1/archive')
+      .set('Authorization', 'Bearer ' + token);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('CHANNEL_HAS_PENDING_WORK');
+    expect(state.rollback).toHaveBeenCalledOnce();
+  });
+  it.each(['RUNNING', 'PAUSED', 'ERROR', 'ARCHIVED'])(
+    'requires stopped status before archiving %s',
+    async (status) => {
+      state.query.mockImplementation(async (sql: string) => ({
+        recordset: sql.includes('SELECT id,name,role')
+          ? [{ id: 1, role: 'ADMIN' }]
+          : sql.includes('SELECT id,status')
+            ? [{ id: 1, status }]
+            : [],
+      }));
+      expect(
+        (
+          await request(app)
+            .post('/api/channel/1/archive')
+            .set('Authorization', 'Bearer ' + token)
+        ).status,
+      ).toBe(409);
+      expect(state.rollback).toHaveBeenCalledOnce();
+    },
+  );
+  it('fails closed when archiving a missing channel', async () => {
+    state.query.mockImplementation(async (sql: string) => ({
+      recordset: sql.includes('SELECT id,name,role') ? [{ id: 1, role: 'ADMIN' }] : [],
+    }));
+    expect(
+      (
+        await request(app)
+          .post('/api/channel/1/archive')
+          .set('Authorization', 'Bearer ' + token)
+      ).status,
+    ).toBe(404);
+    expect(state.rollback).toHaveBeenCalledOnce();
+  });
+  it.each(['VIEWER', 'OPERATOR', 'DEVELOPER'])(
+    '%s cannot delete or archive channels',
+    async (role) => {
+      state.query.mockResolvedValue({ recordset: [{ id: 1, role }] });
+      expect(
+        (
+          await request(app)
+            .delete('/api/channel/1')
+            .set('Authorization', 'Bearer ' + token)
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await request(app)
+            .post('/api/channel/1/archive')
+            .set('Authorization', 'Bearer ' + token)
+        ).status,
+      ).toBe(403);
+      expect(state.begin).not.toHaveBeenCalled();
+    },
+  );
   for (const status of ['RUNNING', 'STOPPED'])
     it('channel status ' + status, async () => {
       const res = await request(app)

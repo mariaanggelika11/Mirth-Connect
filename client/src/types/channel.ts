@@ -3,6 +3,7 @@ export enum ChannelStatus {
   STOPPED = 'STOPPED',
   ERROR = 'ERROR',
   PAUSED = 'PAUSED',
+  ARCHIVED = 'ARCHIVED',
 }
 
 export enum DestinationType {
@@ -56,6 +57,7 @@ export interface Channel {
   apiKeyConfigured?: boolean;
   validationProfile?: Record<string, unknown>;
   activeRevision?: number;
+  draftRevision?: number;
   idempotencyMode?: 'OPTIONAL' | 'REQUIRED' | 'DISABLED';
   id: number;
   name: string;
@@ -68,6 +70,7 @@ export interface Channel {
   created_at?: string;
   updated_at?: string;
   received?: number;
+  hasMessages?: boolean;
   sent?: number;
   errors?: number;
 }

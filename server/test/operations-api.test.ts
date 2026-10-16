@@ -215,13 +215,15 @@ describe('Operational APIs and authorization', () => {
     state.query.mockImplementation(async (sql) => ({
       recordset: sql.includes('SELECT id,name,role')
         ? [admin]
-        : sql.includes('SELECT id,active_revision')
-          ? [{ id: 1, active_revision: 1 }]
-          : sql.includes('SELECT * FROM "ChannelRevisions"')
-            ? [{ state: 'DRAFT', configuration: encrypt(JSON.stringify(configuration)) }]
-            : sql.includes('MAX(revision)')
-              ? [{ revision: 3 }]
-              : [],
+        : sql.includes('SELECT * FROM "Channels"')
+          ? [{ id: 1, name: configuration.name, source_type: 'HTTP', inbound_data_type: 'JSON' }]
+          : sql.includes('SELECT id,active_revision')
+            ? [{ id: 1, active_revision: 1 }]
+            : sql.includes('SELECT * FROM "ChannelRevisions"')
+              ? [{ state: 'DRAFT', configuration: encrypt(JSON.stringify(configuration)) }]
+              : sql.includes('MAX(revision)')
+                ? [{ revision: 3 }]
+                : [],
       rowsAffected: [1],
     }));
     const res = await request(app)
@@ -232,6 +234,91 @@ describe('Operational APIs and authorization', () => {
     expect(res.body.activeRevision).toBe(3);
     expect(state.inputs.action).toBe('PUBLISH_CHANNEL');
   });
+  it('legacy ID-less rollback reuses matching retired connectors without revealing credentials', async () => {
+    const configuration = channelSchema.parse({
+      name: 'Synthetic legacy rollback',
+      source: { type: 'HTTP', inboundDataType: 'JSON' },
+      destinations: [
+        { id: 11, name: 'Retained connector', type: 'REST', endpoint: 'http://localhost/keep' },
+        {
+          name: 'Legacy connector',
+          type: 'REST',
+          endpoint:
+            'http://user:synthetic-fixture-password@localhost/send?token=synthetic-fixture-token',
+        },
+      ],
+    });
+    const destinations = configuration.destinations.map((d, index) => ({
+      id: index === 0 ? 11 : 9,
+      channel_id: 1,
+      name: d.name,
+      type: d.type,
+      endpoint: encrypt(d.endpoint),
+      outbound_data_type: d.outboundDataType,
+      is_enabled: false,
+      retry_enabled: d.retryEnabled,
+      max_retries: d.maxRetries,
+      retry_interval_seconds: d.retryIntervalSeconds,
+      timeout_ms: d.timeoutMs,
+      delivery_policy: d.deliveryPolicy,
+    }));
+    state.query.mockImplementation(async (sql: string) => ({
+      recordset: sql.includes('SELECT id,name,role')
+        ? [admin]
+        : sql.includes('SELECT id,active_revision')
+          ? [{ id: 1, active_revision: 3 }]
+          : sql.includes('SELECT * FROM "ChannelRevisions"')
+            ? [{ state: 'PUBLISHED', configuration: encrypt(JSON.stringify(configuration)) }]
+            : sql.includes('SELECT * FROM "Channels"')
+              ? [{ name: configuration.name, source_type: 'HTTP', inbound_data_type: 'JSON' }]
+              : sql.includes('SELECT * FROM "Destinations"')
+                ? destinations
+                : sql.includes('MAX(revision)')
+                  ? [{ revision: 4 }]
+                  : [],
+      rowsAffected: [1],
+    }));
+    const response = await request(app)
+      .post('/api/channel/1/revisions/1/rollback')
+      .set('Authorization', 'Bearer ' + token)
+      .send({ expectedActiveRevision: 3, changeSummary: 'Synthetic legacy restoration' });
+    expect(response.status).toBe(200);
+    expect(state.history.some((sql) => sql.includes('INSERT INTO "Destinations"'))).toBe(false);
+    expect(
+      JSON.parse(decrypt(String(state.inputs.config))).destinations.map(
+        (d: { id: number }) => d.id,
+      ),
+    ).toEqual([11, 9]);
+    expect(JSON.stringify(response.body)).not.toContain('synthetic-fixture-password');
+    expect(state.inputs.action).toBe('ROLLBACK_CHANNEL');
+  });
+  it.each([
+    { action: 'publish', state: 'DRAFT', code: 'DRAFT_SUPERSEDED' },
+    { action: 'rollback', state: 'PUBLISHED', code: 'ROLLBACK_UNAVAILABLE' },
+  ])(
+    'rejects unsafe activation $code before changing runtime',
+    async ({ action, state: revisionState, code }) => {
+      state.query.mockImplementation(async (sql: string) => ({
+        recordset: sql.includes('SELECT id,name,role')
+          ? [admin]
+          : sql.includes('SELECT id,active_revision')
+            ? [{ id: 1, active_revision: 1 }]
+            : sql.includes('SELECT * FROM "ChannelRevisions"')
+              ? [{ state: revisionState }]
+              : sql.includes('revision>@revision')
+                ? [{ revision: 3 }]
+                : [],
+        rowsAffected: [1],
+      }));
+      const res = await request(app)
+        .post(`/api/channel/1/revisions/1/${action}`)
+        .set('Authorization', 'Bearer ' + token)
+        .send({ expectedActiveRevision: 1, changeSummary: 'Synthetic conflict' });
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe(code);
+      expect(state.history.some((sql) => sql.startsWith('UPDATE'))).toBe(false);
+    },
+  );
   it('rollback creates publish and archive is draft-only', async () => {
     const configuration = channelSchema.parse({
       name: 'Synthetic revision',
@@ -241,13 +328,15 @@ describe('Operational APIs and authorization', () => {
     state.query.mockImplementation(async (sql) => ({
       recordset: sql.includes('SELECT id,name,role')
         ? [admin]
-        : sql.includes('SELECT id,active_revision')
-          ? [{ id: 1, active_revision: 3 }]
-          : sql.includes('SELECT * FROM "ChannelRevisions"')
-            ? [{ state: 'PUBLISHED', configuration: encrypt(JSON.stringify(configuration)) }]
-            : sql.includes('MAX(revision)')
-              ? [{ revision: 4 }]
-              : [],
+        : sql.includes('SELECT * FROM "Channels"')
+          ? [{ id: 1, name: configuration.name, source_type: 'HTTP', inbound_data_type: 'JSON' }]
+          : sql.includes('SELECT id,active_revision')
+            ? [{ id: 1, active_revision: 3 }]
+            : sql.includes('SELECT * FROM "ChannelRevisions"')
+              ? [{ state: 'PUBLISHED', configuration: encrypt(JSON.stringify(configuration)) }]
+              : sql.includes('MAX(revision)')
+                ? [{ revision: 4 }]
+                : [],
       rowsAffected: [1],
     }));
     expect(

@@ -19,17 +19,30 @@ interface Revision {
   state: string;
   change_summary: string;
   checksum: string;
+  created_at?: string;
+  published_at?: string;
 }
 export function RevisionPanel({
   channel,
   onClose,
   onChanged,
+  onPublished,
 }: {
   channel: Channel;
   onClose: () => void;
   onChanged: () => void;
+  onPublished?: (revision: number) => void;
 }) {
   const { can } = useAuth();
+  const [activation, setActivation] = useState<{
+    revision: number;
+    action: 'publish' | 'rollback';
+  } | null>(null);
+  const [testOpen, setTestOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const readOnly = channel.status === 'ARCHIVED' || !can('channel:write');
+  const [activeRevision, setActiveRevision] = useState(channel.activeRevision || 0);
+  const canViewRaw = can('message:raw');
   const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null);
   const [rawPreview, setRawPreview] = useState(false);
   const [rows, setRows] = useState<Revision[]>([]),
@@ -49,6 +62,10 @@ export function RevisionPanel({
     [selected, setSelected] = useState<number[]>([]);
   const dirty = !!editing && JSON.stringify(editing) !== editBaseline;
   useEffect(() => {
+    setRawPreview(false);
+    setDryRunResult(null);
+  }, [canViewRaw]);
+  useEffect(() => {
     setDryRunResult(null);
   }, [synthetic, rawPreview]);
   useEffect(() => {
@@ -66,14 +83,24 @@ export function RevisionPanel({
     else onClose();
   }
   async function reload() {
-    const { data } = await api.get(`/channel/${channel.id}/revisions`);
-    setRows(data.data);
+    setLoading(true);
+    try {
+      const { data } = await api.get(`/channel/${channel.id}/revisions`);
+      setRows(data.data);
+      if (Number.isInteger(data.activeRevision)) setActiveRevision(data.activeRevision);
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => {
     api
       .get(`/channel/${channel.id}/revisions`)
-      .then(({ data }) => setRows(data.data))
-      .catch((e) => setError(e.message));
+      .then(({ data }) => {
+        setRows(data.data);
+        if (Number.isInteger(data.activeRevision)) setActiveRevision(data.activeRevision);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
   }, [channel.id]);
   async function view(revision: number) {
     try {
@@ -132,6 +159,7 @@ export function RevisionPanel({
     }
   }
   async function testRevision(revision: number) {
+    setTestOpen(true);
     setBusy(true);
     setError('');
     setTestResult('');
@@ -148,7 +176,13 @@ export function RevisionPanel({
       });
       setDryRunResult(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to test revision');
+      setError(
+        e instanceof SyntaxError
+          ? 'The test payload is not valid JSON.'
+          : e instanceof Error
+            ? e.message
+            : 'Unable to test revision',
+      );
     } finally {
       setBusy(false);
     }
@@ -189,24 +223,40 @@ export function RevisionPanel({
     setBusy(true);
     setError('');
     try {
-      await api.post(`/channel/${channel.id}/revisions/${revision}/${action}`, {
+      const { data } = await api.post(`/channel/${channel.id}/revisions/${revision}/${action}`, {
         changeSummary:
           summary.trim() ||
           (action === 'rollback'
             ? 'Rollback channel configuration'
             : 'Publish channel configuration'),
-        expectedActiveRevision: channel.activeRevision || 0,
+        expectedActiveRevision: activeRevision,
       });
+      onPublished?.(data.activeRevision);
       onChanged();
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to publish revision');
+      throw e;
     } finally {
       setBusy(false);
     }
   }
   return (
     <Modal isOpen onClose={requestClose} title={`Revisions · ${channel.name}`}>
+      <ConfirmationModal
+        isOpen={!!activation}
+        onClose={() => setActivation(null)}
+        title={activation?.action === 'rollback' ? 'Rollback channel' : 'Publish draft'}
+        confirmLabel={activation?.action === 'rollback' ? 'Confirm rollback' : 'Confirm publish'}
+        message={
+          activation?.action === 'rollback'
+            ? `Restore configuration from revision ${activation.revision}? This creates a new published revision. Existing history and accepted messages are preserved. Any pending drafts will be archived.`
+            : `Publish draft ${activation?.revision}? New messages will use this configuration. Previously accepted messages keep their saved configuration. Other pending drafts will be archived.`
+        }
+        onConfirm={async () => {
+          if (activation) await publish(activation.revision, activation.action);
+        }}
+      />
       <ConfirmationModal
         isOpen={!!discard}
         onClose={() => setDiscard(null)}
@@ -221,19 +271,36 @@ export function RevisionPanel({
         }}
       />
       <div className="form-body">
-        <p>
-          Active revision: {channel.activeRevision || 0}. Publish affects new messages; saved
-          deliveries retain their connector snapshot.
+        <p>Active revision: {activeRevision}. This is the configuration used for new messages.</p>
+        <p className="muted">
+          Draft → Review → Publish. Rollback restores an older published configuration as a new
+          revision; it never removes history.
         </p>
         {error && (
           <p role="alert" className="alert error">
             {error}
           </p>
         )}
-        <label className="field">
-          <span>Publish / rollback summary (optional)</span>
-          <input maxLength={500} value={summary} onChange={(e) => setSummary(e.target.value)} />
-        </label>
+        <Button
+          variant="secondary"
+          disabled={busy || dirty || loading}
+          onClick={() => {
+            void reload()
+              .then(() => setError(''))
+              .catch((e) =>
+                setError(e instanceof Error ? e.message : 'Unable to reload revisions'),
+              );
+          }}
+        >
+          Refresh revisions
+        </Button>
+        <details>
+          <summary>Optional change note</summary>
+          <label className="field">
+            <span>Publish / rollback summary (optional)</span>
+            <input maxLength={500} value={summary} onChange={(e) => setSummary(e.target.value)} />
+          </label>
+        </details>
         {editing && (
           <section className="form-section" aria-label={`Edit draft revision ${editing.revision}`}>
             <h3>Edit draft revision {editing.revision}</h3>
@@ -331,37 +398,48 @@ export function RevisionPanel({
             </Button>
           </section>
         )}
-        <label className="field">
-          <span>Synthetic revision test payload</span>
-          <textarea
-            rows={4}
-            disabled={busy}
-            value={synthetic}
-            onChange={(e) => setSynthetic(e.target.value)}
-          />
-        </label>
-        <p>
-          Use synthetic data only. Revision dry-run performs no network delivery and masks its
-          payload preview.
-        </p>
-        {can('message:raw') && (
-          <label className="check-field">
-            <input
-              type="checkbox"
-              checked={rawPreview}
-              onChange={(e) => {
-                setRawPreview(e.target.checked);
-                setDryRunResult(null);
-              }}
+        <details open={testOpen} onToggle={(event) => setTestOpen(event.currentTarget.open)}>
+          <summary>Test revision with synthetic data</summary>
+          <label className="field">
+            <span>Synthetic revision test payload</span>
+            <textarea
+              rows={4}
+              disabled={busy}
+              value={synthetic}
+              onChange={(e) => setSynthetic(e.target.value)}
             />
-            View raw synthetic preview (audited)
           </label>
-        )}
+          <p>
+            Use synthetic data only. Revision dry-run performs no network delivery and masks its
+            payload preview.
+          </p>
+          {can('message:raw') && (
+            <label className="check-field">
+              <input
+                type="checkbox"
+                checked={rawPreview}
+                onChange={(e) => {
+                  setRawPreview(e.target.checked);
+                  setDryRunResult(null);
+                }}
+              />
+              View raw synthetic preview (audited)
+            </label>
+          )}
+        </details>
+        {loading && <p role="status">Loading revisions…</p>}
+        {!loading && !rows.length && <p role="status">No revisions available.</p>}
         {rows.map((row) => (
           <section key={row.revision} className="form-section">
             <strong>
               Revision {row.revision} · {row.state}
             </strong>
+            {row.revision === activeRevision && <span className="status-badge">Active</span>}
+            {row.created_at && (
+              <small className="table-subtext">
+                Created {new Date(row.created_at).toLocaleString('en-US')}
+              </small>
+            )}
             <p>{row.change_summary}</p>
             <label>
               <input
@@ -381,7 +459,7 @@ export function RevisionPanel({
               <Button variant="secondary" onClick={() => void view(row.revision)}>
                 Review configuration
               </Button>
-              {row.state === 'DRAFT' && (
+              {row.state === 'DRAFT' && !readOnly && (
                 <Button
                   variant="secondary"
                   disabled={busy || !!editing}
@@ -390,7 +468,7 @@ export function RevisionPanel({
                   Edit draft {row.revision}
                 </Button>
               )}
-              {row.state !== 'ARCHIVED' && (
+              {['DRAFT', 'PUBLISHED'].includes(row.state) && !readOnly && (
                 <Button
                   variant="secondary"
                   disabled={busy || !synthetic.trim()}
@@ -399,14 +477,21 @@ export function RevisionPanel({
                   Dry-run revision {row.revision}
                 </Button>
               )}
-              <Button
-                disabled={busy || !!editing || row.state === 'ARCHIVED'}
-                onClick={() =>
-                  void publish(row.revision, row.state === 'DRAFT' ? 'publish' : 'rollback')
-                }
-              >
-                {row.state === 'DRAFT' ? 'Publish' : 'Rollback'}
-              </Button>
+              {!readOnly &&
+                ['DRAFT', 'PUBLISHED'].includes(row.state) &&
+                row.revision !== activeRevision && (
+                  <Button
+                    disabled={busy || !!editing}
+                    onClick={() =>
+                      setActivation({
+                        revision: row.revision,
+                        action: row.state === 'DRAFT' ? 'publish' : 'rollback',
+                      })
+                    }
+                  >
+                    {row.state === 'DRAFT' ? 'Publish' : 'Rollback'}
+                  </Button>
+                )}
             </div>
           </section>
         ))}

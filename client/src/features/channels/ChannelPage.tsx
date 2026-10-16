@@ -5,6 +5,7 @@ import {
   createChannel,
   updateChannel,
   deleteChannel,
+  archiveChannel,
 } from '../../services/channel.api';
 import { uploadXmlConfig } from '../../services/upload.api';
 import type { Channel, ChannelFormData } from '../../types';
@@ -42,12 +43,15 @@ const ChannelDashboard: React.FC<{
   const [deletingChannel, setDeletingChannel] = useState<Channel | null>(null);
   const [savedChannel, setSavedChannel] = useState<Channel | null>(null);
   const [notice, setNotice] = useState('');
+  const [draftChannelId, setDraftChannelId] = useState<number | null>(null);
+  const [archivingChannel, setArchivingChannel] = useState<Channel | null>(null);
+  const [replaceDraftChannel, setReplaceDraftChannel] = useState<Channel | null>(null);
 
   const loadChannels = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await fetchChannels();
+      const data = await fetchChannels(statusFilter === 'ARCHIVED');
       setChannels(data);
     } catch (err) {
       if (err instanceof Error) setError(err.message);
@@ -55,7 +59,7 @@ const ChannelDashboard: React.FC<{
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [statusFilter]);
 
   useEffect(() => {
     loadChannels();
@@ -68,6 +72,10 @@ const ChannelDashboard: React.FC<{
   };
 
   const handleEdit = (channel: Channel) => {
+    if (channel.draftRevision) {
+      setReplaceDraftChannel(channel);
+      return;
+    }
     setDuplicateSeed(null);
     setEditingChannel(channel);
     setIsFormOpen(true);
@@ -84,7 +92,6 @@ const ChannelDashboard: React.FC<{
       setDeletingChannel(null);
       loadChannels();
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Operation failed');
       throw error;
     }
   };
@@ -93,7 +100,8 @@ const ChannelDashboard: React.FC<{
     try {
       if (editingChannel) {
         await updateChannel(editingChannel.id, channelData);
-        setNotice('Changes saved as a draft. Open Revisions to review and publish.');
+        setNotice('Draft saved. Your active configuration is unchanged until you publish.');
+        setDraftChannelId(editingChannel.id);
       } else {
         const result = await createChannel(channelData);
         setNotice('Channel saved');
@@ -175,6 +183,7 @@ const ChannelDashboard: React.FC<{
         onRefresh={loadChannels}
         onEdit={handleEdit}
         onDelete={handleDeleteRequest}
+        onArchive={setArchivingChannel}
       />
     );
   };
@@ -216,7 +225,7 @@ const ChannelDashboard: React.FC<{
           onChange={(e) => setStatusFilter(e.target.value)}
         >
           <option value="ALL">All statuses</option>
-          {['RUNNING', 'STOPPED', 'PAUSED', 'ERROR'].map((s) => (
+          {['RUNNING', 'STOPPED', 'PAUSED', 'ERROR', 'ARCHIVED'].map((s) => (
             <option key={s} value={s}>
               {s[0] + s.slice(1).toLowerCase()}
             </option>
@@ -227,6 +236,17 @@ const ChannelDashboard: React.FC<{
       {notice && (
         <p className="alert success" role="status">
           {notice}
+          {draftChannelId && can('channel:write') && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                const channel = channels.find((c) => c.id === draftChannelId);
+                if (channel) setRevisionChannel(channel);
+              }}
+            >
+              Review and publish draft
+            </Button>
+          )}
         </p>
       )}
       {/* TABLE */}
@@ -237,9 +257,26 @@ const ChannelDashboard: React.FC<{
           channel={revisionChannel}
           onClose={() => setRevisionChannel(null)}
           onChanged={() => void loadChannels()}
+          onPublished={(revision) => {
+            setDraftChannelId(null);
+            setNotice(`Revision ${revision} is now active for new messages.`);
+          }}
         />
       )}
       {/* FORM MODAL */}
+      <ConfirmationModal
+        isOpen={!!replaceDraftChannel}
+        onClose={() => setReplaceDraftChannel(null)}
+        title="This channel has a saved draft"
+        confirmLabel="Edit active configuration"
+        message={`Draft ${replaceDraftChannel?.draftRevision} is not published. Editing starts from the active configuration; saving will replace the pending draft. Cancel and choose Review draft to continue reviewing the saved changes.`}
+        onConfirm={() => {
+          setDuplicateSeed(null);
+          setEditingChannel(replaceDraftChannel);
+          setReplaceDraftChannel(null);
+          setIsFormOpen(true);
+        }}
+      />
       <ChannelForm
         isOpen={isFormOpen && can('channel:write')}
         onClose={() => setIsFormOpen(false)}
@@ -267,7 +304,21 @@ const ChannelDashboard: React.FC<{
         onClose={() => setDeletingChannel(null)}
         onConfirm={handleDeleteConfirm}
         title="Delete Channel"
-        message={`Are you sure you want to permanently delete the channel "${deletingChannel?.name}"? This action cannot be undone.`}
+        message={`Delete "${deletingChannel?.name}" permanently? Only stopped channels without message history can be deleted. Their configuration revisions will also be removed. Use Archive for channels with history.`}
+      />
+      <ConfirmationModal
+        isOpen={!!archivingChannel}
+        onClose={() => setArchivingChannel(null)}
+        title="Archive Channel"
+        confirmLabel="Archive channel"
+        message={`Archive "${archivingChannel?.name}"? It must be stopped with no pending work. Messages, revisions and audit history will be preserved. Find it later using the Archived status filter.`}
+        onConfirm={async () => {
+          if (!archivingChannel) return;
+          await archiveChannel(archivingChannel.id);
+          setArchivingChannel(null);
+          setNotice('Channel archived. Messages and revision history are preserved.');
+          await loadChannels();
+        }}
       />
     </div>
   );

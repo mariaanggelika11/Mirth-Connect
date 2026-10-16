@@ -28,6 +28,7 @@ interface Props {
   onDelete: (channel: Channel) => void;
   onViewMessages?: (id: number) => void;
   onRevisions?: (channel: Channel) => void;
+  onArchive?: (channel: Channel) => void;
   onDuplicate?: (channel: Channel) => void;
 }
 function ChannelRow({
@@ -38,6 +39,7 @@ function ChannelRow({
   onViewMessages,
   onDuplicate,
   onRevisions,
+  onArchive,
 }: Omit<Props, 'channels'> & { channel: Channel }) {
   const { can } = useAuth();
   const menuRef = useRef<HTMLDetailsElement>(null);
@@ -120,6 +122,13 @@ function ChannelRow({
               <small>
                 Channel #{channel.id} · Revision {channel.activeRevision || 0}
               </small>
+              {channel.draftRevision &&
+                can('channel:write') &&
+                channel.status !== ChannelStatus.ARCHIVED && (
+                  <button className="text-button" onClick={() => onRevisions?.(channel)}>
+                    Review draft {channel.draftRevision}
+                  </button>
+                )}
             </span>
             <ChevronDown size={15} className={expanded ? 'rotate-180' : ''} />
           </button>
@@ -149,7 +158,7 @@ function ChannelRow({
         </td>
         <td>
           <div className="row-actions">
-            {can('channel:operate') && (
+            {can('channel:operate') && channel.status !== ChannelStatus.ARCHIVED && (
               <button
                 className={`operation-button ${running ? '' : 'start'}`}
                 disabled={busy}
@@ -193,7 +202,7 @@ function ChannelRow({
                   <ArrowRight size={15} />
                   View messages
                 </button>
-                {can('channel:write') && (
+                {can('channel:write') && channel.status !== ChannelStatus.ARCHIVED && (
                   <button aria-label="Edit channel" onClick={() => onEdit(channel)}>
                     <Pencil size={15} />
                     Edit channel
@@ -212,18 +221,29 @@ function ChannelRow({
                     </button>
                   </>
                 )}
-                {can('channel:delete') && (
+                {can('channel:delete') && channel.status !== ChannelStatus.ARCHIVED && (
                   <button
-                    className="danger"
-                    aria-label="Delete channel"
-                    disabled={running}
-                    title={running ? 'Stop the channel before deleting' : 'Delete channel'}
-                    onClick={() => onDelete(channel)}
+                    disabled={channel.status !== ChannelStatus.STOPPED}
+                    title="Stop the channel and resolve pending work before archiving"
+                    onClick={() => onArchive?.(channel)}
                   >
-                    <Trash2 size={15} />
-                    Delete channel
+                    Archive channel
                   </button>
                 )}
+                {can('channel:delete') &&
+                  channel.status !== ChannelStatus.ARCHIVED &&
+                  !(channel.hasMessages || channel.received || channel.sent) && (
+                    <button
+                      className="danger"
+                      aria-label="Delete channel"
+                      disabled={channel.status !== ChannelStatus.STOPPED}
+                      title={running ? 'Stop the channel before deleting' : 'Delete channel'}
+                      onClick={() => onDelete(channel)}
+                    >
+                      <Trash2 size={15} />
+                      Delete channel
+                    </button>
+                  )}
               </div>
             </details>
           </div>
@@ -336,6 +356,7 @@ export default function ChannelTable(props: Props) {
                 onViewMessages={props.onViewMessages}
                 onDuplicate={props.onDuplicate}
                 onRevisions={props.onRevisions}
+                onArchive={props.onArchive}
               />
             ))}
           </tbody>

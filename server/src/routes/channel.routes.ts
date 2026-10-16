@@ -120,6 +120,12 @@ router.put(
   service.updateChannel,
 );
 router.delete('/:id', requirePermission('channel:delete'), validateId, service.deleteChannel);
+router.post(
+  '/:id/archive',
+  requirePermission('channel:delete'),
+  validateId,
+  service.archiveChannel,
+);
 router.put(
   '/:id/status',
   requirePermission('channel:operate'),

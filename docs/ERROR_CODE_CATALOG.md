@@ -13,7 +13,9 @@ Errors return success=false, code, safe message and requestId; central handler a
 | MESSAGE_IN_PROGRESS | 409; duplicate work still processing |
 | REVISION_CONFLICT | 409; expected active revision is stale |
 | REVISION_ALREADY_PUBLISHED / ROLLBACK_UNAVAILABLE / ARCHIVE_UNAVAILABLE | 409; lifecycle conflict |
-| CHANNEL_HAS_REVISIONS / CHANNEL_HAS_MESSAGES | 409; evidence must be retained |
+| CHANNEL_HAS_MESSAGES | 409; retained message history prevents permanent deletion; use Archive |
+| CHANNEL_HAS_PENDING_WORK | 409; resolve active/queued/retrying/leased work before archive |
+| DRAFT_SUPERSEDED | 409; a newer draft exists; review the latest draft |
 | PAYLOAD_SCHEMA_REJECTED / HL7_PROFILE_REJECTED / PAYLOAD_VALIDATION_REJECTED | 422; channel profile rejected payload |
 | INVALID_JSON_SCHEMA / UNSUPPORTED_JSON_SCHEMA | 400; schema invalid or unsupported costly/reference keywords |
 | INVALID_JSON | 400; incoming JSON text cannot be parsed |

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import axios, { AxiosError } from 'axios';
 import { api, setAccessToken, getAccessToken, refreshSession } from '../src/services/api';
+import { fetchChannels, archiveChannel } from '../src/services/channel.api';
 const storage = new Map<string, string>();
 const dispatch = vi.fn();
 vi.stubGlobal('localStorage', {
@@ -16,6 +17,40 @@ beforeEach(() => {
   dispatch.mockClear();
 });
 describe('Browser API session handling', () => {
+  it('archived history is opt-in and forbidden archive keeps the current management session intact', async () => {
+    const adapter = api.defaults.adapter;
+    setAccessToken('synthetic-viewer-session');
+    storage.set('authToken', 'ignored-legacy-token');
+    const requests: { path?: string; archived: unknown }[] = [];
+    api.defaults.adapter = async (config) => {
+      expect(config.headers.Authorization).toBe('Bearer synthetic-viewer-session');
+      expect(config.headers['X-API-Key']).toBeUndefined();
+      requests.push({ path: config.url, archived: config.params?.includeArchived });
+      if (config.method === 'post')
+        throw new AxiosError('Permission denied', '403', config, undefined, {
+          status: 403,
+          statusText: 'Forbidden',
+          data: { code: 'FORBIDDEN', message: 'Permission denied' },
+          headers: {},
+          config,
+        });
+      return { status: 200, statusText: 'OK', data: [], headers: {}, config };
+    };
+    try {
+      await fetchChannels();
+      await fetchChannels(true);
+      await expect(archiveChannel(7)).rejects.toThrow('Permission denied');
+      expect(requests).toEqual([
+        { path: '/channel', archived: undefined },
+        { path: '/channel', archived: true },
+        { path: '/channel/7/archive', archived: undefined },
+      ]);
+      expect(getAccessToken()).toBe('synthetic-viewer-session');
+      expect(dispatch).not.toHaveBeenCalled();
+    } finally {
+      api.defaults.adapter = adapter;
+    }
+  });
   it('rejects a source key failure without refreshing or expiring the operator session', async () => {
     const adapter = api.defaults.adapter;
     let requests = 0;
