@@ -1,5 +1,13 @@
 # Changelog
 
+## Verify channel XML import — 2026-10-16
+
+- Fix empty/whitespace/comment-only XML returning a null-parser TypeError: reject safely with HTTP 400 `INVALID_CHANNEL_XML` instead of HTTP 500. Three added regression cases initially failed and pass after the fix; all nine XML parser tests pass.
+- Add a real PostgreSQL multipart import regression covering persisted STOPPED channel, destination retry/timeout, initial revision/audit, frontend export→import with a fresh ID, invalid/native/XXE/metadata/oversized/missing/wrong-field uploads and denied anonymous/Viewer/Operator access. Rejections leave the channel count unchanged.
+- Run the complete native PostgreSQL suite: 20/20 pass on a new disposable local PostgreSQL 18.4 cluster/schema through migration 007. Run real-browser login→file picker→HTTP 201→listed persisted channel and malformed-file HTTP 400/error UI against the compiled backend without API mocks. Stop and remove the temporary cluster/backend/browser; existing application databases and environment files are untouched.
+- Browser harness initially failed due to workspace bcrypt resolution, then a local bundle targeting localhost:9000 instead of the disposable backend. Correct harness dependency lookup and use a temporary same-origin frontend build; the final end-to-end run passes. Restore the ordinary frontend build afterward.
+- Full unit/API suite: 383 tests / 30 suites pass; coverage 83.03% statements / 79.78% branches / 85.24% functions / 84.00% lines. Build, typecheck, lint and formatting pass. Native NextGen/Mirth exports remain explicitly unsupported; document the accepted format in README.
+
 ## Preserve security through UI simplification — 2026-10-16
 
 - Retain authentication, four-role RBAC, per-channel source keys and one-time display, rotation, payload redaction/raw audit, encryption, sandbox, safe errors, request limits, correlation and idempotency. No database, production data or environment secrets changed.

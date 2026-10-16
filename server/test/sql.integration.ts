@@ -1296,6 +1296,142 @@ test('real PostgreSQL: visual field mappings preserve routing and final outbound
   assert.deepEqual(filterDetail.body.data.destinationLogs, []);
 });
 
+test('real PostgreSQL: multipart XML import persists stopped revisions and rejects unsafe or unauthorized uploads atomically', async () => {
+  const auth = await syntheticAdminAuth();
+  const xml = await readFile(new URL('../../docs/channel-example.xml', import.meta.url), 'utf8');
+  const imported = await request(app)
+    .post('/api/upload/xml')
+    .set('Authorization', auth)
+    .attach('file', Buffer.from(xml), 'synthetic-channel.xml');
+  assert.equal(imported.status, 201, JSON.stringify(imported.body));
+  const id = imported.body.channelId;
+  const stored = (
+    await pool.request().input('id', id).query('SELECT * FROM "Channels" WHERE id=@id')
+  ).recordset[0];
+  assert.equal(stored.name, 'Example HTTP to REST');
+  assert.equal(stored.status, 'STOPPED');
+  assert.equal(stored.source_type, 'HTTP');
+  assert.equal(stored.inbound_data_type, 'JSON');
+  assert.equal(stored.source_api_key, null);
+  assert.equal(stored.active_revision, 1);
+  const destinations = (
+    await pool.request().input('id', id).query('SELECT * FROM "Destinations" WHERE channel_id=@id')
+  ).recordset;
+  assert.equal(destinations.length, 1);
+  assert.equal(destinations[0].retry_enabled, true);
+  assert.equal(destinations[0].max_retries, 3);
+  assert.equal(destinations[0].timeout_ms, 10000);
+  assert.equal(decrypt(destinations[0].endpoint), 'http://127.0.0.1:9200/api/inbound/2');
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', id)
+        .query('SELECT count(*) total FROM "ChannelRevisions" WHERE channel_id=@id')
+    ).recordset[0].total,
+    1,
+  );
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', id)
+        .query(
+          `SELECT count(*) total FROM "AuditLog" WHERE resource_id=@id AND action='CREATE_CHANNEL'`,
+        )
+    ).recordset[0].total,
+    1,
+  );
+  const listing = await request(app).get('/api/channel').set('Authorization', auth);
+  assert.equal(listing.status, 200);
+  const listed = listing.body.find((channel: { id: number }) => channel.id === id);
+  const { exportChannelXml } = await import('../../client/src/services/channel.config.js');
+  const roundtrip = await request(app)
+    .post('/api/upload/xml')
+    .set('Authorization', auth)
+    .attach('file', Buffer.from(exportChannelXml(listed)), 'roundtrip.xml');
+  assert.equal(roundtrip.status, 201, JSON.stringify(roundtrip.body));
+  assert.notEqual(roundtrip.body.channelId, id);
+  const before = (await pool.request().query('SELECT count(*) total FROM "Channels"')).recordset[0]
+    .total;
+  for (const [body, code] of [
+    ['', 'INVALID_CHANNEL_XML'],
+    ['<channel>', 'INVALID_XML'],
+    [
+      '<channel><sourceConnector>native export</sourceConnector></channel>',
+      'UNSUPPORTED_CHANNEL_XML',
+    ],
+    [
+      '<!DOCTYPE channel [<!ENTITY x SYSTEM "file:///etc/passwd">]><channel>&x;</channel>',
+      'XML_ENTITIES_DENIED',
+    ],
+    [xml.replace('<type>HTTP</type>', '<type>UNSUPPORTED</type>'), 'INVALID_CHANNEL_XML'],
+    [xml.replace('127.0.0.1:9200', '169.254.169.254:80'), 'DESTINATION_HOST_DENIED'],
+  ]) {
+    const rejected = await request(app)
+      .post('/api/upload/xml')
+      .set('Authorization', auth)
+      .attach('file', Buffer.from(body), 'invalid.xml');
+    assert.equal(
+      rejected.status,
+      code === 'DESTINATION_HOST_DENIED' ? 403 : 400,
+      JSON.stringify(rejected.body),
+    );
+    assert.equal(rejected.body.code, code);
+  }
+  assert.equal(
+    (await request(app).post('/api/upload/xml').set('Authorization', auth)).body.code,
+    'FILE_REQUIRED',
+  );
+  assert.equal(
+    (
+      await request(app)
+        .post('/api/upload/xml')
+        .set('Authorization', auth)
+        .attach('unexpected', Buffer.from(xml), 'invalid.xml')
+    ).body.code,
+    'UPLOAD_LIMIT',
+  );
+  assert.equal(
+    (
+      await request(app)
+        .post('/api/upload/xml')
+        .set('Authorization', auth)
+        .attach('file', Buffer.alloc(config.server.payloadLimit + 1, 'x'), 'oversized.xml')
+    ).body.code,
+    'UPLOAD_LIMIT',
+  );
+  assert.equal(
+    (await request(app).post('/api/upload/xml').attach('file', Buffer.from(xml), 'valid.xml'))
+      .status,
+    401,
+  );
+  for (const role of ['VIEWER', 'OPERATOR']) {
+    const user = (
+      await pool
+        .request()
+        .input('username', 'xml-' + role + suffix)
+        .input('role', role)
+        .query(
+          `INSERT INTO "Users"(username,name,password_hash,role) VALUES(@username,'Synthetic XML tester','synthetic-unused-hash',@role) RETURNING id,name,role`,
+        )
+    ).recordset[0];
+    assert.equal(
+      (
+        await request(app)
+          .post('/api/upload/xml')
+          .set('Authorization', 'Bearer ' + signToken(user))
+          .attach('file', Buffer.from(xml), 'valid.xml')
+      ).status,
+      403,
+    );
+  }
+  assert.equal(
+    (await pool.request().query('SELECT count(*) total FROM "Channels"')).recordset[0].total,
+    before,
+  );
+});
+
 test('real PostgreSQL: key rotation failure rolls back all records and new keyring reads rotated snapshots', async () => {
   const id = (
     await pool

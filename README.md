@@ -276,6 +276,14 @@ Rollback aplikasi: stop inbound baru, rekonsiliasi in-flight deliveries, pertaha
 Hasil verifikasi source terbaru tercatat di [manual UI](docs/MIRTH_LITE_UI.md#validasi-dan-batas-verifikasi); status produksi dan kekurangan source tetap dicatat di [readiness matrix](docs/PRODUCTION_READINESS_MATRIX.md).
 
 
+### Import channel XML
+
+Use **Channels → Import from XML** as ADMIN or DEVELOPER. Upload a single channel document in this application's format, such as [channel-example.xml](docs/channel-example.xml), or an XML file exported by this application (format versions 1/2). Import creates a new **STOPPED** channel with its initial published revision, destinations and audit entry; it does not overwrite an existing channel or start delivery. Configure a new source API key and review destination credentials before starting it.
+
+Native NextGen/Mirth Connect exports containing fields such as `sourceConnector` are **not supported** by this importer and are explicitly rejected. Patient-message XML is also different from channel-configuration XML. Missing/empty/malformed files, entity declarations, unauthorized uploads and prohibited destination hosts are rejected. Size limit follows `PAYLOAD_LIMIT_BYTES` (default 1 MiB). XML import does not execute transformation scripts or send messages.
+
+Verified on 16 October 2026 with 20 real PostgreSQL integration scenarios, including multipart import/export roundtrip, revision/audit persistence and rejection without orphan channels. A real browser against a compiled backend and disposable PostgreSQL also passed login/file-picker/import/list/error checks, without mocked APIs. The temporary browser build used same-origin API configuration; environment files and existing databases were unchanged. Native Mirth migration compatibility remains unsupported.
+
 ### Development operational controls
 
 Current development includes a secret-preserving successor draft editor, stored-revision synthetic dry-run, separate DNS/TCP/TLS connection probes, canonical JSON idempotency, optional reservation TTL, revision-owned destination circuit tuning and audited idle-only reset. ADMIN settings expose effective configuration and an audited metadata diagnostic download. `npm run docs:check` checks the static OpenAPI structure; Playwright includes Axe accessibility scans.

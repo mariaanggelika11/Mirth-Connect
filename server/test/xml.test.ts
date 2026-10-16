@@ -24,6 +24,12 @@ it('rejects unsupported native Mirth exports rather than silently losing fields'
 it('rejects malformed XML', async () => {
   await expect(importChannelXml('<channel>')).rejects.toThrow();
 });
+it.each(['', '   ', '<!-- empty document -->'])('rejects empty XML safely (%s)', async (xml) => {
+  await expect(importChannelXml(xml)).rejects.toMatchObject({
+    status: 400,
+    code: 'INVALID_CHANNEL_XML',
+  });
+});
 
 it('round trips frontend XML export with scripts and escaped names but without IDs', async () => {
   const { exportChannelXml } = await import('../../client/src/services/channel.config');

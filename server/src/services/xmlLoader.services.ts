@@ -14,7 +14,7 @@ export async function importChannelXml(xml: string) {
   } catch {
     throw new AppError(400, 'INVALID_XML', 'Invalid XML document');
   }
-  const root = parsed.channel;
+  const root = parsed?.channel;
   if (!root || typeof root !== 'object' || Array.isArray(root))
     throw new AppError(400, 'INVALID_CHANNEL_XML', 'Expected one Mini Mirth channel document');
   const input = root as Record<string, unknown>;
