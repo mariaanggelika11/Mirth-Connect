@@ -1,5 +1,12 @@
 # Changelog
 
+## Consistent dropdowns — 2026-10-16
+
+- Standardize dropdown sizing, padding, chevrons, focus/disabled states and selected options across filters, channel forms, Messages and Settings. Supported browsers use an anchored, scrollable native picker; other browsers retain the system picker.
+- Bound long labels and menus to the viewport, and give mobile search/filter controls room without horizontal page overflow.
+- Let Escape dismiss an open picker before closing its enclosing dialog; extend the existing mobile keyboard/accessibility regression scenario.
+- Verify client build, workspace typecheck, lint, format and 57 browser scenarios. Synthetic desktop/modal/mobile checks also pass for proportional menu bounds, scrollable options, keyboard selection, Escape and long labels; initial mobile overflow and dialog-dismissal failures were corrected before the final runs. No database/dependency changes.
+
 ## Focus mapping and move testing to Review — 2026-10-16
 
 - Base this follow-up on development commit `1734591`. Keep Source → Transformation → Destinations → Review & Test and all existing engine capabilities.

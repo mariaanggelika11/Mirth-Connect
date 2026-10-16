@@ -1663,6 +1663,12 @@ test('four-step setup supports keyboard navigation mobile layout and accessible 
   await page.setViewportSize({ width: 390, height: 844 });
   await workspace(page);
   await page.getByRole('button', { name: 'New Channel', exact: true }).click();
+  const inboundFormat = page.getByLabel('Inbound format');
+  await inboundFormat.click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'New channel', exact: true })).toBeVisible();
+  await expect(inboundFormat).toBeFocused();
+  await expect(inboundFormat).toHaveValue('JSON');
   await page.getByLabel('Channel name', { exact: false }).fill('SYNTHETIC_ACCESSIBILITY');
   const advanced = page.locator('summary').filter({ hasText: 'Advanced source settings' });
   await advanced.focus();

@@ -28,6 +28,9 @@ export function Modal({ isOpen, onClose, title, children, variant = 'dialog' }: 
       const dialogs = document.querySelectorAll('[role="dialog"]');
       if (dialogs[dialogs.length - 1] !== ref.current) return;
       if (e.key === 'Escape') {
+        // Let the browser dismiss an open native picker before closing its dialog.
+        if (CSS.supports('selector(select:open)') && ref.current?.querySelector('select:open'))
+          return;
         e.preventDefault();
         e.stopImmediatePropagation();
         closeRef.current();
