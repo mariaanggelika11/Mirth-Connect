@@ -138,9 +138,11 @@ Create/edit tidak meminta change summary. Backend menghasilkan summary dan audit
 
 ### Revision, publish, rollback dan lifecycle channel — 17 October 2026
 
-Sesudah Save pada channel existing, klik **Review and publish draft** pada notifikasi. Alternatif: **Channels → ⋯ → Revisions**. Revision aktif diberi badge Active. Catatan perubahan dan input test berada dalam disclosure; pengguna tidak harus mengisinya sebelum melihat revision. Gunakan Review configuration/Compare untuk melihat konfigurasi tersanitasi, atau Dry-run untuk pengujian sintetis tanpa delivery. Preview raw tetap memerlukan permission dan audit.
+Sesudah Save pada channel existing, klik **Review and publish draft** pada notifikasi. Alternatif: **Channels → ⋯ → Revisions**. Pilih **Version** untuk melihat ringkasan satu revision. Draft terbaru dipilih otomatis; bila tidak ada draft, revision aktif ditampilkan. Badge membedakan Active, Draft, Previous version dan Archived.
 
-**Review configuration** membuka ringkasan tepat di bawah revision yang dipilih dan otomatis memindahkan scroll/fokus ke hasilnya. Ringkasan menampilkan source, transformation, destination, retry dan timeout; buka **Configuration details (sanitized)** bila membutuhkan JSON detail. Loading dan error muncul pada bagian review yang sama; klik Review configuration lagi untuk mencoba ulang. Endpoint/credential dan isi script tetap mengikuti sanitasi backend. Test connection hanya berjalan ketika tombolnya diklik, bukan saat membuka review.
+Ringkasan source, transformation, destination, retry dan timeout otomatis muncul di area berukuran tetap tanpa memindahkan scroll/fokus. Respons lama yang terlambat tidak boleh menggantikan versi yang baru dipilih. Loading dan error berada di area yang sama; gunakan **Retry review** bila gagal. Tombol utama hanya **Edit draft**, **Publish** atau **Rollback** sesuai versi dan permission, serta **Done**.
+
+Buka **Advanced options** untuk catatan opsional, **Configuration details (sanitized)**, **Compare versions**, **Test with synthetic data** dan **Destination connection tests**. Preview raw tetap memerlukan permission dan audit. Endpoint/credential dan script mengikuti sanitasi backend. Memilih versi hanya mengambil konfigurasi tersanitasi; pengujian script atau koneksi berjalan setelah tombol test diklik.
 
 Jika ada pending draft, tombol **Review draft N** juga tersedia langsung di baris channel. Edit channel membuka konfigurasi aktif, sehingga UI meminta konfirmasi sebelum memulai edit yang nantinya akan menggantikan pending draft. Batalkan dan pilih Review draft untuk memeriksa perubahan yang sudah disimpan; edit draft di panel tetap mempertahankan script/credential server dan menyediakan subset field operasional yang aman.
 

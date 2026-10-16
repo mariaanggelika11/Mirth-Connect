@@ -22,7 +22,19 @@ export function Modal({ isOpen, onClose, title, children, variant = 'dialog' }: 
         ref.current?.querySelectorAll<HTMLElement>(
           'summary,button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex="0"]',
         ) || [],
-      ).filter((el) => el.offsetParent !== null);
+      ).filter((el) => {
+        if (el.offsetParent === null) return false;
+        // Closed disclosures may still report an offsetParent for hidden descendants.
+        for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+          if (
+            parent instanceof HTMLDetailsElement &&
+            !parent.open &&
+            !parent.querySelector(':scope > summary')?.contains(el)
+          )
+            return false;
+        }
+        return true;
+      });
     focusable()[0]?.focus();
     const keydown = (e: KeyboardEvent) => {
       const dialogs = document.querySelectorAll('[role="dialog"]');

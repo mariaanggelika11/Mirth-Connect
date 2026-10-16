@@ -1,5 +1,12 @@
 # Changelog
 
+## Simplify the Revisions panel — 2026-10-17
+
+- Replace repeated revision cards and actions with one Version selector and a stable summary pane. Select the latest draft or active revision automatically, show its status, and expose only the relevant Edit draft, Publish or Rollback action.
+- Remove automatic scroll/focus movement; ignore stale responses when switching versions quickly. Keep inline loading, errors and retry. Move comparison, sanitized JSON, optional notes and explicit synthetic/connection tests into Advanced options. Preserve permissions, confirmation, audited raw access and backend lifecycle behavior.
+- Improve revision error contrast. Browser verification includes long history, stable layout/focus, rapid selection, error recovery, mobile overflow, accessibility and existing draft/publish/rollback workflows. No backend, migration or database changes.
+- Fix dialog keyboard focus to skip controls inside closed disclosures. Final verification: `npm run test:e2e` passes all 64 synthetic browser tests; workspace typecheck, lint, format, client production build and targeted source secret scan pass. Earlier browser failures exposed contrast, scrollable-region keyboard access and hidden-disclosure focus issues; these were corrected and rerun. Backend unit/PostgreSQL tests and deployed-server verification were not rerun for this frontend change.
+
 ## Make configuration review immediately visible — 2026-10-17
 
 - Render Review configuration directly inside the selected revision instead of appending its JSON below the entire revision list. Move keyboard focus and scroll to the review heading after loading/error/success so long history no longer makes the action look unresponsive.

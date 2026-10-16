@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../services/api';
 import type { Channel, ChannelFormData } from '../../types';
 import { Modal } from '../../components/ui/Modal';
@@ -40,7 +40,8 @@ export function RevisionPanel({
   } | null>(null);
   const [testOpen, setTestOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const reviewRef = useRef<HTMLElement>(null);
+  const reviewRequest = useRef(0);
+  const [currentRevision, setCurrentRevision] = useState<number | null>(null);
   const readOnly = channel.status === 'ARCHIVED' || !can('channel:write');
   const [activeRevision, setActiveRevision] = useState(channel.activeRevision || 0);
   const canViewRaw = can('message:raw');
@@ -65,11 +66,6 @@ export function RevisionPanel({
     } | null>(null),
     [selected, setSelected] = useState<number[]>([]);
   const dirty = !!editing && JSON.stringify(editing) !== editBaseline;
-  useEffect(() => {
-    if (!reviewing) return;
-    reviewRef.current?.focus({ preventScroll: true });
-    reviewRef.current?.scrollIntoView({ block: 'start', behavior: 'auto' });
-  }, [reviewing]);
   useEffect(() => {
     setRawPreview(false);
     setDryRunResult(null);
@@ -111,34 +107,56 @@ export function RevisionPanel({
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [channel.id]);
-  async function view(revision: number) {
-    setBusy(true);
-    setError('');
-    setPreview('');
-    setReviewing({ revision, destinations: [], configuration: null, loading: true, error: '' });
-    try {
-      const { data } = await api.get(`/channel/${channel.id}/revisions/${revision}`);
-      if (!data.data || typeof data.data !== 'object')
-        throw new Error('Configuration could not be loaded. Try reviewing this revision again.');
-      setReviewing({
-        revision,
-        destinations: data.data.destinations || [],
-        configuration: data.data,
-        loading: false,
-        error: '',
-      });
-    } catch (e) {
-      setReviewing({
-        revision,
-        destinations: [],
-        configuration: null,
-        loading: false,
-        error: e instanceof Error ? e.message : 'Unable to load revision. Try again.',
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
+  const view = useCallback(
+    async (revision: number) => {
+      const request = ++reviewRequest.current;
+      setError('');
+      setPreview('');
+      setReviewing({ revision, destinations: [], configuration: null, loading: true, error: '' });
+      try {
+        const { data } = await api.get(`/channel/${channel.id}/revisions/${revision}`);
+        if (request !== reviewRequest.current) return;
+        if (!data.data || typeof data.data !== 'object')
+          throw new Error('Configuration could not be loaded. Try reviewing this revision again.');
+        setReviewing({
+          revision,
+          destinations: data.data.destinations || [],
+          configuration: data.data,
+          loading: false,
+          error: '',
+        });
+      } catch (e) {
+        if (request !== reviewRequest.current) return;
+        setReviewing({
+          revision,
+          destinations: [],
+          configuration: null,
+          loading: false,
+          error: e instanceof Error ? e.message : 'Unable to load revision. Try again.',
+        });
+      }
+    },
+    [channel.id],
+  );
+  useEffect(() => {
+    if (!rows.length || rows.some((row) => row.revision === currentRevision)) return;
+    setCurrentRevision(
+      (
+        rows.find((row) => row.state === 'DRAFT') ||
+        rows.find((row) => row.revision === activeRevision) ||
+        rows[0]
+      ).revision,
+    );
+  }, [rows, currentRevision, activeRevision]);
+  useEffect(() => {
+    setDryRunResult(null);
+    setTestResult('');
+    setRawPreview(false);
+    if (currentRevision !== null) void view(currentRevision);
+    return () => {
+      reviewRequest.current++;
+    };
+  }, [currentRevision, view]);
   async function edit(revision: number) {
     setError('');
     try {
@@ -169,7 +187,7 @@ export function RevisionPanel({
     setError('');
     try {
       const { revision, checksum, ...patch } = editing;
-      await api.patch(`/channel/${channel.id}/revisions/${revision}`, {
+      const { data } = await api.patch(`/channel/${channel.id}/revisions/${revision}`, {
         expectedChecksum: checksum,
         changeSummary: summary.trim() || 'Update channel draft',
         patch,
@@ -179,6 +197,7 @@ export function RevisionPanel({
       setSelected([]);
       setPreview('');
       await reload();
+      setCurrentRevision(data.revision);
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to save draft');
@@ -242,7 +261,6 @@ export function RevisionPanel({
       setPreview(
         JSON.stringify({ before: results[0].data.data, after: results[1].data.data }, null, 2),
       );
-      setReviewing(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to compare revisions');
     }
@@ -269,6 +287,23 @@ export function RevisionPanel({
       setBusy(false);
     }
   }
+  const row = rows.find((item) => item.revision === currentRevision);
+  const review = reviewing?.revision === currentRevision ? reviewing : null;
+  const ready = !!review?.configuration && !review.loading && !review.error;
+  const editable = !readOnly && row?.state === 'DRAFT';
+  const activatable =
+    !readOnly &&
+    !!row &&
+    ['DRAFT', 'PUBLISHED'].includes(row.state) &&
+    row.revision !== activeRevision;
+  const stateLabel =
+    row?.revision === activeRevision
+      ? 'Active'
+      : row?.state === 'DRAFT'
+        ? 'Draft'
+        : row?.state === 'PUBLISHED'
+          ? 'Previous version'
+          : 'Archived';
   return (
     <Modal isOpen onClose={requestClose} title={`Revisions · ${channel.name}`}>
       <ConfirmationModal
@@ -298,323 +333,391 @@ export function RevisionPanel({
           if (action === 'CLOSE') onClose();
         }}
       />
-      <div className="form-body">
-        <p>Active revision: {activeRevision}. This is the configuration used for new messages.</p>
-        <p className="muted">
-          Draft → Review → Publish. Rollback restores an older published configuration as a new
-          revision; it never removes history.
-        </p>
+      <div className="form-body revision-panel">
+        <div className="revision-toolbar">
+          <span className="muted">Active revision: {activeRevision}.</span>
+          <Button
+            variant="secondary"
+            disabled={busy || dirty || loading}
+            onClick={() => {
+              void reload()
+                .then(() => setError(''))
+                .catch((e) =>
+                  setError(e instanceof Error ? e.message : 'Unable to reload revisions'),
+                );
+            }}
+          >
+            Refresh revisions
+          </Button>
+        </div>
         {error && (
           <p role="alert" className="alert error">
             {error}
           </p>
         )}
-        <Button
-          variant="secondary"
-          disabled={busy || dirty || loading}
-          onClick={() => {
-            void reload()
-              .then(() => setError(''))
-              .catch((e) =>
-                setError(e instanceof Error ? e.message : 'Unable to reload revisions'),
-              );
-          }}
-        >
-          Refresh revisions
-        </Button>
-        <details>
-          <summary>Optional change note</summary>
-          <label className="field">
-            <span>Publish / rollback summary (optional)</span>
-            <input maxLength={500} value={summary} onChange={(e) => setSummary(e.target.value)} />
-          </label>
-        </details>
-        {editing && (
-          <section className="form-section" aria-label={`Edit draft revision ${editing.revision}`}>
-            <h3>Edit draft revision {editing.revision}</h3>
-            <p>
-              Saving creates a successor draft and preserves credentials and scripts on the server.
-              The active configuration is unchanged.
-            </p>
-            <label className="field">
-              <span>Draft channel name</span>
-              <input
-                maxLength={150}
-                value={editing.name}
-                onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>Draft duplicate message protection</span>
-              <select
-                value={editing.idempotencyMode}
-                onChange={(e) =>
-                  setEditing({
-                    ...editing,
-                    idempotencyMode: e.target.value as DraftEdit['idempotencyMode'],
-                  })
-                }
-              >
-                {['OPTIONAL', 'REQUIRED', 'DISABLED'].map((mode) => (
-                  <option key={mode}>{mode}</option>
-                ))}
-              </select>
-            </label>
-            {editing.destinations.map((d) => (
-              <div key={d.index} className="form-section">
-                <label className="field">
-                  <span>Draft destination {d.index + 1} name</span>
-                  <input
-                    maxLength={150}
-                    value={d.name}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        destinations: editing.destinations.map((v) =>
-                          v.index === d.index ? { ...v, name: e.target.value } : v,
-                        ),
-                      })
-                    }
-                  />
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={d.isEnabled}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        destinations: editing.destinations.map((v) =>
-                          v.index === d.index ? { ...v, isEnabled: e.target.checked } : v,
-                        ),
-                      })
-                    }
-                  />{' '}
-                  Enabled destination {d.index + 1}
-                </label>
-                <label className="field">
-                  <span>Draft destination {d.index + 1} timeout (seconds)</span>
-                  <input
-                    type="number"
-                    min={0.1}
-                    max={120}
-                    step={0.1}
-                    value={d.timeoutMs / 1000}
-                    onChange={(e) =>
-                      setEditing({
-                        ...editing,
-                        destinations: editing.destinations.map((v) =>
-                          v.index === d.index
-                            ? { ...v, timeoutMs: Math.round(Number(e.target.value) * 1000) }
-                            : v,
-                        ),
-                      })
-                    }
-                  />
-                </label>
-              </div>
-            ))}
-            <Button disabled={busy || !editing.name.trim()} onClick={() => void saveDraft()}>
-              Save successor draft
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={busy}
-              onClick={() => (dirty ? setDiscard('CANCEL') : setEditing(null))}
-            >
-              Cancel draft edit
-            </Button>
-          </section>
-        )}
-        <details open={testOpen} onToggle={(event) => setTestOpen(event.currentTarget.open)}>
-          <summary>Test revision with synthetic data</summary>
-          <label className="field">
-            <span>Synthetic revision test payload</span>
-            <textarea
-              rows={4}
-              disabled={busy}
-              value={synthetic}
-              onChange={(e) => setSynthetic(e.target.value)}
-            />
-          </label>
-          <p>
-            Use synthetic data only. Revision dry-run performs no network delivery and masks its
-            payload preview.
-          </p>
-          {can('message:raw') && (
-            <label className="check-field">
-              <input
-                type="checkbox"
-                checked={rawPreview}
-                onChange={(e) => {
-                  setRawPreview(e.target.checked);
-                  setDryRunResult(null);
-                }}
-              />
-              View raw synthetic preview (audited)
-            </label>
-          )}
-        </details>
-        {loading && <p role="status">Loading revisions…</p>}
-        {!loading && !rows.length && <p role="status">No revisions available.</p>}
-        {rows.map((row) => (
-          <section key={row.revision} className="form-section">
-            <strong>
-              Revision {row.revision} · {row.state}
-            </strong>
-            {row.revision === activeRevision && <span className="status-badge">Active</span>}
-            {row.created_at && (
-              <small className="table-subtext">
-                Created {new Date(row.created_at).toLocaleString('en-US')}
-              </small>
+        <label className="field">
+          <span>Version</span>
+          <select
+            aria-label="Revision version"
+            value={currentRevision ?? ''}
+            disabled={busy || !!editing || loading || !rows.length}
+            onChange={(event) => setCurrentRevision(Number(event.target.value))}
+          >
+            {!rows.length && (
+              <option value="">{loading ? 'Loading revisions…' : 'No revisions available'}</option>
             )}
-            <p>{row.change_summary}</p>
-            <label>
-              <input
-                type="checkbox"
-                checked={selected.includes(row.revision)}
-                onChange={(e) =>
-                  setSelected((v) =>
-                    e.target.checked
-                      ? [...v.slice(-1), row.revision]
-                      : v.filter((r) => r !== row.revision),
-                  )
-                }
-              />{' '}
-              Compare revision {row.revision}
-            </label>
-            <div className="heading-actions">
+            {rows.map((item) => (
+              <option key={item.revision} value={item.revision}>
+                Revision {item.revision} ·{' '}
+                {item.revision === activeRevision
+                  ? 'Active'
+                  : item.state === 'DRAFT'
+                    ? 'Draft'
+                    : item.state === 'PUBLISHED'
+                      ? 'Published'
+                      : 'Archived'}
+              </option>
+            ))}
+          </select>
+        </label>
+        {row && (
+          <div className="revision-caption">
+            <span
+              className={`revision-label ${stateLabel === 'Draft' ? 'draft' : stateLabel === 'Active' ? 'active' : ''}`}
+            >
+              {stateLabel}
+            </span>
+            <span>{row.change_summary || `Revision ${row.revision}`}</span>
+          </div>
+        )}
+        <section
+          className="revision-content"
+          tabIndex={0}
+          aria-label={
+            editing ? 'Draft editor' : `Configuration review · revision ${currentRevision ?? ''}`
+          }
+          aria-busy={!editing && !!row && (!review || review.loading)}
+        >
+          {editing && (
+            <section
+              className="form-section"
+              aria-label={`Edit draft revision ${editing.revision}`}
+            >
+              <h3>Edit draft revision {editing.revision}</h3>
+              <p>
+                Saving creates a successor draft and preserves credentials and scripts on the
+                server. The active configuration is unchanged.
+              </p>
+              <label className="field">
+                <span>Draft channel name</span>
+                <input
+                  maxLength={150}
+                  value={editing.name}
+                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span>Draft duplicate message protection</span>
+                <select
+                  value={editing.idempotencyMode}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      idempotencyMode: e.target.value as DraftEdit['idempotencyMode'],
+                    })
+                  }
+                >
+                  {['OPTIONAL', 'REQUIRED', 'DISABLED'].map((mode) => (
+                    <option key={mode}>{mode}</option>
+                  ))}
+                </select>
+              </label>
+              {editing.destinations.map((d) => (
+                <div key={d.index} className="form-section">
+                  <label className="field">
+                    <span>Draft destination {d.index + 1} name</span>
+                    <input
+                      maxLength={150}
+                      value={d.name}
+                      onChange={(e) =>
+                        setEditing({
+                          ...editing,
+                          destinations: editing.destinations.map((v) =>
+                            v.index === d.index ? { ...v, name: e.target.value } : v,
+                          ),
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={d.isEnabled}
+                      onChange={(e) =>
+                        setEditing({
+                          ...editing,
+                          destinations: editing.destinations.map((v) =>
+                            v.index === d.index ? { ...v, isEnabled: e.target.checked } : v,
+                          ),
+                        })
+                      }
+                    />{' '}
+                    Enabled destination {d.index + 1}
+                  </label>
+                  <label className="field">
+                    <span>Draft destination {d.index + 1} timeout (seconds)</span>
+                    <input
+                      type="number"
+                      min={0.1}
+                      max={120}
+                      step={0.1}
+                      value={d.timeoutMs / 1000}
+                      onChange={(e) =>
+                        setEditing({
+                          ...editing,
+                          destinations: editing.destinations.map((v) =>
+                            v.index === d.index
+                              ? { ...v, timeoutMs: Math.round(Number(e.target.value) * 1000) }
+                              : v,
+                          ),
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              ))}
+              <Button disabled={busy || !editing.name.trim()} onClick={() => void saveDraft()}>
+                Save successor draft
+              </Button>
               <Button
                 variant="secondary"
                 disabled={busy}
-                aria-expanded={reviewing?.revision === row.revision}
-                onClick={() => void view(row.revision)}
+                onClick={() => (dirty ? setDiscard('CANCEL') : setEditing(null))}
               >
-                Review configuration
+                Cancel draft edit
               </Button>
-              {row.state === 'DRAFT' && !readOnly && (
-                <Button
-                  variant="secondary"
-                  disabled={busy || !!editing}
-                  onClick={() => void edit(row.revision)}
-                >
-                  Edit draft {row.revision}
-                </Button>
+            </section>
+          )}
+          {!editing && (
+            <>
+              {(loading || (row && (!review || review.loading))) && (
+                <p role="status">Loading configuration…</p>
               )}
-              {['DRAFT', 'PUBLISHED'].includes(row.state) && !readOnly && (
-                <Button
-                  variant="secondary"
-                  disabled={busy || !synthetic.trim()}
-                  onClick={() => void testRevision(row.revision)}
-                >
-                  Dry-run revision {row.revision}
-                </Button>
-              )}
-              {!readOnly &&
-                ['DRAFT', 'PUBLISHED'].includes(row.state) &&
-                row.revision !== activeRevision && (
-                  <Button
-                    disabled={busy || !!editing}
-                    onClick={() =>
-                      setActivation({
-                        revision: row.revision,
-                        action: row.state === 'DRAFT' ? 'publish' : 'rollback',
-                      })
-                    }
-                  >
-                    {row.state === 'DRAFT' ? 'Publish' : 'Rollback'}
-                  </Button>
-                )}
-            </div>
-            {reviewing?.revision === row.revision && (
-              <section
-                ref={reviewRef}
-                tabIndex={-1}
-                className="form-section"
-                aria-label={`Configuration review · revision ${row.revision}`}
-              >
-                <h3>Configuration · revision {row.revision}</h3>
-                {reviewing.loading && <p role="status">Loading configuration…</p>}
-                {reviewing.error && (
+              {!loading && !row && <p role="status">No revisions available.</p>}
+              {review?.error && (
+                <div className="form-section">
                   <p role="alert" className="alert error">
-                    {reviewing.error}
+                    {review.error}
                   </p>
-                )}
-                {reviewing.configuration && (
-                  <>
-                    <p>
-                      <strong>{reviewing.configuration.name || channel.name}</strong>
-                    </p>
-                    <p>
-                      Source: {reviewing.configuration.source?.type || 'Not configured'} /{' '}
-                      {reviewing.configuration.source?.inboundDataType || 'Not specified'}
-                    </p>
-                    <p>
-                      Transformation:{' '}
-                      {reviewing.configuration.processingScript ? 'Configured' : 'Pass-through'}
-                    </p>
-                    {!reviewing.destinations.length && <p>No destinations configured.</p>}
-                    {(reviewing.configuration.destinations || []).map((destination, index) => (
-                      <div key={index} className="form-section">
-                        <strong>{destination.name}</strong>
-                        <p>
-                          {destination.type} / {destination.outboundDataType || 'Not specified'}
-                        </p>
-                        <code className="code-box break-anywhere">{destination.endpoint}</code>
-                        <p>
-                          Retry:{' '}
-                          {destination.retryEnabled
-                            ? `Enabled · up to ${destination.maxRetries ?? 3} retries`
-                            : 'Disabled'}{' '}
-                          · Timeout: {(destination.timeoutMs ?? 10000) / 1000} seconds
-                        </p>
-                      </div>
-                    ))}
-                    <details>
-                      <summary>Configuration details (sanitized)</summary>
-                      <pre className="code-box">
-                        {JSON.stringify(reviewing.configuration, null, 2)}
-                      </pre>
-                    </details>
-                    {!readOnly &&
-                      ['DRAFT', 'PUBLISHED'].includes(row.state) &&
-                      reviewing.destinations.length > 0 && (
-                        <div className="form-section">
-                          <p>
-                            Connection tests open a TCP/TLS connection and send no patient data.
-                          </p>
-                          {reviewing.destinations.map((destination, index) => (
-                            <Button
-                              key={index}
-                              variant="secondary"
-                              disabled={busy}
-                              onClick={() => void probe(row.revision, index)}
-                            >
-                              Test connection · {destination.name}
-                            </Button>
-                          ))}
-                        </div>
-                      )}
-                  </>
-                )}
-              </section>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      if (currentRevision) void view(currentRevision);
+                    }}
+                  >
+                    Retry review
+                  </Button>
+                </div>
+              )}
+              {ready && review?.configuration && (
+                <div className="revision-summary">
+                  <h3>{review.configuration.name || channel.name}</h3>
+                  <div className="revision-flow">
+                    <div>
+                      <small>Source</small>
+                      <strong>
+                        {review.configuration.source?.type || 'Not configured'} /{' '}
+                        {review.configuration.source?.inboundDataType || 'Not specified'}
+                      </strong>
+                    </div>
+                    <span aria-hidden="true">→</span>
+                    <div>
+                      <small>Destinations</small>
+                      <strong>{review.destinations.length || 'Receive only'}</strong>
+                    </div>
+                  </div>
+                  <p className="muted">
+                    {review.configuration.processingScript
+                      ? 'Transformation configured'
+                      : 'Messages pass through without a source transformation.'}
+                  </p>
+                  {(review.configuration.destinations || []).map((destination, index) => (
+                    <div key={index} className="revision-destination">
+                      <strong>{destination.name}</strong>
+                      <span>
+                        {destination.type} / {destination.outboundDataType || 'Not specified'}
+                      </span>
+                      <code className="break-anywhere">{destination.endpoint}</code>
+                      <small>
+                        Retry:{' '}
+                        {destination.retryEnabled ? `up to ${destination.maxRetries ?? 3}` : 'off'}{' '}
+                        · Timeout: {(destination.timeoutMs ?? 10000) / 1000} seconds
+                      </small>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </section>
+        <div className="revision-actions">
+          {editable && (
+            <Button
+              variant="secondary"
+              disabled={busy || !!editing || !ready}
+              onClick={() => {
+                if (row) void edit(row.revision);
+              }}
+            >
+              Edit draft {row?.revision}
+            </Button>
+          )}
+          {activatable && (
+            <Button
+              disabled={busy || !!editing || !ready}
+              onClick={() => {
+                if (row)
+                  setActivation({
+                    revision: row.revision,
+                    action: row.state === 'DRAFT' ? 'publish' : 'rollback',
+                  });
+              }}
+            >
+              {row?.state === 'DRAFT' ? 'Publish' : 'Rollback'}
+            </Button>
+          )}
+          <Button variant="secondary" disabled={busy} onClick={requestClose}>
+            Done
+          </Button>
+        </div>
+        <details className="revision-advanced">
+          <summary>Advanced options</summary>
+          <div className="form-section">
+            <label className="field">
+              <span>Publish / rollback summary (optional)</span>
+              <input
+                maxLength={500}
+                value={summary}
+                disabled={busy}
+                onChange={(event) => setSummary(event.target.value)}
+              />
+            </label>
+            {row?.created_at && (
+              <p className="muted">Created {new Date(row.created_at).toLocaleString('en-US')}</p>
             )}
-          </section>
-        ))}
-        <Button variant="secondary" disabled={selected.length !== 2} onClick={() => void compare()}>
-          Compare selected revisions
-        </Button>
-        {preview && <pre className="code-box">{preview}</pre>}
-        {dryRunResult && (
-          <div aria-label="Revision dry-run result">
-            <DryRunPreview result={dryRunResult} />
+            {ready && (
+              <details>
+                <summary>Configuration details (sanitized)</summary>
+                <pre className="code-box" tabIndex={0} aria-label="Sanitized configuration">
+                  {JSON.stringify(review?.configuration, null, 2)}
+                </pre>
+              </details>
+            )}
+            {!readOnly && row && ['DRAFT', 'PUBLISHED'].includes(row.state) && (
+              <details open={testOpen} onToggle={(event) => setTestOpen(event.currentTarget.open)}>
+                <summary>Test with synthetic data</summary>
+                <div className="form-section">
+                  <label className="field">
+                    <span>Synthetic revision test payload</span>
+                    <textarea
+                      rows={4}
+                      value={synthetic}
+                      disabled={busy}
+                      onChange={(event) => setSynthetic(event.target.value)}
+                    />
+                  </label>
+                  <p className="muted">Synthetic data only. Testing does not send messages.</p>
+                  {canViewRaw && (
+                    <label className="check-field">
+                      <input
+                        type="checkbox"
+                        checked={rawPreview}
+                        onChange={(event) => {
+                          setRawPreview(event.target.checked);
+                          setDryRunResult(null);
+                        }}
+                      />
+                      View raw synthetic preview (audited)
+                    </label>
+                  )}
+                  <Button
+                    variant="secondary"
+                    disabled={busy || !!editing || !ready || !synthetic.trim()}
+                    onClick={() => void testRevision(row.revision)}
+                  >
+                    Dry-run revision {row.revision}
+                  </Button>
+                  {dryRunResult && (
+                    <div aria-label="Revision dry-run result">
+                      <DryRunPreview result={dryRunResult} />
+                    </div>
+                  )}
+                </div>
+              </details>
+            )}
+            {!readOnly &&
+              ready &&
+              row &&
+              ['DRAFT', 'PUBLISHED'].includes(row.state) &&
+              review?.destinations.length > 0 && (
+                <details>
+                  <summary>Destination connection tests</summary>
+                  <div className="form-section">
+                    <p className="muted">Opens a TCP/TLS connection. No patient data is sent.</p>
+                    {review.destinations.map((destination, index) => (
+                      <Button
+                        key={index}
+                        variant="secondary"
+                        disabled={busy || !!editing}
+                        onClick={() => void probe(row.revision, index)}
+                      >
+                        Test connection · {destination.name}
+                      </Button>
+                    ))}
+                    {testResult && (
+                      <pre className="code-box" role="status" aria-label="Revision dry-run result">
+                        {testResult}
+                      </pre>
+                    )}
+                  </div>
+                </details>
+              )}
+            <details>
+              <summary>Compare versions</summary>
+              <div className="revision-compare-list">
+                {rows.map((item) => (
+                  <label className="check-field" key={item.revision}>
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(item.revision)}
+                      disabled={busy}
+                      onChange={(event) =>
+                        setSelected((values) =>
+                          event.target.checked
+                            ? [...values.slice(-1), item.revision]
+                            : values.filter((value) => value !== item.revision),
+                        )
+                      }
+                    />
+                    Compare revision {item.revision}
+                  </label>
+                ))}
+              </div>
+              <Button
+                variant="secondary"
+                disabled={busy || selected.length !== 2}
+                onClick={() => void compare()}
+              >
+                Compare selected revisions
+              </Button>
+              {preview && (
+                <pre className="code-box" tabIndex={0} aria-label="Revision comparison">
+                  {preview}
+                </pre>
+              )}
+            </details>
           </div>
-        )}
-        {testResult && (
-          <pre className="code-box" role="status" aria-label="Revision dry-run result">
-            {testResult}
-          </pre>
-        )}
+        </details>
       </div>
     </Modal>
   );

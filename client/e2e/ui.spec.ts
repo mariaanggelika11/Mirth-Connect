@@ -52,15 +52,18 @@ test('revision review, compare and publish are permission-aware and functional',
   await page.getByLabel('More actions for Test Channel').click();
   await page.getByRole('button', { name: 'Revisions', exact: true }).click();
   await expect(page.getByText('Active revision: 1.', { exact: false })).toBeVisible();
-  await expect(page.getByText('Revision 2 · DRAFT', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Revision version', { exact: true })).toHaveValue('2');
+  await expect(page.getByRole('heading', { name: 'After synthetic', exact: true })).toBeVisible();
   if (process.env.UI_REVISION_SCREENSHOT)
     await page.screenshot({ path: process.env.UI_REVISION_SCREENSHOT, fullPage: true });
+  await revisionAdvanced(page);
+  await page.getByText('Compare versions', { exact: true }).click();
   await page.getByLabel('Compare revision 2').check();
   await page.getByLabel('Compare revision 1').check();
   await page.getByRole('button', { name: 'Compare selected revisions' }).click();
   await expect(page.locator('pre').filter({ hasText: 'Before synthetic' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
-  await page.getByText('Optional change note', { exact: true }).click();
+  await revisionAdvanced(page);
   await page.getByLabel('Publish / rollback summary').fill('Synthetic reviewed activation');
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Publish draft', exact: true })).toBeVisible();
@@ -97,6 +100,9 @@ test('rollback requires confirmation, hides active rollback and preserves the pu
       },
     }),
   );
+  await page.route(/\/api\/channel\/1\/revisions\/(?:1|3)$/, (r) =>
+    r.fulfill({ json: { data: { name: 'Synthetic published configuration', destinations: [] } } }),
+  );
   let rollbacks = 0;
   await page.route('**/api/channel/1/revisions/1/rollback', (r) => {
     rollbacks++;
@@ -106,7 +112,9 @@ test('rollback requires confirmation, hides active rollback and preserves the pu
   await page.getByLabel('More actions for Test Channel').click();
   await page.getByRole('button', { name: 'Revisions', exact: true }).click();
   await expect(page.getByLabel('Synthetic revision test payload')).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Rollback', exact: true })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Rollback', exact: true })).toHaveCount(0);
+  await page.getByLabel('Revision version', { exact: true }).selectOption('1');
+  await expect(page.getByRole('button', { name: 'Rollback', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Rollback', exact: true }).click();
   const confirmation = page.getByRole('dialog', { name: 'Rollback channel', exact: true });
   await expect(confirmation).toContainText('creates a new published revision');
@@ -139,7 +147,7 @@ test('unused duplicate deletion confirms once and removes the row', async ({ pag
   await expect(page.getByText('No channels found', { exact: true })).toBeVisible();
   expect(deleted).toBe(true);
 });
-test('configuration review appears inline, receives focus and stays visible with a long revision history', async ({
+test('version selector keeps review visible and layout stable with a long revision history', async ({
   page,
 }) => {
   await session(page, 'DEVELOPER');
@@ -183,28 +191,93 @@ test('configuration review appears inline, receives focus and stays visible with
   });
   await page.getByLabel('More actions for Test Channel').click();
   await page.getByRole('button', { name: 'Revisions', exact: true }).click();
-  await page.getByRole('button', { name: 'Review configuration', exact: true }).first().click();
+  await expect(page.getByLabel('Revision version', { exact: true })).toBeEnabled();
+  await page.getByLabel('Revision version', { exact: true }).focus();
+  await page.getByLabel('Revision version', { exact: true }).selectOption('20');
   const review = page.getByRole('region', {
     name: 'Configuration review · revision 20',
     exact: true,
   });
+  let before: Awaited<ReturnType<typeof review.boundingBox>>;
   try {
     await expect(review.getByRole('status')).toHaveText('Loading configuration…');
+    before = await review.boundingBox();
   } finally {
     release?.();
   }
   await expect(review).toContainText('Reviewed synthetic configuration');
-  await expect(review).toContainText('Source: HTTP / JSON');
+  await expect(review).toContainText('HTTP / JSON');
   await expect(review).toContainText('REST / XML');
   await expect(review).toContainText('Timeout: 5 seconds');
-  await expect(review).toBeFocused();
-  const heading = review.getByRole('heading', { name: 'Configuration · revision 20', exact: true });
+  await expect(page.getByLabel('Revision version', { exact: true })).toHaveValue('20');
+  await expect(page.getByLabel('Revision version', { exact: true })).toBeFocused();
+  const after = await review.boundingBox();
+  expect(Math.abs(after!.height - before!.height)).toBeLessThan(1);
+  expect(Math.abs(after!.y - before!.y)).toBeLessThan(1);
+  const heading = review.getByRole('heading', {
+    name: 'Reviewed synthetic configuration',
+    exact: true,
+  });
   await expect(heading).toBeInViewport();
   await expect(review.locator('pre')).toBeHidden();
-  await review.getByText('Configuration details (sanitized)', { exact: true }).click();
-  await expect(review.locator('pre')).toContainText('[CONFIGURED]');
+  await revisionAdvanced(page);
+  await page.getByText('Configuration details (sanitized)', { exact: true }).click();
+  await expect(page.locator('pre')).toContainText('[CONFIGURED]');
   const axe = await new AxeBuilder({ page }).analyze();
   expect(axe.violations).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('rapid version changes ignore an older response without moving focus', async ({ page }) => {
+  await session(page, 'DEVELOPER');
+  await page.route('**/api/channel/1/revisions', (r) =>
+    r.fulfill({
+      json: {
+        data: [
+          { revision: 2, state: 'DRAFT', change_summary: 'Pending version' },
+          { revision: 1, state: 'PUBLISHED', change_summary: 'Active version' },
+        ],
+      },
+    }),
+  );
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let oldRequest = false;
+  const oldResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/channel/1/revisions/2'),
+  );
+  await page.route('**/api/channel/1/revisions/2', async (r) => {
+    oldRequest = true;
+    await gate;
+    return r.fulfill({ json: { data: { name: 'Stale draft response', destinations: [] } } });
+  });
+  await page.route('**/api/channel/1/revisions/1', (r) =>
+    r.fulfill({ json: { data: { name: 'Selected active configuration', destinations: [] } } }),
+  );
+  await page.getByLabel('More actions for Test Channel').click();
+  await page.getByRole('button', { name: 'Revisions', exact: true }).click();
+  try {
+    await expect.poll(() => oldRequest).toBe(true);
+    await page.getByLabel('Revision version', { exact: true }).focus();
+    await page.getByLabel('Revision version', { exact: true }).selectOption('1');
+    await expect(
+      page.getByRole('heading', { name: 'Selected active configuration', exact: true }),
+    ).toBeVisible();
+  } finally {
+    release?.();
+  }
+  await oldResponse;
+  await expect(
+    page.getByRole('heading', { name: 'Selected active configuration', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Stale draft response', exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByLabel('Revision version', { exact: true })).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Publish', exact: true })).toHaveCount(0);
 });
 
 test('failed configuration review shows an inline error and retry replaces it with the correct revision', async ({
@@ -227,14 +300,12 @@ test('failed configuration review shows an inline error and retry replaces it wi
   });
   await page.getByLabel('More actions for Test Channel').click();
   await page.getByRole('button', { name: 'Revisions', exact: true }).click();
-  await page.getByRole('button', { name: 'Review configuration', exact: true }).click();
   const review = page.getByRole('region', {
     name: 'Configuration review · revision 2',
     exact: true,
   });
   await expect(review.getByRole('alert')).toContainText('Permission denied');
-  await expect(review).toBeFocused();
-  await page.getByRole('button', { name: 'Review configuration', exact: true }).click();
+  await page.getByRole('button', { name: 'Retry review', exact: true }).click();
   await expect(review).toContainText('Recovered synthetic configuration');
   await expect(review.getByRole('alert')).toHaveCount(0);
   expect(attempts).toBe(2);
@@ -303,6 +374,11 @@ test('used channel offers archive and archived filter preserves read-only histor
   await expect(page.getByRole('button', { name: 'Edit channel', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'View messages', exact: true })).toBeVisible();
 });
+async function revisionAdvanced(page: Page) {
+  const advanced = page.locator('details.revision-advanced');
+  if ((await advanced.getAttribute('open')) === null)
+    await advanced.locator(':scope > summary').click();
+}
 async function session(page: Page, role: string, view: 'overview' | 'channels' = 'channels') {
   await page.route('**/health', (r) => r.fulfill({ json: { status: 'ok' } }));
   await page.route('**/ready', (r) => r.fulfill({ json: { status: 'ready' } }));
@@ -760,7 +836,7 @@ test('draft iteration, stored dry-run and handshake probe use functional APIs wi
   await page.getByRole('button', { name: 'Edit draft 2' }).click();
   await page.getByLabel('Draft channel name').fill('Edited synthetic draft');
   await page.getByLabel('Draft destination 1 timeout').fill('2.345');
-  await page.getByText('Optional change note', { exact: true }).click();
+  await revisionAdvanced(page);
   await page.getByLabel('Publish / rollback summary').fill('Synthetic reviewed edit');
   await page.getByRole('button', { name: 'Save successor draft' }).click();
   await expect(page.getByRole('button', { name: 'Edit draft 3' })).toBeVisible();
@@ -775,9 +851,11 @@ test('draft iteration, stored dry-run and handshake probe use functional APIs wi
   });
   expect(JSON.stringify(patchBody)).not.toContain('processingScript');
   expect(JSON.stringify(patchBody)).not.toContain('endpoint');
+  await revisionAdvanced(page);
+  await page.getByText('Test with synthetic data', { exact: true }).click();
   await page.getByRole('button', { name: 'Dry-run revision 3' }).click();
   await expect(page.getByLabel('Revision dry-run result')).toContainText('processed');
-  await page.getByRole('button', { name: 'Review configuration' }).click();
+  await page.getByText('Destination connection tests', { exact: true }).click();
   await page.getByRole('button', { name: 'Test connection · Synthetic sender' }).click();
   await expect(page.getByLabel('Revision dry-run result')).toContainText('reachable');
   expect(probeCalls).toBe(1);
@@ -802,7 +880,7 @@ test('draft conflict keeps the editor open and exposes the server error', async 
   await page.getByLabel('More actions for Test Channel').click();
   await page.getByRole('button', { name: 'Revisions', exact: true }).click();
   await page.getByRole('button', { name: 'Edit draft 2' }).click();
-  await page.getByText('Optional change note', { exact: true }).click();
+  await revisionAdvanced(page);
   await page.getByLabel('Publish / rollback summary').fill('Synthetic conflicting edit');
   await page.getByRole('button', { name: 'Save successor draft' }).click();
   await expect(page.getByRole('alert')).toContainText('Draft changed');
@@ -845,7 +923,7 @@ test('WCAG accessibility scan and keyboard focus trap cover login and revision e
   expect(scan.violations).toEqual([]);
   await page.getByLabel('Close dialog').focus();
   await page.keyboard.press('Shift+Tab');
-  await expect(page.getByRole('button', { name: 'Compare selected revisions' })).not.toBeFocused();
+  await expect(page.locator('.revision-advanced > summary')).toBeFocused();
   expect(
     await page.evaluate(() =>
       document.querySelector('[role="dialog"]')?.contains(document.activeElement),
@@ -970,6 +1048,8 @@ test('stored TEXT revision dry-run preserves JSON-looking text without changing 
   });
   await page.getByLabel('More actions for Test Channel').click();
   await page.getByRole('button', { name: 'Revisions', exact: true }).click();
+  await revisionAdvanced(page);
+  await page.getByText('Test with synthetic data', { exact: true }).click();
   await page.getByRole('button', { name: 'Dry-run revision 2' }).click();
   await expect(page.getByLabel('Revision dry-run result')).toContainText(
     'Source processing · TEXT',

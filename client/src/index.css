@@ -2199,6 +2199,128 @@ select:disabled {
   padding: 24px;
   background: radial-gradient(ellipse at 50% 10%, #e7efff 0%, #f5f7fb 55%);
 }
+.revision-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.revision-panel .alert.error {
+  color: #a94343;
+}
+.revision-toolbar,
+.revision-caption,
+.revision-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.revision-toolbar {
+  justify-content: space-between;
+}
+.revision-caption {
+  font-size: 12px;
+  min-height: 28px;
+}
+.revision-caption > span:last-child {
+  overflow-wrap: anywhere;
+}
+.revision-label {
+  flex-shrink: 0;
+  border-radius: 20px;
+  padding: 4px 10px;
+  background: #edf0f5;
+  color: #45516a;
+  font-size: 11px;
+  font-weight: 600;
+}
+.revision-label.active {
+  background: #eaf7f0;
+  color: #216744;
+}
+.revision-label.draft {
+  background: #fff4df;
+  color: #805700;
+}
+.revision-content {
+  height: clamp(240px, 38dvh, 340px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+  border: 1px solid var(--border-main);
+  border-radius: 12px;
+}
+.revision-summary {
+  display: grid;
+  gap: 14px;
+}
+.revision-summary h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.revision-flow {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.revision-flow > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.revision-flow small,
+.revision-destination small {
+  color: var(--text-soft);
+}
+.revision-destination {
+  display: grid;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-main);
+  font-size: 12px;
+}
+.revision-destination code {
+  font-size: 11px;
+}
+.revision-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.revision-advanced {
+  padding-top: 8px;
+  border-top: 1px solid var(--border-main);
+}
+.revision-advanced > summary {
+  color: var(--text-soft);
+  font-size: 12px;
+  cursor: pointer;
+}
+.revision-advanced .code-box {
+  max-height: 260px;
+  overflow: auto;
+}
+.revision-compare-list {
+  max-height: 180px;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  padding: 12px 0;
+}
+@media (max-width: 560px) {
+  .revision-toolbar {
+    align-items: flex-start;
+  }
+  .revision-flow {
+    gap: 12px;
+    font-size: 12px;
+  }
+  .revision-actions > button {
+    flex: 1;
+  }
+  .revision-content {
+    padding: 12px;
+  }
+}
 .login-card {
   width: 100%;
   max-width: 420px;
