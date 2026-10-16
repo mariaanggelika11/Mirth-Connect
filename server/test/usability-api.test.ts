@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import net from 'node:net';
+import { randomBytes } from 'node:crypto';
 import type * as MessageProcessor from '../src/services/messageProcessor.services.js';
 const state = vi.hoisted(() => ({
   query: vi.fn(),
@@ -83,6 +84,8 @@ describe('Authoritative source URLs and legacy inbound compatibility', () => {
     PG_SSL: 'true',
     OUTBOUND_ALLOWED_HOSTS: 'receiver.example',
     HL7_ENABLED: 'false',
+    JWT_SECRET: randomBytes(32).toString('hex'),
+    CONFIG_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
   });
   it('uses localhost locally and explicit public HTTPS behind a production proxy', () => {
     expect(loadConfig(environment()).inbound).toMatchObject({

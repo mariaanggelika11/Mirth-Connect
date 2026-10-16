@@ -159,6 +159,25 @@ describe('Destination transports (real loopback)', () => {
     ).rejects.toThrow();
     expect(received).toEqual([]);
   });
+  it('does not follow redirects to a second destination', async () => {
+    let redirectedRequests = 0;
+    const target = await listen(
+      http.createServer((_req, res) => {
+        redirectedRequests++;
+        res.end('Unexpected delivery');
+      }),
+    );
+    const source = await listen(
+      http.createServer((_req, res) => {
+        res.writeHead(302, { Location: 'http://' + target });
+        res.end();
+      }),
+    );
+    await expect(sendRest('http://' + source, '{}', {})).rejects.toMatchObject({
+      code: 'HTTP_302',
+    });
+    expect(redirectedRequests).toBe(0);
+  });
   it('rejects unsupported URLs and nonallowlisted hosts', () => {
     expect(() => validateEndpoint('file:///etc/passwd', 'REST')).toThrow();
     expect(() => validateEndpoint('http://169.254.169.254', 'REST')).toThrow();

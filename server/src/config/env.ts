@@ -123,6 +123,17 @@ export function loadConfig(input: NodeJS.ProcessEnv) {
         result.error.issues.map((i) => i.path.join('.') + ': ' + i.message).join('; '),
     );
   const e = result.data;
+  if (e.NODE_ENV === 'production') {
+    // Reject obvious example/test keys; operators must still generate independent random secrets.
+    if (
+      /test[-_ ]?only|synthetic|placeholder|change[-_ ]?me|your[_-]|default[_-]?secret/i.test(
+        e.JWT_SECRET,
+      ) ||
+      new Set(e.JWT_SECRET).size < 8 ||
+      new Set(e.CONFIG_ENCRYPTION_KEY.toLowerCase().match(/../g)).size < 8
+    )
+      throw new Error('Production requires independently generated non-placeholder secrets');
+  }
   try {
     const ring = JSON.parse(e.CONFIG_ENCRYPTION_PREVIOUS_KEYS);
     if (

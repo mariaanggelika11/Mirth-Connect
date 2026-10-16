@@ -35,7 +35,28 @@ export function validateEndpoint(endpoint: string, type: string) {
   // Cloud instance metadata must never be a connector destination.
   if (['169.254.169.254', 'metadata.google.internal'].includes(url.hostname))
     throw new AppError(403, 'DESTINATION_HOST_DENIED', 'Destination hostname is not allowed');
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  if (
+    net.isIP(hostname) &&
+    (isUnsafeAddress(hostname) ||
+      (isPrivateAddress(hostname) && !config.transport.allowedHosts.includes(hostname)))
+  )
+    throw new AppError(403, 'DESTINATION_ADDRESS_DENIED', 'Destination address is not allowed');
   return url;
+}
+const privateAddresses = new net.BlockList();
+for (const [address, prefix] of [
+  ['10.0.0.0', 8],
+  ['127.0.0.0', 8],
+  ['172.16.0.0', 12],
+  ['192.168.0.0', 16],
+  ['100.64.0.0', 10],
+] as const)
+  privateAddresses.addSubnet(address, prefix, 'ipv4');
+privateAddresses.addAddress('::1', 'ipv6');
+privateAddresses.addSubnet('fc00::', 7, 'ipv6');
+function isPrivateAddress(address: string) {
+  return privateAddresses.check(address, net.isIP(address) === 6 ? 'ipv6' : 'ipv4');
 }
 export function isUnsafeAddress(address: string) {
   let ip = address.toLowerCase();
@@ -48,6 +69,7 @@ export function isUnsafeAddress(address: string) {
   return (
     /^169\.254\./.test(ip) ||
     /^0\./.test(ip) ||
+    /^(?:22[4-9]|23\d|24\d|25[0-5])\./.test(ip) ||
     /^fe[89ab][0-9a-f]:/i.test(ip) ||
     ip === '::' ||
     /^ff/i.test(ip)
@@ -68,7 +90,14 @@ async function resolveHost(hostname: string, timeout: number) {
             );
           }),
         ]);
-    if (!addresses.length || addresses.some((v) => isUnsafeAddress(v.address)))
+    if (
+      !addresses.length ||
+      addresses.some(
+        (v) =>
+          isUnsafeAddress(v.address) ||
+          (isPrivateAddress(v.address) && !config.transport.allowedHosts.includes(host)),
+      )
+    )
       throw new AppError(
         403,
         'DESTINATION_ADDRESS_DENIED',

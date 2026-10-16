@@ -43,7 +43,7 @@ Konfigurasi penting:
 | `HL7_ENABLED`, `HL7_HOST`, `HL7_PORT` | Default `true`, `127.0.0.1`, `2575` |
 | `HL7_ALLOWED_IPS` | IP literal peer yang diperbolehkan; default loopback |
 | `PUBLIC_BASE_URL`, `INBOUND_PATH` | Origin publik backend yang dipakai pada source endpoint; default lokal `http://localhost:9000` dan `/api/message/inbound`. Production wajib HTTPS eksplisit. `INBOUND_BASE_URL` tetap menjadi fallback kompatibilitas. |
-| `OUTBOUND_ALLOWED_HOSTS` | Hostname/IP destination yang diizinkan; wajib di production |
+| `OUTBOUND_ALLOWED_HOSTS` | Hostname/IP exact destination yang diizinkan; wajib di production. Alamat private/loopback memerlukan entry eksplisit, termasuk di development. Metadata/link-local tetap diblokir |
 | `REQUEST_TIMEOUT_MS`, `PAYLOAD_LIMIT_BYTES` | Default 10 detik, 1 MiB |
 | `SCRIPT_TIMEOUT_MS`, `SCRIPT_MEMORY_MB`, `SCRIPT_CONCURRENCY` | Default 1000 ms, 16 MiB, 4 worker aktif |
 | `MESSAGE_RETENTION_DAYS`, `AUDIT_RETENTION_DAYS` | Default 30 dan 365 hari |

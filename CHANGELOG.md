@@ -1,5 +1,14 @@
 # Changelog
 
+## Preserve security through UI simplification — 2026-10-16
+
+- Retain authentication, four-role RBAC, per-channel source keys and one-time display, rotation, payload redaction/raw audit, encryption, sandbox, safe errors, request limits, correlation and idempotency. No database, production data or environment secrets changed.
+- Limit unsuccessful source API-key requests to 60 per IP/minute per process before more database lookups. Keep existing authentication/management limits and compatibility routes. Document failure-budget/NAT/distributed-limit implications.
+- Require explicit allowlisting for private/loopback destinations, including development; reject prohibited metadata/link-local/unspecified/multicast addresses, pin DNS answers and retain redirect rejection. Preserve intentionally allowlisted hospital network destinations.
+- Reject obvious placeholder/repetitive current secrets during production config loading. Add negative API tests, real logger leakage assertions, fail-closed raw auditing, DNS-rebinding/pinning and real redirect rejection tests.
+- Verify 380 unit/API tests in 30 suites and 57 browser scenarios; coverage rises to 82.99% statements / 79.73% branches / 85.24% functions / 83.96% lines. Typecheck/lint/format/build, OpenAPI structure, targeted source scan and dependency audit (0 vulnerabilities) pass. Initial loopback sandbox test failure was corrected by rerunning with local-socket permission.
+- Record each security control and unverified deployment requirements in [SECURITY.md](SECURITY.md). Deployed HTTPS/firewall/certificates, full Gitleaks/history scan, remote CI, fresh PostgreSQL concurrency and production operational qualification remain NOT TESTED in this review.
+
 ## English application interface — 2026-10-16
 
 - Translate the remaining Indonesian source API-key helper into English and review application-authored UI/backend messages for mixed-language text.

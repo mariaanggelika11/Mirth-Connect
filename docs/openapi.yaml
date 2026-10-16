@@ -1535,7 +1535,7 @@
             "description": "State, revision or idempotency conflict"
           },
           "429": {
-            "description": "Management/authentication rate limit"
+            "description": "Per-IP source credential/management rate limit; Retry-After indicates seconds before retry"
           },
           "502": {
             "description": "Persisted failed/partial processing outcome. Includes safe MESSAGE_PROCESSING_FAILED code, message, requestId and empty details; messageId/status and complete legacy result are retained.",
@@ -1599,7 +1599,8 @@
               }
             }
           }
-        }
+        },
+        "description": " Source API-key requests are limited to 60 unsuccessful responses per IP per minute in each process; in-flight requests temporarily count. HTTP 429 includes Retry-After. Management bearer requests retain management rate limits."
       }
     },
     "/api/message/inbound/{channelId}": {
@@ -1647,7 +1648,7 @@
             "description": "State, revision or idempotency conflict"
           },
           "429": {
-            "description": "Management/authentication rate limit"
+            "description": "Per-IP source credential/management rate limit; Retry-After indicates seconds before retry"
           },
           "502": {
             "description": "Persisted failed/partial processing outcome. Includes safe MESSAGE_PROCESSING_FAILED code, message, requestId and empty details; messageId/status and complete legacy result are retained.",
@@ -1716,7 +1717,7 @@
             }
           }
         },
-        "description": "Canonical external source endpoint accepts the per-channel X-API-Key. Legacy management bearer automation remains supported. /api/inbound/{channelId} remains an API-key alias; configured INBOUND_PATH is also accepted."
+        "description": "Canonical external source endpoint accepts the per-channel X-API-Key. Legacy management bearer automation remains supported. /api/inbound/{channelId} remains an API-key alias; configured INBOUND_PATH is also accepted. Source API-key requests are limited to 60 unsuccessful responses per IP per minute in each process; in-flight requests temporarily count. HTTP 429 includes Retry-After. Management bearer requests retain management rate limits."
       }
     },
     "/api/message": {

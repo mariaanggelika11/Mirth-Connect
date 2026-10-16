@@ -1,5 +1,15 @@
 # Operational controls
 
+## Security controls after UI simplification
+
+See the [per-control security verification](../SECURITY.md#security-verification--16-october-2026). Authentication, all four roles, source credentials/rotation, redaction/raw auditing, encryption, sandbox limits, safe errors, correlation and idempotency remain backend enforced.
+
+`OUTBOUND_ALLOWED_HOSTS` must explicitly include intended private/loopback destination hosts, even in development. DNS answers are checked and pinned for delivery/probes; metadata/link-local/unspecified/multicast destinations remain prohibited even when listed. A hostname allowlist entry intentionally permits its private DNS answers for hospital integrations; review DNS ownership and apply network egress rules.
+
+Source API-key routes reject more than 60 unsuccessful requests per IP per minute in each process, before additional credential database lookups; completed successful requests are removed from the failure budget, while in-flight requests count temporarily. Processing errors also count. HTTP 429 includes `Retry-After`, safe error fields and a correlation ID. Counter: `rate_limit_inbound_rejections_total`. Existing auth 20/minute and management 300/minute limits remain. Shared NATs share budgets; multi-instance deployments need gateway/shared rate limiting and load verification.
+
+Production rejects obvious example/repeated current JWT/encryption secrets and still requires a public HTTPS base URL, verified database TLS and exact destination allowlist. Generate independent random secrets through protected environment/mounts; use keyring rotation for existing encrypted data. The production compose example publishes proxy 443 only; verify actual firewall/ingress and direct port 9000 externally. Do not treat a configured HTTPS URL as evidence that transport/firewall has been tested.
+
 ## Migration and compatibility
 
 Apply the complete migration chain **001–007** through `npm run db:migrate`, never as ad-hoc partial statements. Migrations are additive and transactional; the migrator's existing advisory lock serializes runs. Migration 005 preserves destination policy defaults `{}` (deployment defaults), legacy reservations keep NULL expiry, and legacy request hashes remain unchanged. New messages store both the old order-sensitive digest and a canonical digest, permitting rollback to the prior application artifact without losing the legacy reader's hash. PostgreSQL tests run the full migration set twice and check existing rows/counts. Backfill/index duration still needs staging/load verification on organization-sized data.

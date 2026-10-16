@@ -92,6 +92,23 @@ app.get('/ready', async (_req, res) => {
   }
 });
 let activeInbound = 0;
+const inboundCredentialLimit = rateLimit({
+  windowMs: 60000,
+  limit: 60,
+  skipSuccessfulRequests: true,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  handler: (req, res) => {
+    increment('rate_limit_inbound_rejections_total');
+    res.status(429).json({
+      success: false,
+      code: 'RATE_LIMITED',
+      message: 'Too many unsuccessful inbound requests',
+      requestId: req.requestId,
+      details: [],
+    });
+  },
+});
 app.post(
   [...new Set([config.inbound.path, '/api/inbound', '/api/message/inbound'])].map(
     (inboundPath) => inboundPath + '/:channelId',
@@ -107,6 +124,7 @@ app.post(
     next();
   },
   validateId,
+  inboundCredentialLimit,
   async (req, _res, next) => {
     try {
       const pool = await getConnection();

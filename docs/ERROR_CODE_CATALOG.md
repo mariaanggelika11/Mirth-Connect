@@ -21,6 +21,7 @@ Errors return success=false, code, safe message and requestId; central handler a
 | MESSAGE_PROCESSING_FAILED | 502; persisted processing outcome is failed/partial; messageId/status and the legacy result remain available for reconciliation |
 | ENCRYPTION_KEY_UNAVAILABLE | 500; current/previous keyring cannot authenticate record |
 | INBOUND_CAPACITY | 503 + Retry-After; bounded source capacity reached |
+| RATE_LIMITED | 429 + Retry-After; authentication, management or unsuccessful source requests exceeded the per-IP process-local limit |
 | DELIVERY_LEASE_LOST | 409; old worker cannot overwrite a new delivery claim |
 | DEAD_LETTER_UNAVAILABLE / RESEND_UNAVAILABLE | 409; operation not valid for message state |
 | INVALID_ASSIGNEE | 400; assignment requires existing operator/admin |
