@@ -17,6 +17,7 @@ import { ScriptEditorModal } from '../../components/status/ScriptEditorModal';
 import type { Channel, ChannelFormData, Destination } from '../../types';
 import { DataType } from '../../types';
 import { TransformationEditor } from './TransformationEditor';
+import { FilterEditor } from './FilterEditor';
 import { readFieldMapping } from '../../../../server/src/utils/fieldMapping';
 import { SourceEndpoint } from './SourceEndpoint';
 import type { DryRunResult } from './DryRunPreview';
@@ -463,19 +464,14 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                       Enable source filter
                     </label>
                     {filterEnabled ? (
-                      <label className="field">
-                        <span>Source filter script</span>
-                        <small>Return true to accept, false to filter.</small>
-                        <textarea
-                          rows={4}
-                          className="code-input"
-                          value={draft.filterScript || ''}
-                          onChange={(e) => {
-                            setRetainedFilter(e.target.value);
-                            setDraft((d) => ({ ...d, filterScript: e.target.value }));
-                          }}
-                        />
-                      </label>
+                      <FilterEditor
+                        kind="source"
+                        value={draft.filterScript || ''}
+                        onChange={(script) => {
+                          setRetainedFilter(script);
+                          setDraft((d) => ({ ...d, filterScript: script }));
+                        }}
+                      />
                     ) : (
                       <p className="muted">All messages are accepted.</p>
                     )}

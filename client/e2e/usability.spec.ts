@@ -538,12 +538,16 @@ test('advanced filtering validation retry and timeout remain optional and preser
   );
   await expect(page.getByLabel('Duplicate message protection', { exact: false })).toHaveCount(0);
   await page.getByRole('checkbox', { name: 'Enable source filter' }).check();
-  await page.getByLabel('Source filter script', { exact: false }).fill('return false;');
+  await expect(page.getByRole('combobox', { name: 'Source filter', exact: true })).toHaveValue(
+    'accept',
+  );
+  await expect(page.getByLabel('Source filter script', { exact: false })).toHaveCount(0);
+  await page.getByRole('combobox', { name: 'Source filter', exact: true }).selectOption('reject');
   await page.getByRole('checkbox', { name: 'Enable source filter' }).uncheck();
   await expect(page.getByLabel('Source filter script', { exact: false })).toHaveCount(0);
   await page.getByRole('checkbox', { name: 'Enable source filter' }).check();
-  await expect(page.getByLabel('Source filter script', { exact: false })).toHaveValue(
-    'return false;',
+  await expect(page.getByRole('combobox', { name: 'Source filter', exact: true })).toHaveValue(
+    'reject',
   );
   await page.getByRole('checkbox', { name: 'Enable source filter' }).uncheck();
   await step(page, 2);
@@ -603,6 +607,186 @@ function legacyChannel() {
     ],
   };
 }
+
+for (const choice of [
+  {
+    initialSource: 'return true;',
+    initialDestination: 'return false;',
+    sourceMode: 'accept',
+    destinationMode: 'reject',
+    nextSourceMode: 'reject',
+    nextDestinationMode: 'accept',
+    sourceScript: 'return false;',
+    destinationScript: 'return true;',
+  },
+  {
+    initialSource: 'return false',
+    initialDestination: 'return true',
+    sourceMode: 'reject',
+    destinationMode: 'accept',
+    nextSourceMode: 'accept',
+    nextDestinationMode: 'reject',
+    sourceScript: 'return true;',
+    destinationScript: 'return false;',
+  },
+])
+  test(`simple filter choices save ${choice.nextSourceMode} source and ${choice.nextDestinationMode} destination without typing code`, async ({
+    page,
+  }) => {
+    const channel = {
+      ...existingChannel,
+      filterScript: choice.initialSource,
+      destinations: [
+        { ...existingChannel.destinations[0], filterScript: choice.initialDestination },
+      ],
+    };
+    const state = await workspace(page, { channels: [channel] });
+    await openExisting(page);
+    await page.getByText('Advanced source settings', { exact: true }).click();
+    const source = page.getByRole('combobox', { name: 'Source filter', exact: true });
+    await expect(source).toHaveValue(choice.sourceMode);
+    await expect(
+      source.getByRole('option', { name: 'Accept all messages', exact: true }),
+    ).toHaveCount(1);
+    await expect(
+      source.getByRole('option', { name: 'Filter all messages', exact: true }),
+    ).toHaveCount(1);
+    await expect(page.getByLabel('Source filter script', { exact: false })).toHaveCount(0);
+    await source.selectOption(choice.nextSourceMode);
+    await expect(page.getByLabel('Source filter script', { exact: false })).toHaveCount(0);
+    await step(page, 2);
+    await page.getByText('Advanced destination settings', { exact: true }).click();
+    await page
+      .locator('summary')
+      .filter({ hasText: /^Message processing/ })
+      .click();
+    const destination = page.getByRole('combobox', { name: 'Destination filter', exact: true });
+    await expect(destination).toHaveValue(choice.destinationMode);
+    await expect(
+      destination.getByRole('option', { name: 'Deliver to this destination', exact: true }),
+    ).toHaveCount(1);
+    await expect(
+      destination.getByRole('option', { name: 'Skip this destination', exact: true }),
+    ).toHaveCount(1);
+    await expect(page.getByLabel('Destination filter script', { exact: false })).toHaveCount(0);
+    await destination.selectOption(choice.nextDestinationMode);
+    await expect(page.getByLabel('Destination filter script', { exact: false })).toHaveCount(0);
+    await step(page, 3);
+    await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(captured(state, '/api/channel/1')[0].body).toMatchObject({
+      filterScript: choice.sourceScript,
+      destinations: [{ filterScript: choice.destinationScript }],
+    });
+    expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
+    expect(state.externalRequests).toEqual([]);
+  });
+
+test('advanced filter conditions survive simple choices and disabling the source filter', async ({
+  page,
+}) => {
+  const sourceScript = 'return Boolean(msg.patient);';
+  const destinationScript = 'return msg.patient.active === true;';
+  const editedSource = 'return Boolean(msg.patient && msg.patient.active);';
+  const editedDestination = 'return msg.patient.identifier !== undefined;';
+  const channel = {
+    ...existingChannel,
+    filterScript: sourceScript,
+    destinations: [{ ...existingChannel.destinations[0], filterScript: destinationScript }],
+  };
+  const state = await workspace(page, { channels: [channel] });
+  await openExisting(page);
+  await page.getByText('Advanced source settings', { exact: true }).click();
+  const source = page.getByRole('combobox', { name: 'Source filter', exact: true });
+  await expect(source).toHaveValue('custom');
+  await expect(page.getByLabel('Source filter script', { exact: false })).not.toBeVisible();
+  await page.getByText('Advanced source filter script', { exact: true }).click();
+  await expect(page.getByLabel('Source filter script', { exact: false })).toHaveValue(sourceScript);
+  await page.getByLabel('Source filter script', { exact: false }).fill(editedSource);
+  await source.selectOption('accept');
+  await expect(page.getByLabel('Source filter script', { exact: false })).toHaveCount(0);
+  await source.selectOption('reject');
+  await source.selectOption('custom');
+  await expect(page.getByLabel('Source filter script', { exact: false })).toBeVisible();
+  await expect(page.getByLabel('Source filter script', { exact: false })).toHaveValue(editedSource);
+  await page.getByRole('checkbox', { name: 'Enable source filter' }).uncheck();
+  await expect(source).toHaveCount(0);
+  await page.getByRole('checkbox', { name: 'Enable source filter' }).check();
+  await expect(source).toHaveValue('custom');
+  await expect(page.getByLabel('Source filter script', { exact: false })).toHaveValue(editedSource);
+  await step(page, 2);
+  await page.getByText('Advanced destination settings', { exact: true }).click();
+  await page
+    .locator('summary')
+    .filter({ hasText: /^Message processing/ })
+    .click();
+  const destination = page.getByRole('combobox', { name: 'Destination filter', exact: true });
+  await expect(destination).toHaveValue('custom');
+  await expect(page.getByLabel('Destination filter script', { exact: false })).not.toBeVisible();
+  await page.getByText('Advanced destination filter script', { exact: true }).click();
+  await expect(page.getByLabel('Destination filter script', { exact: false })).toHaveValue(
+    destinationScript,
+  );
+  await page.getByLabel('Destination filter script', { exact: false }).fill(editedDestination);
+  await destination.selectOption('reject');
+  await expect(page.getByLabel('Destination filter script', { exact: false })).toHaveCount(0);
+  await destination.selectOption('accept');
+  await destination.selectOption('custom');
+  await expect(page.getByLabel('Destination filter script', { exact: false })).toBeVisible();
+  await expect(page.getByLabel('Destination filter script', { exact: false })).toHaveValue(
+    editedDestination,
+  );
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(captured(state, '/api/channel/1')[0].body).toMatchObject({
+    filterScript: editedSource,
+    destinations: [{ filterScript: editedDestination }],
+  });
+});
+
+test('legacy bare boolean filters stay unchanged until an explicit simple behavior is selected', async ({
+  page,
+}) => {
+  const channel = {
+    ...existingChannel,
+    filterScript: 'false',
+    destinations: [{ ...existingChannel.destinations[0], filterScript: 'false' }],
+  };
+  const state = await workspace(page, { channels: [channel] });
+  for (const replace of [false, true]) {
+    await openExisting(page);
+    await page.getByText('Advanced source settings', { exact: true }).click();
+    const source = page.getByRole('combobox', { name: 'Source filter', exact: true });
+    await expect(source).toHaveValue('custom');
+    await expect(page.getByLabel('Source filter script', { exact: false })).not.toBeVisible();
+    await expect(page.getByLabel('Source filter script', { exact: false })).toHaveValue('false');
+    if (replace) await source.selectOption('reject');
+    await step(page, 2);
+    await page.getByText('Advanced destination settings', { exact: true }).click();
+    await page
+      .locator('summary')
+      .filter({ hasText: /^Message processing/ })
+      .click();
+    const destination = page.getByRole('combobox', { name: 'Destination filter', exact: true });
+    await expect(destination).toHaveValue('custom');
+    await expect(page.getByLabel('Destination filter script', { exact: false })).not.toBeVisible();
+    await expect(page.getByLabel('Destination filter script', { exact: false })).toHaveValue(
+      'false',
+    );
+    if (replace) await destination.selectOption('reject');
+    await step(page, 3);
+    await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(captured(state, '/api/channel/1').at(-1)?.body).toMatchObject({
+      filterScript: replace ? 'return false;' : 'false',
+      destinations: [{ filterScript: replace ? 'return false;' : 'false' }],
+    });
+  }
+  expect(captured(state, '/api/channel/1')).toHaveLength(2);
+  expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
+  expect(state.externalRequests).toEqual([]);
+});
 
 test('editing preserves advanced legacy settings while removing the mandatory change summary', async ({
   page,

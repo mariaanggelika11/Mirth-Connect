@@ -22,6 +22,8 @@ Navigasi utama terdiri dari Overview untuk kesehatan/antrean, Channels untuk kon
 
 Setelah **Save Channel**, dialog onboarding menyediakan Start channel, API key dan Open Messages. **Test this channel** membuka contoh request dan pengiriman sintetis. API key hanya ditampilkan sekali; rotasi membatalkan key sebelumnya. Endpoint berasal dari backend (`PUBLIC_BASE_URL` / `INBOUND_PATH`); copy membutuhkan HTTPS atau secure localhost dan tetap dapat dilakukan manual bila clipboard ditolak browser.
 
+Filter sederhana menggunakan dropdown. Pada source pilih **Accept all messages** atau **Filter all messages**; pada destination pilih **Deliver to this destination** atau **Skip this destination**. Pengguna tidak perlu mengetik `true`/`false`. **Custom condition (advanced)** membuka editor script untuk aturan khusus; script existing ditampilkan dalam disclosure Advanced yang awalnya tertutup dan tetap dipertahankan sampai pengguna memilih perubahan. Script lama yang hanya berisi literal `false` tetap dianggap custom agar perilaku running tidak berubah secara diam-diam; pilih perilaku sederhana secara eksplisit untuk menggantinya.
+
 Untuk perubahan channel existing, Save membuat draft; review dan publish melalui **Revisions** sebelum konfigurasi running berubah. Resend meminta review payload/destination dan konfirmasi, lalu backend memeriksa ulang permission, status dan snapshot. Delivery dengan hasil tidak pasti memerlukan rekonsiliasi operator sebelum dikirim ulang. Riwayat attempt dan dead letter dipertahankan.
 
 ## Mapping tanpa script
@@ -104,3 +106,5 @@ Coverage meningkat dari baseline statements **80.35 → 81.11%**, branches **75.
 Kegagalan selama pengembangan diperbaiki lalu diuji ulang: sandbox menolak loopback sockets/Chrome sehingga test dijalankan ulang dengan izin lokal; assertion required-field disesuaikan dengan kontrak existing `422 SCRIPT_EXECUTION_FAILED`; selector browser disesuaikan dengan label format; contrast indikator unsaved diperbaiki setelah Axe menemukan kegagalan. Hasil PASS di tabel adalah run terakhir setelah perbaikan, bukan hasil awal.
 
 Screenshot dari browser test memakai data sintetis: [Source](screenshots/usability/lite-source.png), [Transformation](screenshots/usability/lite-transformation.png), [Review](screenshots/usability/lite-review.png).
+
+Tindak lanjut pilihan filter: build, typecheck, lint, format dan **45 browser tests PASS**, termasuk penyimpanan pilihan source/destination, script custom, toggle filter serta legacy literal tanpa perubahan otomatis. Backend, database dan format konfigurasi tetap menggunakan pipeline existing.

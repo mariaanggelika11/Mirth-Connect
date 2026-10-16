@@ -1,5 +1,11 @@
 # Changelog
 
+## Simple filter choices — 2026-10-16
+
+- Replace source/destination boolean textareas with explicit accept/filter or deliver/skip choices; keep custom conditions in Advanced.
+- Preserve existing scripts until an explicit selection, including legacy bare boolean text, and retain custom edits while switching choices.
+- Verify build, typecheck, lint, formatting and 45 browser tests. No backend or database changes.
+
 ## Startup migration diagnostics — 2026-10-16
 
 - Replace the generic missing-schema startup cause with safe MIGRATION_REQUIRED instructions; retain the schema-6 guard and manual migration requirement.

@@ -5,6 +5,7 @@ import type { Destination } from '../../types';
 import type { ChannelScriptEditor } from './channelDraft';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../services/api';
+import { FilterEditor } from './FilterEditor';
 interface Props {
   dest: Destination;
   index: number;
@@ -188,16 +189,11 @@ export function DestinationEditor({
           <summary>
             Message processing{processingConfigured && <small> · Configured</small>}
           </summary>
-          <label className="field">
-            <span>Destination filter</span>
-            <small>Return true to deliver the message, or false to skip this destination.</small>
-            <textarea
-              rows={4}
-              className="code-input"
-              value={dest.filterScript || ''}
-              onChange={(e) => onChange({ filterScript: e.target.value })}
-            />
-          </label>
+          <FilterEditor
+            kind="destination"
+            value={dest.filterScript || ''}
+            onChange={(script) => onChange({ filterScript: script })}
+          />
           <div className="heading-actions">
             {(['processingScript', 'templateScript'] as const).map((field) => (
               <Button
