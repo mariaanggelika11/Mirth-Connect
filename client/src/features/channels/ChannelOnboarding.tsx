@@ -54,9 +54,10 @@ export function ChannelOnboarding({
         title="Channel saved"
       >
         <div className="form-body form-section">
-          <h3>{channel.name}</h3>
-          <StatusBadge status={status} />
-          <p>Your channel is saved. Follow these steps to check the complete connection.</p>
+          <div className="channel-ready-heading">
+            <h3>{channel.name}</h3>
+            <StatusBadge status={status} />
+          </div>
           {error && (
             <p className="alert error" role="alert">
               {error}
@@ -67,74 +68,70 @@ export function ChannelOnboarding({
               {notice}
             </p>
           )}
-          <ol className="onboarding-steps">
-            {http && (
-              <li>
-                <strong>Create a source API key</strong>
-                <p>The source system uses this key when sending messages. It is shown only once.</p>
-                {can('channel:write') && (
+          <div className="channel-ready-actions">
+            {can('channel:operate') && (
+              <Button
+                type="button"
+                disabled={busy || running}
+                onClick={() => {
+                  void action(async () => {
+                    await updateChannelStatus(channel.id, ChannelStatus.RUNNING);
+                    setStatus(ChannelStatus.RUNNING);
+                    setNotice('Channel started');
+                    onChanged();
+                  }).catch(() => {});
+                }}
+              >
+                {running ? 'Channel running' : 'Start channel'}
+              </Button>
+            )}
+            <Button type="button" variant="secondary" disabled={busy} onClick={onMessages}>
+              Open Messages
+            </Button>
+          </div>
+          {http && can('channel:write') && (
+            <section className="channel-key-setup form-section" aria-label="Source API key setup">
+              <div className="channel-ready-heading">
+                <div>
+                  <strong>Source API key</strong>
+                  <p>The sending system needs this key. New keys are shown only once.</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => setConfirm('key')}
+                >
+                  {key ? 'Rotate API key' : 'Create API key'}
+                </Button>
+              </div>
+              {key && (
+                <div className="credential-panel form-section">
+                  <strong>Copy this key now. It disappears when you close this window.</strong>
+                  <code className="break-anywhere">{key}</code>
                   <Button
                     type="button"
                     variant="secondary"
                     disabled={busy}
-                    onClick={() => setConfirm('key')}
+                    onClick={() => {
+                      void navigator.clipboard
+                        .writeText(key)
+                        .then(() => setNotice('API key copied'))
+                        .catch(() => setError('Clipboard unavailable. Select and copy the key.'));
+                    }}
                   >
-                    {key ? 'Rotate API key' : 'Create API key'}
+                    Copy API key
                   </Button>
-                )}
-                {key && (
-                  <div className="credential-panel form-section">
-                    <strong>Copy this key now. It disappears when you close this window.</strong>
-                    <code className="break-anywhere">{key}</code>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => {
-                        void navigator.clipboard
-                          .writeText(key)
-                          .then(() => setNotice('API key copied'))
-                          .catch(() => setError('Clipboard unavailable. Select and copy the key.'));
-                      }}
-                    >
-                      Copy API key
-                    </Button>
-                  </div>
-                )}
-              </li>
-            )}
-            <li>
-              <strong>Start channel</strong>
-              <p>
-                {running
-                  ? 'Channel started. It can now receive messages.'
-                  : 'Starting activates the saved configuration.'}
-              </p>
-              {can('channel:operate') && (
-                <Button
-                  type="button"
-                  disabled={busy || running}
-                  onClick={() => {
-                    void action(async () => {
-                      await updateChannelStatus(channel.id, ChannelStatus.RUNNING);
-                      setStatus(ChannelStatus.RUNNING);
-                      setNotice('Channel started');
-                      onChanged();
-                    }).catch(() => {});
-                  }}
-                >
-                  {running ? 'Channel running' : 'Start channel'}
-                </Button>
+                </div>
               )}
-            </li>
-            <li>
-              <strong>Send a synthetic test message</strong>
+            </section>
+          )}
+          <details className="channel-test-tools">
+            <summary>Test this channel</summary>
+            <div className="form-section">
               {http ? (
                 <>
                   <SourceEndpoint channel={channel} />
-                  <p>
-                    Import the copied collection into Postman and replace its placeholders. Use a
-                    new request ID for each new test.
-                  </p>
                   <Button
                     type="button"
                     variant="secondary"
@@ -143,10 +140,10 @@ export function ChannelOnboarding({
                   >
                     Send synthetic message
                   </Button>
-                  {!key && (
+                  {(!running || !key) && (
                     <small>
-                      Create a key here to send a test in this window, or use your saved key in
-                      Postman.
+                      Start the channel and create a key here to send a test, or use your saved key
+                      with a request example.
                     </small>
                   )}
                 </>
@@ -156,21 +153,13 @@ export function ChannelOnboarding({
                   transport settings.
                 </p>
               )}
-            </li>
-            <li>
-              <strong>Check Messages</strong>
-              <p>
-                Inspect the inbound message, source processing and final outbound payload for each
-                destination.
-              </p>
-              <Button type="button" variant="secondary" disabled={busy} onClick={onMessages}>
-                Open Messages
-              </Button>
-            </li>
-          </ol>
-          <Button type="button" variant="secondary" disabled={busy} onClick={onClose}>
-            Done
-          </Button>
+            </div>
+          </details>
+          <div className="form-actions">
+            <Button type="button" variant="secondary" disabled={busy} onClick={onClose}>
+              Done
+            </Button>
+          </div>
         </div>
       </Modal>
       <ConfirmationModal

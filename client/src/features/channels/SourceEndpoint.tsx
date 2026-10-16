@@ -30,25 +30,31 @@ export function SourceEndpoint({ channel }: { channel: Pick<Channel, 'id' | 'nam
         >
           Copy endpoint
         </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => void copy(examples.curl, 'curl example')}
-        >
-          Copy curl example
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => void copy(examples.postman, 'Postman collection')}
-        >
-          Copy Postman request
-        </Button>
       </div>
-      <small>
-        Examples contain placeholders. Supply your source API key and a unique request ID before
-        sending synthetic data.
-      </small>
+      <details className="source-request-examples">
+        <summary>Request examples</summary>
+        <div className="form-section">
+          <div className="heading-actions">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void copy(examples.curl, 'curl example')}
+            >
+              Copy curl example
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void copy(examples.postman, 'Postman collection')}
+            >
+              Copy Postman request
+            </Button>
+          </div>
+          <small>
+            Replace the API key and request ID placeholders before sending synthetic data.
+          </small>
+        </div>
+      </details>
       {notice && <p role="status">{notice}</p>}
       {error && <p role="alert">{error}</p>}
     </section>

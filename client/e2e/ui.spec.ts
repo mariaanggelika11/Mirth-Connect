@@ -266,8 +266,6 @@ test('channel wizard prevents accidental loss and requires review before saving'
   await page.getByRole('button', { name: 'New Channel' }).click();
   await page.getByLabel('Channel name', { exact: false }).fill('New integration');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await expect(page.getByText('Prepare messages for delivery')).toBeVisible();
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByText('Where should messages go?')).toBeVisible();
   await page.getByLabel('Destination name').fill('REST receiver');
   await page.getByLabel('Endpoint', { exact: false }).fill('https://api.example.com/messages');
@@ -360,7 +358,6 @@ test('duplicate uses a new draft and XML export has no runtime IDs', async ({ pa
   await expect(page.getByLabel('Channel name', { exact: false })).toHaveValue(
     'Test Channel (copy)',
   );
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(
     page.getByText('This channel will receive messages without outbound delivery.', {

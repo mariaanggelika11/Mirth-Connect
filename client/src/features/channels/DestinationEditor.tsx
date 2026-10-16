@@ -33,6 +33,18 @@ export function DestinationEditor({
   const [probing, setProbing] = useState(false);
   const [probeResult, setProbeResult] = useState<ConnectionResult | null>(null);
   const [probeError, setProbeError] = useState('');
+  const processingConfigured = Boolean(
+    dest.filterScript?.trim() || dest.processingScript?.trim() || dest.templateScript?.trim(),
+  );
+  const deliveryConfigured =
+    dest.isEnabled === false ||
+    Boolean(dest.retryEnabled) ||
+    (dest.timeoutMs !== undefined && dest.timeoutMs !== 10000) ||
+    (dest.maxRetries !== undefined && dest.maxRetries !== 3) ||
+    (dest.retryIntervalSeconds !== undefined && dest.retryIntervalSeconds !== 30) ||
+    Object.values(dest.deliveryPolicy ?? {}).some((value) => value !== undefined);
+  const responseConfigured = Boolean(dest.responseScript?.trim());
+  const advancedConfigured = processingConfigured || deliveryConfigured || responseConfigured;
   const probeTarget = JSON.stringify([dest.endpoint, dest.type, dest.timeoutMs]);
   const currentTarget = useRef(probeTarget);
   currentTarget.current = probeTarget;
@@ -109,40 +121,40 @@ export function DestinationEditor({
               <option key={t}>{t}</option>
             ))}
           </select>
-          <small>Format akhir yang dikirim ke destination.</small>
+          {inboundFormat && (
+            <small>
+              {inboundFormat} → {dest.outboundDataType}
+            </small>
+          )}
         </label>
       </div>
-      {inboundFormat && (
-        <p className="format-flow" aria-label="Message format flow">
-          {inboundFormat} → {dest.outboundDataType}
-        </p>
-      )}
-      <label className="field">
-        <span>Endpoint *</span>
-        <input
-          value={dest.endpoint}
-          autoComplete="off"
-          spellCheck={false}
-          placeholder={
-            dest.type === 'REST' ? 'https://api.example.com/messages' : 'tcp://host:2575'
-          }
-          disabled={probing}
-          onChange={(e) => onChange({ endpoint: e.target.value })}
-        />
-      </label>
+      <div className="field">
+        <label htmlFor={`destination-endpoint-${index}`}>Endpoint *</label>
+        <div className="destination-endpoint-row">
+          <input
+            id={`destination-endpoint-${index}`}
+            value={dest.endpoint}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder={
+              dest.type === 'REST' ? 'https://api.example.com/messages' : 'tcp://host:2575'
+            }
+            disabled={probing}
+            onChange={(e) => onChange({ endpoint: e.target.value })}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            title="Checks TCP/TLS without sending a message or patient data (up to 10 seconds)."
+            disabled={probing || !dest.endpoint.trim()}
+            onClick={() => void testConnection()}
+          >
+            {probing ? 'Testing connection…' : 'Test connection'}
+          </Button>
+        </div>
+      </div>
       <div className="connection-test">
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={probing || !dest.endpoint.trim()}
-          onClick={() => void testConnection()}
-        >
-          {probing ? 'Testing connection…' : 'Test connection'}
-        </Button>
-        <p className="muted">
-          Checks a TCP or TLS connection without sending a message or patient data. The connection
-          test waits at most 10 seconds.
-        </p>
         {probeError && (
           <p className="alert error" role="alert">
             Connection failed: {probeError}
@@ -155,10 +167,7 @@ export function DestinationEditor({
               {probeResult.probe === 'TLS_HANDSHAKE' ? 'TLS' : 'TCP'} handshake · Response time:{' '}
               {probeResult.elapsedMs} ms.
             </p>
-            <p>
-              Application delivery was not tested. Preview output before sending a synthetic test
-              message.
-            </p>
+            <p>Connectivity only; no message was sent. Use synthetic data to verify delivery.</p>
             {probeResult.warnings?.map((warning) => (
               <p key={warning}>{warning}</p>
             ))}
@@ -171,13 +180,14 @@ export function DestinationEditor({
         </p>
       )}
       <details className="advanced-section">
-        <summary>Advanced destination settings</summary>
-        <section className="destination-settings-group" aria-label="Destination message processing">
-          <h4>Message processing</h4>
-          <p className="muted">
-            The output converter works without a script. Add processing only when the message
-            structure needs to change.
-          </p>
+        <summary>
+          <span>Advanced destination settings</span>
+          {advancedConfigured && <small> · Configured</small>}
+        </summary>
+        <details className="advanced-section" aria-label="Destination message processing">
+          <summary>
+            Message processing{processingConfigured && <small> · Configured</small>}
+          </summary>
           <label className="field">
             <span>Destination filter</span>
             <small>Return true to deliver the message, or false to skip this destination.</small>
@@ -216,13 +226,9 @@ export function DestinationEditor({
               </Button>
             ))}
           </div>
-          <p className="muted">
-            A destination transformation changes the structure before conversion to the output
-            format. A template builds the payload before conversion.
-          </p>
-        </section>
-        <section className="destination-settings-group" aria-label="Delivery settings">
-          <h4>Delivery settings</h4>
+        </details>
+        <details className="advanced-section" aria-label="Delivery settings">
+          <summary>Delivery settings{deliveryConfigured && <small> · Configured</small>}</summary>
           <label className="field">
             <span>Request timeout (seconds)</span>
             <input
@@ -309,17 +315,9 @@ export function DestinationEditor({
               ))}
             </div>
           </details>
-        </section>
-        <section
-          className="destination-settings-group"
-          aria-label="Destination response processing"
-        >
-          <h4>Response processing</h4>
-          <p className="muted">
-            {dest.responseScript
-              ? 'A custom response script is configured.'
-              : 'Use the default destination response.'}
-          </p>
+        </details>
+        <details className="advanced-section" aria-label="Destination response processing">
+          <summary>Response processing{responseConfigured && <small> · Configured</small>}</summary>
           <Button
             type="button"
             variant="secondary"
@@ -334,7 +332,7 @@ export function DestinationEditor({
             <Code2 size={14} />
             {dest.responseScript ? 'Edit response script' : 'Configure custom response'}
           </Button>
-        </section>
+        </details>
       </details>
     </section>
   );

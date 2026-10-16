@@ -74,3 +74,15 @@ Pada **Payload**, lihat **Original inbound payload** (pesan yang diterima), **So
 Payload pada attempt Delivered adalah hasil akhir yang diterima destination. Attempt yang gagal pada persiapan dapat menyimpan input persiapan, sehingga UI mengingatkan pengguna untuk memeriksa status dan history. Retry tampil sebagai attempt terpisah; pagination pada Payload dan Delivery history tetap tersedia. Message direction OUT menampilkan **Stored outbound payload** agar tidak salah dilabeli sebagai inbound.
 
 Redacted tetap default. **View raw (audited)** hanya untuk permission khusus dan memiliki peringatan sebelum tindakan. Copy mengikuti isi yang sedang ditampilkan. Tooltip status menjelaskan arti Delivered, Filtered, Retry scheduled dan Dead letter; unknown delivery outcome tetap perlu rekonsiliasi sebelum resend.
+
+### Editor ringkas — tindak lanjut 16 Oktober 2026
+
+Wizard kini hanya **Source → Destinations → Review**. Processing tidak lagi menjadi langkah wajib; transformation, filter dan response berada di **Advanced source settings → Message processing**. Config existing tetap dipertahankan dan diberi penanda **Custom settings active** ketika ada perilaku khusus.
+
+Pada edit Source, tampilan awal hanya memuat nama, connector dan inbound format. **Connection & API key** membuka alamat penerimaan, Copy endpoint dan pengelolaan key. Contoh curl/Postman berada di **Request examples**. API key tetap sekali tampil; menutup bagian key, berpindah langkah atau menutup editor menyembunyikannya. Rotasi tetap memerlukan konfirmasi dan perpindahan langkah dinonaktifkan selama request key berjalan.
+
+Destination menampilkan nama, connector, outbound format dan endpoint dengan Test connection ringkas. Script, delivery/retry/timeout dan response masing-masing dapat dibuka di Advanced; konfigurasi khusus diberi penanda **Configured**. Review menampilkan rute dan destination; field default yang berulang dihilangkan. **Test sample message (optional)** membuka dry-run secara sadar, sehingga tidak ada textarea, raw preview atau request pengujian pada alur Save biasa.
+
+Dialog setelah Save berfokus pada status, Start, API key dan Open Messages. Pengiriman sintetis serta contoh request tersedia melalui **Test this channel**. Klasifikasi ini adalah keputusan tampilan berdasarkan kebutuhan alur dasar, bukan klaim statistik penggunaan. Tidak ada kemampuan backend, credential atau data channel yang dihapus.
+
+[Screenshot editor ringkas](screenshots/usability/compact-edit-source.png) memakai channel dan API fixture sintetis. Verifikasi tindak lanjut: `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run build`, 267 test `npm run test:coverage` dan 33 skenario `npm run test:e2e` semuanya PASS. Coverage tetap 80.35% statements / 81.52% lines. Native SQL tidak diulang karena backend/schema tidak berubah. Percobaan browser awal diblokir listener sandbox; dijalankan ulang dengan izin runtime lokal. Satu locator test baru untuk Source connector diperbaiki menjadi accessible combobox, lalu seluruh skenario lulus; screenshot juga menunggu state edit selesai dimuat.

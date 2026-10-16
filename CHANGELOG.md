@@ -1,5 +1,12 @@
 # Changelog
 
+## Compact channel editor — 2026-10-16
+
+- Reduce setup to Source → Destinations → Review; move optional source processing into Advanced.
+- Collapse connection/key management, curl/Postman examples, sample previews and synthetic test delivery; retain one-time key display and delivery confirmations.
+- Group destination details behind compact disclosures and retain configured indicators and existing values.
+- Verify 267 unit/API and 33 browser tests, including closed-panel configuration retention, pending key operations, keyboard/mobile and accessibility. No backend or database changes.
+
 ## Development usability — 2026-10-16
 
 - Simplify channel setup with optional source processing and Advanced settings; automatically describe the initial configuration while retaining required edit summaries.
