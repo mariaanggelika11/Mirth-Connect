@@ -3,14 +3,14 @@ import type { Request, Response, NextFunction } from 'express';
 import type { DatabaseTransaction } from '../config/db.js';
 import { getConnection, withTransaction } from '../config/db.js';
 import { channelSchema, draftPatchSchema } from '../utils/validator.js';
-import { runConfiguration } from './dryRun.services.js';
-import { maskPayload } from '../utils/masking.js';
+import { runConfiguration, presentDryRun, rawDryRunRequested } from './dryRun.services.js';
 import { decrypt, encrypt, publicEndpoint, storeEndpoint } from '../utils/secrets.js';
 import { AppError } from '../utils/errors.js';
 import { audit } from './audit.services.js';
 import { saveDestinations, applyChannelConfiguration } from './channel.services.js';
 import { validateProfileConfiguration } from './profileValidation.services.js';
 import { validateEndpoint, testConnection } from '../utils/transport.js';
+import { withConnectionProbe } from './connectionProbe.services.js';
 import type { z } from 'zod';
 export type RevisionConfig = z.infer<typeof channelSchema>;
 export async function readRuntimeConfiguration(
@@ -351,6 +351,7 @@ export const editDraft = async (req: Request, res: Response, next: NextFunction)
 };
 export const dryRunRevision = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const raw = rawDryRunRequested(req);
     const pool = await getConnection();
     const row = (
       await pool
@@ -367,11 +368,15 @@ export const dryRunRevision = async (req: Request, res: Response, next: NextFunc
       channelSchema.parse(JSON.parse(decrypt(row.configuration))),
       req.body.payload,
     );
-    await audit('DRY_RUN_REVISION', req, 'channel', Number(req.params.id));
+    await audit(
+      raw ? 'DRY_RUN_REVISION_RAW' : 'DRY_RUN_REVISION',
+      req,
+      'channel',
+      Number(req.params.id),
+    );
     res.json({
-      ...result,
+      ...presentDryRun(result, raw),
       revision: Number(req.params.revision),
-      results: result.results.map((r) => ({ ...r, finalPayload: maskPayload(r.finalPayload) })),
     });
   } catch (error) {
     next(
@@ -381,33 +386,29 @@ export const dryRunRevision = async (req: Request, res: Response, next: NextFunc
     );
   }
 };
-let activeProbes = 0;
 export const testRevisionDestination = async (req: Request, res: Response, next: NextFunction) => {
-  if (activeProbes >= 4)
-    return next(new AppError(503, 'CONNECTION_TEST_CAPACITY', 'Connection test capacity exceeded'));
-  activeProbes++;
   try {
-    const pool = await getConnection();
-    const row = (
-      await pool
-        .request()
-        .input('id', Number(req.params.id))
-        .input('revision', Number(req.params.revision))
-        .query(
-          'SELECT configuration,state FROM "ChannelRevisions" WHERE channel_id=@id AND revision=@revision',
-        )
-    ).recordset[0];
-    if (!row || row.state === 'ARCHIVED')
-      throw new AppError(404, 'REVISION_NOT_FOUND', 'Revision not available');
-    const data = channelSchema.parse(JSON.parse(decrypt(row.configuration)));
-    const destination = data.destinations[Number(req.params.index)];
-    if (!destination) throw new AppError(404, 'DESTINATION_NOT_FOUND', 'Destination not found');
-    await audit('TEST_DESTINATION_CONNECTION', req, 'channel', Number(req.params.id));
-    const result = await testConnection(destination.endpoint, destination.type);
-    res.json({ success: true, ...result });
+    await withConnectionProbe(async () => {
+      const pool = await getConnection();
+      const row = (
+        await pool
+          .request()
+          .input('id', Number(req.params.id))
+          .input('revision', Number(req.params.revision))
+          .query(
+            'SELECT configuration,state FROM "ChannelRevisions" WHERE channel_id=@id AND revision=@revision',
+          )
+      ).recordset[0];
+      if (!row || row.state === 'ARCHIVED')
+        throw new AppError(404, 'REVISION_NOT_FOUND', 'Revision not available');
+      const data = channelSchema.parse(JSON.parse(decrypt(row.configuration)));
+      const destination = data.destinations[Number(req.params.index)];
+      if (!destination) throw new AppError(404, 'DESTINATION_NOT_FOUND', 'Destination not found');
+      await audit('TEST_DESTINATION_CONNECTION', req, 'channel', Number(req.params.id));
+      const result = await testConnection(destination.endpoint, destination.type);
+      res.json({ success: true, ...result });
+    });
   } catch (error) {
     next(error);
-  } finally {
-    activeProbes--;
   }
 };

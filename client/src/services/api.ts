@@ -68,6 +68,8 @@ api.interceptors.response.use(
   async (error) => {
     if (typeof error.response?.data?.message === 'string')
       error.message = error.response.data.message;
+    // Source API keys authenticate the connector independently of the operator's UI session.
+    if (error.response?.data?.code === 'CONNECTOR_UNAUTHORIZED') return Promise.reject(error);
     const isLoginRequest = /\/auth\/(?:browser\/)?login/.test(error.config?.url || '');
     if (isLoginRequest) {
       return Promise.reject(error);

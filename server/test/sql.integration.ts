@@ -38,12 +38,21 @@ const control = new pg.Pool({
 let schemaCreated = false;
 let pool: Awaited<ReturnType<typeof getConnection>>;
 let received = 0;
+const receivedBodies: string[] = [];
 const suffix = randomUUID();
 const username = 'qa-' + suffix;
-const receiver = http.createServer((_req, res) => {
-  received++;
-  res.setHeader('Content-Type', 'application/json');
-  res.end('{"ok":true}');
+const receiver = http.createServer((req, res) => {
+  let body = '';
+  req.setEncoding('utf8');
+  req.on('data', (chunk: string) => {
+    body += chunk;
+  });
+  req.on('end', () => {
+    received++;
+    receivedBodies.push(body);
+    res.setHeader('Content-Type', 'application/json');
+    res.end('{"ok":true}');
+  });
 });
 let port: number;
 before(async () => {
@@ -1001,6 +1010,92 @@ test('real PostgreSQL: protected diagnostic bundle has metadata only and reports
       403,
     );
   }
+});
+
+test('real PostgreSQL: JSON to XML matches the received body and audited outbound preview after API key rotation', async () => {
+  const auth = await syntheticAdminAuth();
+  const configuration = {
+    name: 'Synthetic JSON XML usability ' + suffix,
+    source: { type: 'HTTP', inboundDataType: 'JSON' },
+    destinations: [
+      {
+        name: 'Synthetic XML receiver',
+        type: 'REST',
+        endpoint: `http://127.0.0.1:${port}`,
+        outboundDataType: 'XML',
+      },
+    ],
+  };
+  const created = await request(app)
+    .post('/api/channel')
+    .set('Authorization', auth)
+    .send(configuration);
+  assert.equal(created.status, 201);
+  const id = created.body.channelId;
+  assert.equal(
+    created.body.sourceEndpoint,
+    `${config.inbound.baseUrl}${config.inbound.path}/${id}`,
+  );
+  const credential = () =>
+    request(app).put(`/api/channel/${id}/credential`).set('Authorization', auth);
+  const originalKey = (await credential()).body.data.apiKey;
+  const rotated = await credential();
+  assert.equal(rotated.status, 200);
+  const currentKey = rotated.body.data.apiKey;
+  assert.notEqual(currentKey, originalKey);
+  assert.equal(
+    (
+      await request(app)
+        .put(`/api/channel/${id}/status`)
+        .set('Authorization', auth)
+        .send({ status: 'RUNNING' })
+    ).status,
+    200,
+  );
+  const message = { Patient: { name: 'SYNTHETIC NAME', reference: 'SYNTHETIC-ONLY' } };
+  const inbound = () => request(app).post(`/api/message/inbound/${id}`).send(message);
+  assert.equal((await inbound().set('X-API-Key', originalKey)).status, 401);
+  const before = received;
+  const preview = await request(app)
+    .post('/api/channel/dry-run')
+    .set('Authorization', auth)
+    .send({ configuration, payload: message, raw: true });
+  assert.equal(preview.status, 200);
+  assert.equal(preview.body.networkDelivery, 'NOT_SENT');
+  assert.equal(received, before);
+  const sent = await inbound()
+    .set('X-API-Key', currentKey)
+    .set('Idempotency-Key', 'synthetic-usability-' + suffix);
+  assert.equal(sent.status, 200);
+  assert.equal(sent.body.result.inboundStatus, 'SUCCESS');
+  assert.equal(received, before + 1);
+  assert.match(receivedBodies.at(-1)!, /<Patient>/);
+  assert.match(receivedBodies.at(-1)!, /SYNTHETIC NAME/);
+  assert.equal(preview.body.results[0].finalPayload, receivedBodies.at(-1));
+  const messageId = sent.body.result.inboundMessageId;
+  const detail = await request(app).get(`/api/message/${messageId}`).set('Authorization', auth);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.data.inboundFormat, 'JSON');
+  assert.equal(detail.body.data.sourceTransformed, false);
+  assert.equal(detail.body.data.originalPayload.Patient, '[REDACTED]');
+  assert.equal(detail.body.data.destinationLogs[0].outboundFormat, 'XML');
+  assert.equal(detail.body.data.destinationLogs[0].outboundData, '[REDACTED TEXT]');
+  const raw = await request(app)
+    .get(`/api/message/${messageId}?raw=true`)
+    .set('Authorization', auth);
+  assert.equal(raw.status, 200);
+  assert.deepEqual(raw.body.data.originalPayload, message);
+  assert.deepEqual(raw.body.data.transformedPayload, message);
+  assert.equal(raw.body.data.destinationLogs[0].outboundData, receivedBodies.at(-1));
+  assert.equal(raw.body.data.destinationLogs[0].status, 'OUT-SENT');
+  assert.equal(raw.body.data.destinationLogs[0].snapshotCaptured, true);
+  const audits = (
+    await pool
+      .request()
+      .input('id', messageId)
+      .query('SELECT action FROM "AuditLog" WHERE resource_id=@id')
+  ).recordset;
+  assert.ok(audits.some((entry) => entry.action === 'VIEW_MESSAGE_RAW'));
 });
 
 test('real PostgreSQL: key rotation failure rolls back all records and new keyring reads rotated snapshots', async () => {

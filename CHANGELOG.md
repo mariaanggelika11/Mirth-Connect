@@ -1,5 +1,14 @@
 # Changelog
 
+## Development usability — 2026-10-16
+
+- Simplify channel setup with optional source processing and Advanced settings; automatically describe the initial configuration while retaining required edit summaries.
+- Add authoritative public source URLs, placeholder curl/Postman exports and post-save key/start/synthetic-test guidance.
+- Add destination TCP/TLS connection tests without application payloads and structured, masked/audited output previews.
+- Separate inbound, source processed and final destination payloads in Messages using captured revision/transport metadata.
+- Preserve operator sessions after source-key failures; preserve TEXT input types in stored revision previews; improve Advanced text contrast.
+- Verify 267 unit/API tests, 29 browser scenarios and 18 disposable PostgreSQL integration tests. No database migration or runtime production changes.
+
 ## Development source cleanup — 2026-10-14
 
 - Remove the unused Modal `keepMounted` prop and backend `Direction` type.

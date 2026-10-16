@@ -85,11 +85,12 @@ export function loadConfig(input: NodeJS.ProcessEnv) {
     MLLP_MAX_CONNECTIONS: integer(64, 1, 10000),
     HL7_ENABLED: bool(true),
     HL7_ALLOWED_IPS: z.string().default('127.0.0.1,::1'),
-    INBOUND_BASE_URL: z.url().default('http://localhost:9000'),
+    PUBLIC_BASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.url().optional()),
+    INBOUND_BASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.url().optional()),
     INBOUND_PATH: z
       .string()
       .regex(/^\/[A-Za-z0-9/_-]+$/)
-      .default('/api/inbound'),
+      .default('/api/message/inbound'),
     INBOUND_API_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(32).optional()),
     PAYLOAD_LIMIT_BYTES: integer(1048576, 1024, 10485760),
     REQUEST_TIMEOUT_MS: integer(10000, 100, 120000),
@@ -153,6 +154,26 @@ export function loadConfig(input: NodeJS.ProcessEnv) {
     throw new Error('Production requires verified encrypted PostgreSQL connections');
   if (e.NODE_ENV === 'production' && !e.OUTBOUND_ALLOWED_HOSTS)
     throw new Error('Production requires OUTBOUND_ALLOWED_HOSTS');
+  const publicBase = new URL(
+    e.PUBLIC_BASE_URL || e.INBOUND_BASE_URL || `http://localhost:${e.PORT}`,
+  );
+  if (
+    !['http:', 'https:'].includes(publicBase.protocol) ||
+    publicBase.username ||
+    publicBase.password ||
+    publicBase.search ||
+    publicBase.hash
+  )
+    throw new Error(
+      'PUBLIC_BASE_URL must be an HTTP(S) base URL without credentials, query or fragment',
+    );
+  if (
+    e.NODE_ENV === 'production' &&
+    (!(e.PUBLIC_BASE_URL || e.INBOUND_BASE_URL) ||
+      publicBase.protocol !== 'https:' ||
+      ['localhost', '127.0.0.1', '[::1]'].includes(publicBase.hostname))
+  )
+    throw new Error('Production requires an explicit public HTTPS PUBLIC_BASE_URL');
   if (e.MLLP_TLS_ENABLED && (!e.MLLP_TLS_CERT_FILE || !e.MLLP_TLS_KEY_FILE || !e.MLLP_TLS_CA_FILE))
     throw new Error('MLLP TLS requires certificate, private key and CA files');
   if (
@@ -208,7 +229,7 @@ export function loadConfig(input: NodeJS.ProcessEnv) {
       },
     },
     inbound: {
-      baseUrl: e.INBOUND_BASE_URL,
+      baseUrl: publicBase.href.replace(/\/$/, ''),
       path: e.INBOUND_PATH.replace(/\/$/, ''),
       apiKey: e.INBOUND_API_KEY || '',
       idempotencyMode: e.INBOUND_IDEMPOTENCY_MODE,

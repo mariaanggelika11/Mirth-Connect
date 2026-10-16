@@ -282,8 +282,10 @@ test('channel wizard prevents accidental loss and requires review before saving'
     .getByRole('button', { name: 'Cancel' })
     .click();
   await expect(page.getByText('Review your connection')).toBeVisible();
-  await page.getByLabel('Change summary').fill('Synthetic configuration review');
+  await expect(page.getByLabel('Change summary')).toHaveCount(0);
   await page.getByRole('button', { name: 'Save Channel' }).click();
+  await expect(page.getByRole('dialog', { name: 'Channel saved', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(saves).toBe(1);
 });
@@ -383,6 +385,7 @@ test('draft iteration, stored dry-run and handshake probe use functional APIs wi
   let probeCalls = 0;
   const detail = {
     name: 'Synthetic draft',
+    source: { type: 'HTTP', inboundDataType: 'JSON' },
     idempotencyMode: 'OPTIONAL',
     destinations: [
       {
@@ -433,7 +436,17 @@ test('draft iteration, stored dry-run and handshake probe use functional APIs wi
       json: {
         success: true,
         revision: 3,
-        results: [{ finalPayload: { fixture: 'synthetic', processed: true }, status: 'VALID' }],
+        accepted: true,
+        elapsedMs: 2,
+        networkDelivery: 'NOT_SENT',
+        results: [
+          {
+            name: 'Synthetic sender',
+            outputFormat: 'JSON',
+            finalPayload: { fixture: 'synthetic', processed: true },
+            status: 'VALID',
+          },
+        ],
         warnings: ['No DNS or network delivery'],
       },
     });
@@ -453,7 +466,7 @@ test('draft iteration, stored dry-run and handshake probe use functional APIs wi
   await page.getByRole('button', { name: 'Revisions', exact: true }).click();
   await page.getByRole('button', { name: 'Edit draft 2' }).click();
   await page.getByLabel('Draft channel name').fill('Edited synthetic draft');
-  await page.getByLabel('Draft destination 1 timeout').fill('2345');
+  await page.getByLabel('Draft destination 1 timeout').fill('2.345');
   await page.getByLabel('Publish / rollback summary').fill('Synthetic reviewed edit');
   await page.getByRole('button', { name: 'Save successor draft' }).click();
   await expect(page.getByRole('button', { name: 'Edit draft 3' })).toBeVisible();
@@ -606,4 +619,66 @@ test('admin downloads audited metadata using real diagnostic API contract', asyn
   await page.getByRole('button', { name: 'Download diagnostic metadata' }).click();
   expect((await report).suggestedFilename()).toBe('mirth-diagnostic-metadata.json');
   expect(downloads).toBe(1);
+});
+
+test('stored TEXT revision dry-run preserves JSON-looking text without changing its type', async ({
+  page,
+}) => {
+  await session(page, 'DEVELOPER');
+  await page.route('**/api/channel/1/revisions', (route) =>
+    route.fulfill({
+      json: {
+        success: true,
+        data: [
+          {
+            revision: 2,
+            state: 'DRAFT',
+            change_summary: 'Synthetic text channel',
+            checksum: 'a'.repeat(64),
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/channel/1/revisions/2', (route) =>
+    route.fulfill({
+      json: {
+        success: true,
+        data: {
+          name: 'Synthetic text',
+          source: { type: 'HTTP', inboundDataType: 'TEXT' },
+          destinations: [],
+        },
+      },
+    }),
+  );
+  let posted: unknown;
+  await page.route('**/api/channel/1/revisions/2/dry-run', (route) => {
+    posted = route.request().postDataJSON();
+    return route.fulfill({
+      json: {
+        success: true,
+        accepted: true,
+        elapsedMs: 1,
+        networkDelivery: 'NOT_SENT',
+        results: [],
+        source: {
+          format: 'TEXT',
+          payload: '{"fixture":"synthetic"}',
+          validation: 'PASSED',
+          filter: 'ACCEPTED',
+          transformation: 'PASS_THROUGH',
+        },
+      },
+    });
+  });
+  await page.getByLabel('More actions for Test Channel').click();
+  await page.getByRole('button', { name: 'Revisions', exact: true }).click();
+  await page.getByRole('button', { name: 'Dry-run revision 2' }).click();
+  await expect(page.getByLabel('Revision dry-run result')).toContainText(
+    'Source processing · TEXT',
+  );
+  expect(posted).toEqual({ payload: '{"fixture":"synthetic"}' });
+  await page.getByLabel('Synthetic revision test payload').fill('Changed synthetic input');
+  await expect(page.getByLabel('Revision dry-run result')).toHaveCount(0);
 });

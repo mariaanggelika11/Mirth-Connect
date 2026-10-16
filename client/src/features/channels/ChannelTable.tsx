@@ -20,6 +20,7 @@ import { updateChannelStatus } from '../../services/channel.api';
 import { api } from '../../services/api';
 import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
 import { StatusBadge, FlowLabel, EmptyState } from '../../components/ui/OperationalUI';
+import { SourceEndpoint } from './SourceEndpoint';
 interface Props {
   channels: Channel[];
   onRefresh: () => void;
@@ -249,6 +250,7 @@ function ChannelRow({
                   <ArrowRight size={14} />
                 </button>
               </div>
+              <SourceEndpoint channel={channel} />
               {!channel.destinations.length ? (
                 <p className="muted">
                   No destinations configured. Add one in the channel editor to deliver messages.

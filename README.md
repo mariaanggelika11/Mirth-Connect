@@ -42,14 +42,16 @@ Konfigurasi penting:
 | `PG_SSL`, `PG_SSL_REJECT_UNAUTHORIZED` | Default `false`, `true`; production mewajibkan keduanya `true` |
 | `HL7_ENABLED`, `HL7_HOST`, `HL7_PORT` | Default `true`, `127.0.0.1`, `2575` |
 | `HL7_ALLOWED_IPS` | IP literal peer yang diperbolehkan; default loopback |
-| `INBOUND_BASE_URL`, `INBOUND_PATH` | URL yang ditampilkan untuk HTTP source; default `/api/inbound` |
+| `PUBLIC_BASE_URL`, `INBOUND_PATH` | Origin publik backend yang dipakai pada source endpoint; default lokal `http://localhost:9000` dan `/api/message/inbound`. Production wajib HTTPS eksplisit. `INBOUND_BASE_URL` tetap menjadi fallback kompatibilitas. |
 | `OUTBOUND_ALLOWED_HOSTS` | Hostname/IP destination yang diizinkan; wajib di production |
 | `REQUEST_TIMEOUT_MS`, `PAYLOAD_LIMIT_BYTES` | Default 10 detik, 1 MiB |
 | `SCRIPT_TIMEOUT_MS`, `SCRIPT_MEMORY_MB`, `SCRIPT_CONCURRENCY` | Default 1000 ms, 16 MiB, 4 worker aktif |
 | `MESSAGE_RETENTION_DAYS`, `AUDIT_RETENTION_DAYS` | Default 30 dan 365 hari |
 | `PUBLIC_REGISTRATION` | Default false; bila diaktifkan hanya VIEWER |
 
-`BASE_URL`/`INBOUND_BASE` lama diganti `INBOUND_BASE_URL`/`INBOUND_PATH`. Endpoint legacy `/api/message/inbound/:channelId` tetap tersedia dengan JWT dan permission `inbound:send`. `VITE_API_BASE_URL` kosong memakai same origin; `VITE_API_PROXY_URL` menentukan backend development. Jangan masukkan secret dalam variable `VITE_`.
+Atur `PUBLIC_BASE_URL=https://connect.bulmar.tech` pada server di balik reverse proxy; untuk development gunakan `PUBLIC_BASE_URL=http://localhost:9000`. UI menerima endpoint dari backend, tanpa menebak dari hostname browser. `PUBLIC_BASE_URL` mengungguli `INBOUND_BASE_URL`; hapus override `INBOUND_PATH` lama bila ingin memakai path default baru. Path source yang dikonfigurasi, `/api/inbound/:channelId`, dan `/api/message/inbound/:channelId` tetap dapat menerima source API key. Alur Bearer pada endpoint management tetap memerlukan permission `inbound:send`. `VITE_API_BASE_URL` kosong memakai same origin; `VITE_API_PROXY_URL` menentukan backend development. Jangan masukkan secret dalam variable `VITE_`.
+
+Panduan wizard, preview output, API key dan pemeriksaan hasil akhir tersedia di [manual UI/UX](docs/UI_UX.md#simplifikasi-usability--16-oktober-2026).
 
 ## Database setup dan migration
 

@@ -6,7 +6,18 @@ import { validate, validateId, channelSchema, draftPatchSchema } from '../utils/
 import * as revision from '../services/revision.services.js';
 import { dryRun } from '../services/dryRun.services.js';
 import { AppError } from '../utils/errors.js';
+import { config } from '../config/env.js';
+import { connectionProbeSchema, probeDestination } from '../services/connectionProbe.services.js';
 const router = Router();
+router.get('/source-configuration', requirePermission('channel:read'), (_req, res) =>
+  res.json({ success: true, baseUrl: config.inbound.baseUrl, path: config.inbound.path }),
+);
+router.post(
+  '/test-connection',
+  requirePermission('channel:write'),
+  validate(connectionProbeSchema),
+  probeDestination,
+);
 router.post('/dry-run', requirePermission('channel:write'), dryRun);
 const revisionId = (
   req: Parameters<typeof validateId>[0],
@@ -56,7 +67,10 @@ router.post(
   revisionId,
   validate(
     z
-      .object({ payload: z.unknown().refine((v) => v !== undefined, 'Provide synthetic payload') })
+      .object({
+        payload: z.unknown().refine((v) => v !== undefined, 'Provide synthetic payload'),
+        raw: z.boolean().optional(),
+      })
       .strict(),
   ),
   revision.dryRunRevision,

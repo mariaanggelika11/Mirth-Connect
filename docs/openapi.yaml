@@ -1310,7 +1310,112 @@
         "operationId": "post__api_channel_dry_run",
         "responses": {
           "200": {
-            "description": "Success; see route-specific legacy envelope."
+            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes only. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "accepted",
+                    "input",
+                    "source",
+                    "networkDelivery",
+                    "results",
+                    "rawPayload"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "accepted": {
+                      "type": "boolean"
+                    },
+                    "networkDelivery": {
+                      "const": "NOT_SENT"
+                    },
+                    "rawPayload": {
+                      "type": "boolean"
+                    },
+                    "input": {
+                      "type": "object",
+                      "properties": {
+                        "format": {
+                          "type": "string"
+                        },
+                        "payload": {}
+                      }
+                    },
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "format": {
+                          "type": "string"
+                        },
+                        "payload": {},
+                        "validation": {
+                          "enum": [
+                            "PASSED",
+                            "ERROR",
+                            "SKIPPED"
+                          ]
+                        },
+                        "filter": {
+                          "enum": [
+                            "ACCEPTED",
+                            "FILTERED",
+                            "ERROR",
+                            "SKIPPED"
+                          ]
+                        },
+                        "transformation": {
+                          "enum": [
+                            "TRANSFORMED",
+                            "PASS_THROUGH",
+                            "SKIPPED",
+                            "ERROR"
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "description": "Safe diagnostic code for a failed source stage; no exception text."
+                        }
+                      }
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "outputFormat": {
+                            "type": "string"
+                          },
+                          "connectorType": {
+                            "type": "string"
+                          },
+                          "finalPayload": {},
+                          "status": {
+                            "enum": [
+                              "VALID",
+                              "ERROR"
+                            ]
+                          },
+                          "stages": {
+                            "type": "object"
+                          },
+                          "code": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Safe validation error",
@@ -1338,7 +1443,17 @@
             "description": "Database or capacity unavailable"
           }
         },
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "raw",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Explicit audited administrator raw preview; otherwise every input/source/final payload is masked. Use synthetic messages only."
+          }
+        ],
         "x-required-permission": "channel:write",
         "requestBody": {
           "required": true,
@@ -1354,7 +1469,12 @@
                   "configuration": {
                     "$ref": "#/components/schemas/Channel"
                   },
-                  "payload": {}
+                  "payload": {},
+                  "raw": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Explicit administrator-only audited raw preview; equivalent to raw=true query parameter."
+                  }
                 }
               }
             }
@@ -1517,6 +1637,9 @@
         "x-required-permission": "inbound:send",
         "security": [
           {
+            "connectorKey": []
+          },
+          {
             "bearerAuth": []
           }
         ],
@@ -1542,7 +1665,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Canonical external source endpoint accepts the per-channel X-API-Key. Legacy management bearer automation remains supported. /api/inbound/{channelId} remains an API-key alias; configured INBOUND_PATH is also accepted."
       }
     },
     "/api/message": {
@@ -1707,7 +1831,7 @@
         "operationId": "get__api_message__id_",
         "responses": {
           "200": {
-            "description": "Success; see route-specific legacy envelope."
+            "description": "Message detail retains originalPayload/transformedPayload fields with existing redaction and audited raw access. inboundFormat comes from the captured inbound message; optional sourceTransformed comes only from its immutable channel revision. Destination logs add outboundFormat, connectorType and snapshotCaptured from captured transport configuration. Missing historical metadata is unknown. HTTP response codes are not inferred. Failed/filtered attempts may precede conversion or network submission."
           },
           "400": {
             "description": "Safe validation error",
@@ -2385,6 +2509,15 @@
               "type": "integer",
               "minimum": 1
             }
+          },
+          {
+            "name": "raw",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Explicit audited administrator raw preview; otherwise every input/source/final payload is masked. Use synthetic messages only."
           }
         ],
         "requestBody": {
@@ -2400,6 +2533,11 @@
                 "properties": {
                   "payload": {
                     "description": "Synthetic JSON value or HL7/XML/TEXT string"
+                  },
+                  "raw": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Explicit administrator-only audited raw preview; equivalent to raw=true query parameter."
                   }
                 }
               }
@@ -2408,11 +2546,109 @@
         },
         "responses": {
           "200": {
-            "description": "Successful implemented operation",
+            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes only. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "accepted",
+                    "input",
+                    "source",
+                    "networkDelivery",
+                    "results",
+                    "rawPayload"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "accepted": {
+                      "type": "boolean"
+                    },
+                    "networkDelivery": {
+                      "const": "NOT_SENT"
+                    },
+                    "rawPayload": {
+                      "type": "boolean"
+                    },
+                    "input": {
+                      "type": "object",
+                      "properties": {
+                        "format": {
+                          "type": "string"
+                        },
+                        "payload": {}
+                      }
+                    },
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "format": {
+                          "type": "string"
+                        },
+                        "payload": {},
+                        "validation": {
+                          "enum": [
+                            "PASSED",
+                            "ERROR",
+                            "SKIPPED"
+                          ]
+                        },
+                        "filter": {
+                          "enum": [
+                            "ACCEPTED",
+                            "FILTERED",
+                            "ERROR",
+                            "SKIPPED"
+                          ]
+                        },
+                        "transformation": {
+                          "enum": [
+                            "TRANSFORMED",
+                            "PASS_THROUGH",
+                            "SKIPPED",
+                            "ERROR"
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "description": "Safe diagnostic code for a failed source stage; no exception text."
+                        }
+                      }
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "outputFormat": {
+                            "type": "string"
+                          },
+                          "connectorType": {
+                            "type": "string"
+                          },
+                          "finalPayload": {},
+                          "status": {
+                            "enum": [
+                              "VALID",
+                              "ERROR"
+                            ]
+                          },
+                          "stages": {
+                            "type": "object"
+                          },
+                          "code": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -2561,35 +2797,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "success",
-                    "reachable",
-                    "secure",
-                    "elapsedMs",
-                    "warnings"
-                  ],
-                  "properties": {
-                    "success": {
-                      "const": true
-                    },
-                    "reachable": {
-                      "const": true
-                    },
-                    "secure": {
-                      "type": "boolean"
-                    },
-                    "elapsedMs": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "warnings": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
+                  "$ref": "#/components/schemas/ConnectionProbe"
                 }
               }
             }
@@ -3087,6 +3295,177 @@
           },
           "504": {
             "description": "Safe error; no credentials, payload, SQL or stack trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channel/test-connection": {
+      "post": {
+        "summary": "Test an unsaved destination with an audited DNS and pinned TCP/TLS handshake; sends no application bytes",
+        "operationId": "post__api_channel_test_connection",
+        "x-required-permission": "channel:write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "endpoint",
+                  "type"
+                ],
+                "properties": {
+                  "endpoint": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "type": {
+                    "enum": [
+                      "REST",
+                      "HL7",
+                      "MLLP",
+                      "TCP",
+                      "RAW"
+                    ]
+                  },
+                  "timeoutMs": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "maximum": 10000,
+                    "default": 5000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transport handshake succeeded; HTTP status, application credentials and delivery are not tested",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionProbe"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Safe validation, authorization or capacity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Safe validation, authorization or capacity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Safe validation, authorization or capacity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Safe validation, authorization or capacity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Safe validation, authorization or capacity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Safe validation, authorization or capacity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/channel/source-configuration": {
+      "get": {
+        "summary": "Authoritative source base URL and inbound path from backend deployment configuration; PUBLIC_BASE_URL takes precedence over legacy INBOUND_BASE_URL",
+        "operationId": "get__api_channel_source_configuration",
+        "x-required-permission": "channel:read",
+        "responses": {
+          "200": {
+            "description": "Configured public source URL, never inferred from request or browser host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "baseUrl",
+                    "path"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "baseUrl": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Safe validation, authorization or capacity error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Safe validation, authorization or capacity error",
             "content": {
               "application/json": {
                 "schema": {
@@ -3840,6 +4219,48 @@
           }
         },
         "additionalProperties": false
+      },
+      "ConnectionProbe": {
+        "type": "object",
+        "required": [
+          "success",
+          "reachable",
+          "secure",
+          "elapsedMs",
+          "probe",
+          "applicationDeliveryTested",
+          "warnings"
+        ],
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "reachable": {
+            "const": true
+          },
+          "secure": {
+            "type": "boolean"
+          },
+          "elapsedMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "probe": {
+            "enum": [
+              "TCP_HANDSHAKE",
+              "TLS_HANDSHAKE"
+            ]
+          },
+          "applicationDeliveryTested": {
+            "const": false
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       }
     }
   }

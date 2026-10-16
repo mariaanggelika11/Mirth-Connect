@@ -144,6 +144,8 @@ export async function testConnection(endpoint: string, type: string, timeout = 5
   return {
     reachable: true,
     secure,
+    probe: secure ? 'TLS_HANDSHAKE' : 'TCP_HANDSHAKE',
+    applicationDeliveryTested: false,
     elapsedMs: Math.round(performance.now() - started),
     warnings: [
       secure

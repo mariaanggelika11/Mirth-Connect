@@ -1,6 +1,6 @@
 import { api } from '../../services/api';
 import { useState } from 'react';
-import { ChevronDown, RotateCcw } from 'lucide-react';
+import { ArrowRight, ChevronDown, RotateCcw } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchLogDetail, resendMessage } from '../../services/message.api';
 import type { LogEntry, DestinationLog } from '../../types';
@@ -52,6 +52,27 @@ export default function LogDetailModal({
       setResending(false);
     }
   }
+  const pagination = log.destinationPagination && (
+    <div className="pagination">
+      <span>Results page {log.destinationPagination.page}</span>
+      <div className="heading-actions">
+        <Button
+          variant="secondary"
+          disabled={loading || log.destinationPagination.page <= 1}
+          onClick={() => void loadPage(log.destinationPagination!.page - 1)}
+        >
+          Previous results
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={loading || !log.destinationPagination.hasNext}
+          onClick={() => void loadPage(log.destinationPagination!.page + 1)}
+        >
+          Next results
+        </Button>
+      </div>
+    </div>
+  );
   return (
     <>
       <Modal isOpen onClose={onClose} title={`Message #${log.id}`} variant="drawer">
@@ -196,7 +217,7 @@ export default function LogDetailModal({
                 </strong>
                 <p>
                   {log.destinationLogs?.length
-                    ? 'Open Delivery history for destination results, responses and retry actions.'
+                    ? 'Open Payload for the final output sent to each destination. Delivery history shows attempts, responses and retry actions.'
                     : 'This message has no destination attempts recorded.'}
                 </p>
               </div>
@@ -209,28 +230,141 @@ export default function LogDetailModal({
           )}
           {tab === 'payload' && log.payloadAllowed && (
             <div className="form-section">
-              {can('message:raw') && (
-                <Button
-                  variant="secondary"
-                  disabled={loading}
-                  onClick={() => {
-                    setLoading(true);
-                    void fetchLogDetail(log.id, 1, !log.rawPayload)
-                      .then(setLog)
-                      .catch((e) => setError(e.message))
-                      .finally(() => setLoading(false));
-                  }}
-                >
-                  {log.rawPayload ? 'Show redacted' : 'View raw (audited)'}
-                </Button>
-              )}
-              <p className="muted">
+              <p className="muted" role="status">
                 {log.rawPayload
-                  ? 'Raw payload access is audited.'
+                  ? 'Raw payload access is audited. Copies contain the raw content displayed below.'
                   : 'Redacted view. Copies use the displayed content.'}
               </p>
-              <PayloadViewer title="Original payload" value={log.originalPayload} />
-              <PayloadViewer title="Transformed payload" value={log.transformedPayload} />
+              {can('message:raw') && (
+                <div className="raw-access-controls">
+                  {!log.rawPayload && (
+                    <p className="muted">Viewing raw payload will be recorded in the audit log.</p>
+                  )}
+                  <Button
+                    variant="secondary"
+                    disabled={loading}
+                    onClick={() => {
+                      setLoading(true);
+                      setError('');
+                      void fetchLogDetail(
+                        log.id,
+                        log.destinationPagination?.page || 1,
+                        !log.rawPayload,
+                      )
+                        .then(setLog)
+                        .catch((e) => setError(e.message))
+                        .finally(() => setLoading(false));
+                    }}
+                  >
+                    {log.rawPayload ? 'Show redacted' : 'View raw (audited)'}
+                  </Button>
+                </div>
+              )}
+              {log.direction === 'OUT' ? (
+                <>
+                  <p className="muted">
+                    This outbound record stores the payload available for destination delivery. It
+                    is separate from the original inbound message; check the delivery status to see
+                    whether it was accepted.
+                  </p>
+                  <PayloadViewer
+                    title="Stored outbound payload"
+                    value={log.transformedPayload ?? log.originalPayload}
+                  />
+                </>
+              ) : (
+                <>
+                  <PayloadViewer title="Original inbound payload" value={log.originalPayload} />
+                  <p className="muted">The message received from the source.</p>
+                  {log.sourceTransformed === false && (
+                    <span className="status-pill status-stopped">No source transformation</span>
+                  )}
+                  <PayloadViewer title="Source processed payload" value={log.transformedPayload} />
+                  <p className="muted">
+                    The result of source processing, before each destination converts the message to
+                    its outbound format.
+                  </p>
+                </>
+              )}
+              <div className="section-header">
+                <h3>Outbound deliveries</h3>
+              </div>
+              <p className="muted">
+                Recorded outbound payload and response for each destination attempt on this page.
+                Delivered attempts show the final payload accepted by the destination. Retries
+                appear as separate attempts.
+              </p>
+              {!log.destinationLogs?.length ? (
+                <EmptyState
+                  title="No outbound deliveries recorded"
+                  description="Final outbound payloads appear when destination processing records an attempt."
+                />
+              ) : (
+                log.destinationLogs.map((dest, i) => (
+                  <section
+                    key={`${dest.messageId}-${dest.sentAt}-${i}`}
+                    className="delivery-card outbound-delivery"
+                    aria-label={`Outbound delivery to ${dest.destinationName || 'destination'}`}
+                  >
+                    <div className="delivery-heading">
+                      <div>
+                        <h3>{dest.destinationName || 'Destination'}</h3>
+                        <small>{formatTime(dest.sentAt)}</small>
+                      </div>
+                      <StatusBadge status={dest.status} />
+                    </div>
+                    {log.direction !== 'OUT' && (
+                      <div className="message-processing-flow" aria-label="Message processing flow">
+                        <span>{log.inboundFormat || 'Inbound format not recorded'}</span>
+                        <ArrowRight size={14} aria-hidden="true" />
+                        <span>Source processing</span>
+                        <ArrowRight size={14} aria-hidden="true" />
+                        <span>Destination processing</span>
+                        <ArrowRight size={14} aria-hidden="true" />
+                        <strong>{dest.outboundFormat || 'Outbound format not recorded'}</strong>
+                      </div>
+                    )}
+                    <dl className="definition-list">
+                      <div>
+                        <dt>Outbound format</dt>
+                        <dd>{dest.outboundFormat || 'Not recorded'}</dd>
+                      </div>
+                      {dest.connectorType && (
+                        <div>
+                          <dt>Connector</dt>
+                          <dd>{dest.connectorType}</dd>
+                        </div>
+                      )}
+                      <div>
+                        <dt>Delivery status</dt>
+                        <dd>{dest.status}</dd>
+                      </div>
+                      {dest.ackCode && (
+                        <div>
+                          <dt>Acknowledgement</dt>
+                          <dd>ACK {dest.ackCode}</dd>
+                        </div>
+                      )}
+                    </dl>
+                    {dest.snapshotCaptured === false && (
+                      <p className="muted">
+                        This legacy attempt has no captured destination configuration. Missing
+                        format metadata is not inferred from current channel settings.
+                      </p>
+                    )}
+                    {dest.status !== 'OUT-SENT' && (
+                      <p className="muted">
+                        Delivery is not confirmed for this attempt. A filter or processing error can
+                        stop delivery before a final outbound payload is generated; the stored
+                        payload alone does not prove it was sent.
+                      </p>
+                    )}
+                    <PayloadViewer title="Outbound payload" value={dest.outboundData} />
+                    <PayloadViewer title="Destination response" value={dest.responseText} />
+                  </section>
+                ))
+              )}
+              {pagination}
             </div>
           )}
           {tab === 'history' && (
@@ -276,7 +410,10 @@ export default function LogDetailModal({
                           Request, outbound & response
                           <ChevronDown size={14} />
                         </summary>
-                        <PayloadViewer title="Request data" value={dest.requestData} />
+                        <PayloadViewer
+                          title="Destination processing input"
+                          value={dest.requestData}
+                        />
                         <PayloadViewer title="Outbound payload" value={dest.outboundData} />
                         <PayloadViewer title="Destination response" value={dest.responseText} />
                       </details>
@@ -284,27 +421,7 @@ export default function LogDetailModal({
                   </section>
                 ))
               )}
-              {log.destinationPagination && (
-                <div className="pagination">
-                  <span>Results page {log.destinationPagination.page}</span>
-                  <div className="heading-actions">
-                    <Button
-                      variant="secondary"
-                      disabled={loading || log.destinationPagination.page <= 1}
-                      onClick={() => void loadPage(log.destinationPagination!.page - 1)}
-                    >
-                      Previous results
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      disabled={loading || !log.destinationPagination.hasNext}
-                      onClick={() => void loadPage(log.destinationPagination!.page + 1)}
-                    >
-                      Next results
-                    </Button>
-                  </div>
-                </div>
-              )}
+              {pagination}
             </div>
           )}
         </div>

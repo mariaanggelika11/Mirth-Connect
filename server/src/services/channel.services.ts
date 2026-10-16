@@ -39,7 +39,7 @@ interface DestinationRow extends Destination {
   is_enabled: boolean;
 }
 
-function endpoint(type: string, id: number) {
+export function endpoint(type: string, id: number) {
   return type === 'HTTP'
     ? `${config.inbound.baseUrl}${config.inbound.path}/${id}`
     : `MLLP:${config.hl7.port}`;
@@ -98,7 +98,7 @@ export const getAllChannels = async (req: Request, res: Response, next: NextFunc
         apiKeyConfigured: !!c.source_api_key,
         source: {
           type: c.source_type,
-          endpoint: c.source_endpoint,
+          endpoint: endpoint(c.source_type, c.id),
           inboundDataType: c.inbound_data_type,
         },
         processingScript: mayConfigure ? c.processing_script : '',
@@ -260,6 +260,7 @@ async function saveChannel(req: Request, res: Response, next: NextFunction, crea
       revision: id.revision,
       draft: id.draft,
       endpoint: endpoint(data.source.type, id.id),
+      sourceEndpoint: endpoint(data.source.type, id.id),
     });
   } catch (error) {
     next(error);

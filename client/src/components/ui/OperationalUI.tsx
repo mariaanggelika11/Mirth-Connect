@@ -20,9 +20,32 @@ export function StatusBadge({ status }: { status?: string }) {
       .toLowerCase()
       .replaceAll('_', ' ')
       .replace(/^./, (c) => c.toUpperCase());
+  const descriptions: Record<string, string> = {
+    RUNNING: 'The channel is accepting messages.',
+    STOPPED: 'The channel is stopped. Start it before sending a message.',
+    SUCCESS: 'Message processing completed successfully.',
+    RECEIVED: 'The inbound message was received.',
+    'OUT-SENT':
+      'The destination accepted delivery. This does not confirm downstream business processing.',
+    FILTERED: 'The message was not forwarded because a configured filter did not accept it.',
+    DEAD_LETTER:
+      'Automatic delivery has stopped. Delivery failed or could not be confirmed. Review the outcome before resending.',
+    'OUT-ERROR': 'A destination delivery attempt failed. Review the response and retry history.',
+    'IN-ERROR': 'Inbound processing failed. Review the diagnostic and delivery history.',
+    FAILED: 'Message processing failed. Review the diagnostic and delivery history.',
+    ERROR: 'An error requires attention. Review the recorded diagnostic.',
+    QUEUED: 'The message is waiting for a delivery attempt.',
+    RETRYING: 'A retry is scheduled or in progress. Check the next retry time.',
+    PARTIAL: 'Destination results differ. Review each delivery before taking action.',
+    'IN-PROCESS': 'The inbound message is being processed.',
+    PROCESSING: 'Message processing is in progress.',
+    PAUSED: 'Processing is paused.',
+    UNKNOWN: 'No status has been recorded.',
+  };
   return (
     <span
       className={`status-pill ${good ? 'status-running' : bad ? 'status-error' : waiting ? 'status-warning' : 'status-stopped'}`}
+      title={`${value}: ${descriptions[value] || 'Review the recorded message details.'}`}
     >
       <span className="status-dot" />
       {label}

@@ -214,7 +214,7 @@ describe('Revision and dry-run gates', () => {
   it('dry-run returns transformed synthetic payload without transport side effects', async () => {
     state.query.mockResolvedValue({ recordset: [admin] });
     const res = await request(app)
-      .post('/api/channel/dry-run')
+      .post('/api/channel/dry-run?raw=true')
       .set('Authorization', 'Bearer ' + token)
       .send({
         configuration: {

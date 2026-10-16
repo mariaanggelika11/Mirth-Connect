@@ -4,6 +4,9 @@ import type { Channel } from '../../types';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
+import { DryRunPreview } from './DryRunPreview';
+import type { DryRunResult } from './DryRunPreview';
+import { useAuth } from '../../contexts/AuthContext';
 interface DraftEdit {
   revision: number;
   checksum: string;
@@ -26,6 +29,9 @@ export function RevisionPanel({
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const { can } = useAuth();
+  const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null);
+  const [rawPreview, setRawPreview] = useState(false);
   const [rows, setRows] = useState<Revision[]>([]),
     [error, setError] = useState(''),
     [summary, setSummary] = useState(''),
@@ -42,6 +48,9 @@ export function RevisionPanel({
     } | null>(null),
     [selected, setSelected] = useState<number[]>([]);
   const dirty = !!editing && JSON.stringify(editing) !== editBaseline;
+  useEffect(() => {
+    setDryRunResult(null);
+  }, [synthetic, rawPreview]);
   useEffect(() => {
     if (!dirty) return;
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -126,17 +135,18 @@ export function RevisionPanel({
     setBusy(true);
     setError('');
     setTestResult('');
+    setDryRunResult(null);
     try {
+      const { data: configuration } = await api.get(`/channel/${channel.id}/revisions/${revision}`);
       let payload: unknown = synthetic;
-      try {
+      if (configuration.data.source.inboundDataType === 'JSON') {
         payload = JSON.parse(synthetic);
-      } catch {
-        /* HL7/XML/TEXT synthetic fixture */
       }
       const { data } = await api.post(`/channel/${channel.id}/revisions/${revision}/dry-run`, {
         payload,
+        ...(rawPreview && can('message:raw') ? { raw: true } : {}),
       });
-      setTestResult(JSON.stringify(data, null, 2));
+      setDryRunResult(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to test revision');
     } finally {
@@ -147,6 +157,7 @@ export function RevisionPanel({
     setBusy(true);
     setError('');
     setTestResult('');
+    setDryRunResult(null);
     try {
       const { data } = await api.post(
         `/channel/${channel.id}/revisions/${revision}/destinations/${index}/test-connection`,
@@ -235,7 +246,7 @@ export function RevisionPanel({
               />
             </label>
             <label className="field">
-              <span>Draft idempotency mode</span>
+              <span>Draft duplicate message protection</span>
               <select
                 value={editing.idempotencyMode}
                 onChange={(e) =>
@@ -283,17 +294,20 @@ export function RevisionPanel({
                   Enabled destination {d.index + 1}
                 </label>
                 <label className="field">
-                  <span>Draft destination {d.index + 1} timeout (ms)</span>
+                  <span>Draft destination {d.index + 1} timeout (seconds)</span>
                   <input
                     type="number"
-                    min={100}
-                    max={120000}
-                    value={d.timeoutMs}
+                    min={0.1}
+                    max={120}
+                    step={0.1}
+                    value={d.timeoutMs / 1000}
                     onChange={(e) =>
                       setEditing({
                         ...editing,
                         destinations: editing.destinations.map((v) =>
-                          v.index === d.index ? { ...v, timeoutMs: Number(e.target.value) } : v,
+                          v.index === d.index
+                            ? { ...v, timeoutMs: Math.round(Number(e.target.value) * 1000) }
+                            : v,
                         ),
                       })
                     }
@@ -318,12 +332,30 @@ export function RevisionPanel({
         )}
         <label className="field">
           <span>Synthetic revision test payload</span>
-          <textarea rows={4} value={synthetic} onChange={(e) => setSynthetic(e.target.value)} />
+          <textarea
+            rows={4}
+            disabled={busy}
+            value={synthetic}
+            onChange={(e) => setSynthetic(e.target.value)}
+          />
         </label>
         <p>
           Use synthetic data only. Revision dry-run performs no network delivery and masks its
           payload preview.
         </p>
+        {can('message:raw') && (
+          <label className="check-field">
+            <input
+              type="checkbox"
+              checked={rawPreview}
+              onChange={(e) => {
+                setRawPreview(e.target.checked);
+                setDryRunResult(null);
+              }}
+            />
+            View raw synthetic preview (audited)
+          </label>
+        )}
         {rows.map((row) => (
           <section key={row.revision} className="form-section">
             <strong>
@@ -401,6 +433,11 @@ export function RevisionPanel({
               ))}
             </section>
           )}
+        {dryRunResult && (
+          <div aria-label="Revision dry-run result">
+            <DryRunPreview result={dryRunResult} />
+          </div>
+        )}
         {testResult && (
           <pre className="code-box" role="status" aria-label="Revision dry-run result">
             {testResult}

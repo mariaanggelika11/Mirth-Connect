@@ -16,6 +16,37 @@ beforeEach(() => {
   dispatch.mockClear();
 });
 describe('Browser API session handling', () => {
+  it('rejects a source key failure without refreshing or expiring the operator session', async () => {
+    const adapter = api.defaults.adapter;
+    let requests = 0;
+    setAccessToken('synthetic-operator-access-token');
+    api.defaults.adapter = async (config) => {
+      requests++;
+      throw new AxiosError('Invalid connector credential', '401', config, undefined, {
+        data: { code: 'CONNECTOR_UNAUTHORIZED', message: 'Invalid connector credential' },
+        status: 401,
+        statusText: 'Unauthorized',
+        headers: {},
+        config,
+      });
+    };
+    try {
+      await expect(
+        api.post(
+          '/message/inbound/1',
+          { message: 'Synthetic' },
+          {
+            headers: { 'X-API-Key': 'invalid-synthetic-key' },
+          },
+        ),
+      ).rejects.toThrow('Invalid connector credential');
+      expect(requests).toBe(1);
+      expect(getAccessToken()).toBe('synthetic-operator-access-token');
+      expect(dispatch).not.toHaveBeenCalled();
+    } finally {
+      api.defaults.adapter = adapter;
+    }
+  });
   it('refresh is serialized and updates memory token without persistent storage', async () => {
     const adapter = api.defaults.adapter;
     let refreshCalls = 0;

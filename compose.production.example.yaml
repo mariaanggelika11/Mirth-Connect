@@ -6,6 +6,7 @@ services:
     environment:
       NODE_ENV: production
       ENV_FILE: /run/secrets/runtime_env
+      # Set PUBLIC_BASE_URL=https://<your-public-host> in runtime_env for source request URLs.
       HOST: 0.0.0.0
       HL7_ENABLED: 'false'
       PG_SSL: 'true'

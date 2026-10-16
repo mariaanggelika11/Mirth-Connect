@@ -1,6 +1,6 @@
 import { maskPayload } from '../utils/masking.js';
 import { querySchema } from './monitor/query.js';
-import { parsed, logRow } from './monitor/mapping.js';
+import { parsed, logRow, sourceMetadata } from './monitor/mapping.js';
 import { listMessages, findMessage, listDeliveryLogs, messageStats } from './monitor/repository.js';
 import type { Request, Response, NextFunction } from 'express';
 import { getConnection } from '../config/db.js';
@@ -119,6 +119,7 @@ export const getMessageDetail = async (req: Request, res: Response, next: NextFu
         correlationId: m.correlation_id,
         errorCode: m.last_error,
         channelRevision: m.channel_revision,
+        ...sourceMetadata(m),
         idempotencyApplied: !!(m.dedupe_key || m.idempotency_key_hash),
         reconciliation:
           m.reconciliation && typeof m.reconciliation === 'object'

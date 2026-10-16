@@ -16,6 +16,8 @@ import { PageHeading, RefreshButton } from '../../components/ui/OperationalUI';
 import { Search, Plus } from 'lucide-react';
 import ChannelForm from './ChannelForm';
 import XmlUpload from './XmlUpload';
+import { ChannelOnboarding } from './ChannelOnboarding';
+import { ChannelStatus } from '../../types';
 
 import { Button } from '../../components/ui/Button';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
@@ -38,6 +40,8 @@ const ChannelDashboard: React.FC<{
   const [duplicateSeed, setDuplicateSeed] = useState<ChannelFormData | null>(null);
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null);
   const [deletingChannel, setDeletingChannel] = useState<Channel | null>(null);
+  const [savedChannel, setSavedChannel] = useState<Channel | null>(null);
+  const [notice, setNotice] = useState('');
 
   const loadChannels = useCallback(async () => {
     try {
@@ -89,8 +93,16 @@ const ChannelDashboard: React.FC<{
     try {
       if (editingChannel) {
         await updateChannel(editingChannel.id, channelData);
+        setNotice('Changes saved as a draft. Open Revisions to review and publish.');
       } else {
-        await createChannel(channelData);
+        const result = await createChannel(channelData);
+        setNotice('Channel saved');
+        setSavedChannel({
+          ...channelData,
+          id: result.channelId,
+          status: ChannelStatus.STOPPED,
+          source: { ...channelData.source, endpoint: result.sourceEndpoint },
+        });
       }
       setIsFormOpen(false);
       setEditingChannel(null);
@@ -212,6 +224,11 @@ const ChannelDashboard: React.FC<{
         </select>
         <span className="toolbar-count">{channels.length} configured</span>
       </div>
+      {notice && (
+        <p className="alert success" role="status">
+          {notice}
+        </p>
+      )}
       {/* TABLE */}
       {renderContent()}
 
@@ -230,6 +247,19 @@ const ChannelDashboard: React.FC<{
         initialData={editingChannel}
         seedData={duplicateSeed}
       />
+      {savedChannel && can('channel:write') && (
+        <ChannelOnboarding
+          key={savedChannel.id}
+          channel={channels.find((c) => c.id === savedChannel.id) || savedChannel}
+          onClose={() => setSavedChannel(null)}
+          onChanged={() => void loadChannels()}
+          onMessages={() => {
+            const id = savedChannel.id;
+            setSavedChannel(null);
+            onViewMessages?.(id);
+          }}
+        />
+      )}
 
       {/* DELETE CONFIRMATION */}
       <ConfirmationModal

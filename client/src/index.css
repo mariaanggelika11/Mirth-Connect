@@ -1,4 +1,72 @@
 @import 'tailwindcss';
+
+.source-endpoint,
+.preview-stage,
+.destination-settings-group,
+.raw-access-controls {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.source-endpoint .code-box,
+.dry-run-preview .code-box {
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.onboarding-steps {
+  display: grid;
+  gap: 24px;
+  padding-left: 24px;
+}
+.onboarding-steps li > p {
+  margin: 6px 0 10px;
+}
+.onboarding-steps li > small {
+  display: block;
+  margin-top: 8px;
+}
+.message-processing-flow,
+.format-flow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-main);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  font-size: 12px;
+}
+.message-processing-flow svg {
+  flex: 0 0 auto;
+}
+.dry-run-preview {
+  display: grid;
+  gap: 20px;
+}
+.preview-stage,
+.destination-settings-group {
+  padding: 16px 0;
+  border-top: 1px solid var(--border-main);
+}
+.preview-stage h4,
+.destination-settings-group h4 {
+  font-weight: 600;
+}
+.preview-destination > div {
+  min-width: 0;
+  width: 100%;
+}
+.connection-test {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+.connection-test .alert {
+  width: 100%;
+}
 :root {
   --font-main: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -953,7 +1021,7 @@ summary::-webkit-details-marker {
 }
 .advanced-section > summary {
   font-size: 12px;
-  color: #70809b;
+  color: #5b687d;
   cursor: pointer;
   list-style: none;
 }
@@ -1242,7 +1310,7 @@ summary::-webkit-details-marker {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #73829b;
+  color: #5b687d;
 }
 .form-grid {
   display: grid;

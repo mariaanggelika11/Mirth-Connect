@@ -93,7 +93,19 @@ app.get('/ready', async (_req, res) => {
 });
 let activeInbound = 0;
 app.post(
-  config.inbound.path + '/:channelId',
+  [...new Set([config.inbound.path, '/api/inbound', '/api/message/inbound'])].map(
+    (inboundPath) => inboundPath + '/:channelId',
+  ),
+  (req, _res, next) => {
+    // Preserve management-JWT automation on the original route alongside API-key sources.
+    if (
+      req.path.startsWith('/api/message/inbound/') &&
+      req.get('Authorization')?.startsWith('Bearer ') &&
+      !req.get('X-API-Key')
+    )
+      return next('route');
+    next();
+  },
   validateId,
   async (req, _res, next) => {
     try {

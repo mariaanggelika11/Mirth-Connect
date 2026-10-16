@@ -25,6 +25,9 @@ export interface DestinationLog {
   destinationId?: number;
   ackCode?: string;
   destinationName: string;
+  outboundFormat?: string;
+  connectorType?: string;
+  snapshotCaptured?: boolean;
   status: string;
   responseText: string;
   sentAt: string;
@@ -37,6 +40,8 @@ export interface LogEntry {
   rawPayload?: boolean;
   channelRevision?: number;
   idempotencyApplied?: boolean;
+  inboundFormat?: string;
+  sourceTransformed?: boolean;
   reconciliation?: { state: string; note: string; category: string };
   id: number;
   payloadAllowed?: boolean;

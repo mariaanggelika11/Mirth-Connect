@@ -41,7 +41,7 @@ export async function findMessage(id: number) {
       .request()
       .input('id', id)
       .query<MonitorRow>(
-        'SELECT m.*,c.name channel_name,(SELECT row_to_json(dl) FROM "DeadLetterCases" dl WHERE dl.message_id=m.id) reconciliation FROM "Messages" m JOIN "Channels" c ON c.id=m.channel_id WHERE m.id=@id',
+        'SELECT m.*,c.name channel_name,CASE WHEN m.direction=\'IN\' THEN m.message_type ELSE parent.message_type END inbound_format,r.configuration revision_configuration,(SELECT row_to_json(dl) FROM "DeadLetterCases" dl WHERE dl.message_id=m.id) reconciliation FROM "Messages" m JOIN "Channels" c ON c.id=m.channel_id LEFT JOIN "Messages" parent ON parent.id=m.inbound_message_id LEFT JOIN "ChannelRevisions" r ON r.channel_id=m.channel_id AND r.revision=m.channel_revision WHERE m.id=@id',
       )
   ).recordset[0];
   if (!m) throw new AppError(404, 'MESSAGE_NOT_FOUND', 'Message not found');
@@ -56,7 +56,7 @@ export async function listDeliveryLogs(id: number, logPage: number, logPageSize:
       .input('offset', (logPage - 1) * logPageSize)
       .input('limit', logPageSize + 1)
       .query<DestinationLogRow>(
-        `SELECT l.*,d.name destination_name,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING' AND d.is_enabled=true AND d.is_deleted=false) retry_eligible FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE o.inbound_message_id=@id OR o.id=@id ORDER BY l.id DESC LIMIT @limit OFFSET @offset`,
+        `SELECT l.*,o.transport_config,d.name destination_name,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING' AND d.is_enabled=true AND d.is_deleted=false) retry_eligible FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE o.inbound_message_id=@id OR o.id=@id ORDER BY l.id DESC LIMIT @limit OFFSET @offset`,
       )
   ).recordset;
   return logs;

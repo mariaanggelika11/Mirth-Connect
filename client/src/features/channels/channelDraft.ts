@@ -4,7 +4,7 @@ export const newDestination = (): Destination => ({
   name: '',
   type: DestinationType.REST,
   endpoint: '',
-  outboundDataType: DataType.HL7V2,
+  outboundDataType: DataType.JSON,
   isEnabled: true,
   retryEnabled: false,
   maxRetries: 3,
@@ -23,13 +23,18 @@ export function initialDraft(channel?: Channel | null): ChannelFormData {
     changeSummary: '',
     source: {
       type: channel?.source.type === 'HL7' ? 'HL7' : 'HTTP',
-      inboundDataType: channel?.source.inboundDataType || DataType.HL7V2,
+      inboundDataType:
+        channel?.source.inboundDataType || (channel ? DataType.HL7V2 : DataType.JSON),
     },
     processingScript: channel?.processingScript || '',
     filterScript: channel?.filterScript || '',
     responseScript: channel?.responseScript || '',
     destinations: channel
-      ? channel.destinations.map((d) => ({ ...newDestination(), ...d }))
+      ? channel.destinations.map((d) => ({
+          ...newDestination(),
+          ...d,
+          outboundDataType: d.outboundDataType || DataType.HL7V2,
+        }))
       : [newDestination()],
   };
 }
@@ -38,4 +43,29 @@ export interface ChannelScriptEditor {
   destination?: number;
   field: 'processingScript' | 'responseScript' | 'templateScript';
   title: string;
+}
+
+export type MessageValidation = 'NONE' | 'BASIC_JSON' | 'CUSTOM';
+export const basicJsonProfile = { jsonSchema: { type: 'object' } };
+export function validationChoice(profile: Record<string, unknown> = {}): MessageValidation {
+  if (!Object.keys(profile).length) return 'NONE';
+  const schema = profile.jsonSchema;
+  return Object.keys(profile).length === 1 &&
+    schema !== null &&
+    typeof schema === 'object' &&
+    Object.keys(schema).length === 1 &&
+    (schema as Record<string, unknown>).type === 'object'
+    ? 'BASIC_JSON'
+    : 'CUSTOM';
+}
+export function selectedValidationProfile(
+  choice: MessageValidation,
+  customText: string,
+): Record<string, unknown> {
+  if (choice === 'NONE') return {};
+  if (choice === 'BASIC_JSON') return structuredClone(basicJsonProfile);
+  const profile: unknown = JSON.parse(customText);
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile))
+    throw new Error('Custom validation must be a JSON object.');
+  return profile as Record<string, unknown>;
 }
