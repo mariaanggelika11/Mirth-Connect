@@ -4,7 +4,7 @@ import { getConnection, closeConnection } from './config/db.js';
 import { startHl7Listener, stopHl7Listener } from './services/hl7Listener.services.js';
 import { startWorkers, stopWorkers } from './services/worker.services.js';
 import { logger } from './utils/logger.js';
-import { safeError } from './utils/errors.js';
+import { AppError, safeError } from './utils/errors.js';
 import type { Server as TcpServer } from 'node:net';
 import type { Server } from 'node:http';
 let http: Server | undefined,
@@ -46,7 +46,8 @@ try {
   const ready = (
     await pool.request().query('SELECT version FROM "SchemaMigrations" WHERE version=6')
   ).recordset;
-  if (!ready.length) throw new Error('Migration required');
+  if (!ready.length)
+    throw new AppError(503, 'MIGRATION_REQUIRED', 'Database migrations are required');
   if (config.hl7.enabled) {
     startupStage = 'mllp';
     mllp = await startHl7Listener();
@@ -62,7 +63,9 @@ try {
   startWorkers();
   logger.info({ port: config.server.port }, 'Integration engine started');
 } catch (error) {
-  const cause = safeError(error);
+  const errorCode = safeError(error);
+  const cause =
+    startupStage === 'migration' && errorCode === '42P01' ? 'MIGRATION_REQUIRED' : errorCode;
   logger.error(
     {
       code: 'STARTUP_FAILED',
@@ -72,9 +75,11 @@ try {
         ? { port: startupStage === 'mllp' ? config.hl7.port : config.server.port }
         : {}),
     },
-    cause === 'EADDRINUSE'
-      ? 'Port already in use; stop the other backend instance before starting'
-      : 'Startup failed; check the reported stage, configuration and database connectivity',
+    cause === 'MIGRATION_REQUIRED'
+      ? 'Database migrations are required; run npm run db:migrate, then npm run start'
+      : cause === 'EADDRINUSE'
+        ? 'Port already in use; stop the other backend instance before starting'
+        : 'Startup failed; check the reported stage, configuration and database connectivity',
   );
   process.exitCode = 1;
   await shutdown();

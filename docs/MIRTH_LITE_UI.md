@@ -69,7 +69,11 @@ Sebelum menjalankan build baru pada database existing:
 4. Jalankan `npm run build`, kemudian restart melalui deployment procedure existing.
 5. Verifikasi `/health`, `/ready` dan synthetic channel yang berizin.
 
-Tidak ada migration/reset terhadap `MiniMirthDev` remote atau database production. Backup schema 5 tetap disimpan; untuk memakai verifier runtime versi baru, restore ke target disposable, apply migration 006 dengan keyring yang benar, lalu verifikasi schema 6. Native backup/restore drill baru belum dijalankan karena `pg_dump`/`pg_restore` tidak tersedia pada environment sesi ini.
+Implementasi UI awal tidak memigrasikan `MiniMirthDev` remote. Setelah pengguna melaporkan startup gagal pada 16 Oktober 2026, preflight remote development berhasil dan migration 006 diterapkan melalui migrator transactional. Verifikasi menunjukkan schema tepat 1–6, `http_status` nullable integer, serta business counts tetap: 1 akun, 1 channel, 1 destination dan 2 pesan. Audit bertambah oleh `REFRESH_SESSION` selama pemeriksaan; tidak diasumsikan memiliki count tetap.
+
+Build ulang dan compiled backend terhadap database tersebut berhasil: `/health` dan `/ready` HTTP 200, lalu proses uji dihentikan melalui SIGTERM dengan exit 0. Tidak ada payload uji yang dikirim. Pesan schema yang belum dimigrasikan diperjelas menjadi `MIGRATION_REQUIRED` dengan instruksi command, tanpa mengaktifkan automatic migration. Regresi startup mencakup missing version, missing migration table dan permission error; seluruh `npm test` 303/303, typecheck, lint, format dan build lulus. Percobaan suite dalam sandbox gagal membuka socket, lalu dijalankan ulang dengan akses loopback lokal.
+
+Tidak ada reset database atau perubahan production. Backup lama tetap disimpan; untuk memakai verifier runtime versi baru, restore ke target disposable, apply migration 006 dengan keyring yang benar, lalu verifikasi schema 6. Native backup/restore drill baru belum dijalankan karena `pg_dump`/`pg_restore` tidak tersedia pada environment sesi ini.
 
 Rollback source ke commit sebelumnya dapat mempertahankan kolom nullable baru; jangan drop kolom/data. Sebelum rollback backend lama, review channel XML yang baru memakai visual mapping: normalisasi XML khusus mapping memerlukan backend baru. Gunakan rollback revision channel yang sesuai bila kembali ke engine lama. Mapping JSON/HL7 tetap berupa script existing; seluruh rollback tetap memerlukan verifikasi sintetis.
 

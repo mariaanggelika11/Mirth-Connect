@@ -1,5 +1,11 @@
 # Changelog
 
+## Startup migration diagnostics — 2026-10-16
+
+- Replace the generic missing-schema startup cause with safe MIGRATION_REQUIRED instructions; retain the schema-6 guard and manual migration requirement.
+- Apply additive migration 006 to the configured development database after preflight; verify existing business counts and rebuilt backend health/readiness, then stop the test process cleanly.
+- Verify 303 unit/API tests, including three startup regressions, typecheck, lint, formatting and build. A sandbox socket restriction required rerunning the suite with local loopback access.
+
 ## Documentation cleanup — 2026-10-16
 
 - Remove ten superseded audit, baseline, plan, implementation and UI/migration reports; preserve their history in Git.

@@ -219,6 +219,7 @@ Compose ini development, DB eksternal, port host loopback. Container/migration b
 - Jangan mengubah encryption key tanpa re-enkripsi endpoint/source keys/snapshot dengan key lama. Simpan recovery key di secret manager terpisah.
 - Startup `Invalid environment`: lengkapi mandatory keys; expiry JWT harus detik, bukan `1d`.
 - `STARTUP_FAILED`: periksa DB, migration dan port; credential/internal SQL tidak dicetak.
+- `cause=MIGRATION_REQUIRED`, `stage=migration`: schema belum memenuhi build. Verifikasi target dan backup, jalankan `npm run db:migrate -- --dry-run`, lalu `npm run db:migrate`, `npm run build` dan `npm run start`. Aplikasi tetap menolak startup sebelum migration lengkap.
 - `TOKEN_INVALID`: login lagi setelah deployment/rotasi; token lama tidak memenuhi issuer/audience/jti.
 - `CONNECTOR_UNAUTHORIZED`: buat/rotate key per-channel; JWT bukan credential source external.
 - `DESTINATION_HOST_DENIED`: tambahkan hostname exact ke allowlist yang ditinjau administrator. DNS resolution dipin dan alamat link-local/metadata diblokir.
