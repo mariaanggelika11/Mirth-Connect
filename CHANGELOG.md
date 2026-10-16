@@ -1,5 +1,11 @@
 # Changelog
 
+## Make configuration review immediately visible — 2026-10-17
+
+- Render Review configuration directly inside the selected revision instead of appending its JSON below the entire revision list. Move keyboard focus and scroll to the review heading after loading/error/success so long history no longer makes the action look unresponsive.
+- Add inline loading/error/retry behavior, disable duplicate review clicks while fetching, and clear stale comparison output when reviewing a revision. Show readable source/transformation/destination/retry/timeout summaries with sanitized JSON under an optional disclosure; retain explicit, permission-aware connection probes alongside the selected configuration. No automatic network probes, backend/data/migration changes or additional secret access.
+- Verify three targeted browser scenarios: a 20-revision history with loading/focus/visible result and Axe checks; inline permission error followed by retry; existing draft/dry-run/connection-probe workflow. Client build, workspace typecheck, lint, format, targeted source secret scan and diff checks pass. Full unit/PostgreSQL/browser suites are not rerun for this UI-only follow-up.
+
 ## Revision flow, rollback and safe channel retirement — 2026-10-17
 
 - Add a direct Review and publish draft action after saving, an Active revision badge, refresh of server-side active revision, collapsed optional note/test controls, explicit loading state, and publish/rollback confirmation. Hide rollback for the already active revision. Keep synthetic testing, sanitized comparisons, permissions and audited raw previews.

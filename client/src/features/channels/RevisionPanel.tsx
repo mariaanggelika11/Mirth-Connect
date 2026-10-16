@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../services/api';
-import type { Channel } from '../../types';
+import type { Channel, ChannelFormData } from '../../types';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
@@ -40,6 +40,7 @@ export function RevisionPanel({
   } | null>(null);
   const [testOpen, setTestOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const reviewRef = useRef<HTMLElement>(null);
   const readOnly = channel.status === 'ARCHIVED' || !can('channel:write');
   const [activeRevision, setActiveRevision] = useState(channel.activeRevision || 0);
   const canViewRaw = can('message:raw');
@@ -58,9 +59,17 @@ export function RevisionPanel({
     [reviewing, setReviewing] = useState<{
       revision: number;
       destinations: { name: string }[];
+      configuration: Partial<ChannelFormData> | null;
+      loading: boolean;
+      error: string;
     } | null>(null),
     [selected, setSelected] = useState<number[]>([]);
   const dirty = !!editing && JSON.stringify(editing) !== editBaseline;
+  useEffect(() => {
+    if (!reviewing) return;
+    reviewRef.current?.focus({ preventScroll: true });
+    reviewRef.current?.scrollIntoView({ block: 'start', behavior: 'auto' });
+  }, [reviewing]);
   useEffect(() => {
     setRawPreview(false);
     setDryRunResult(null);
@@ -103,12 +112,31 @@ export function RevisionPanel({
       .finally(() => setLoading(false));
   }, [channel.id]);
   async function view(revision: number) {
+    setBusy(true);
+    setError('');
+    setPreview('');
+    setReviewing({ revision, destinations: [], configuration: null, loading: true, error: '' });
     try {
       const { data } = await api.get(`/channel/${channel.id}/revisions/${revision}`);
-      setPreview(JSON.stringify(data.data, null, 2));
-      setReviewing({ revision, destinations: data.data.destinations });
+      if (!data.data || typeof data.data !== 'object')
+        throw new Error('Configuration could not be loaded. Try reviewing this revision again.');
+      setReviewing({
+        revision,
+        destinations: data.data.destinations || [],
+        configuration: data.data,
+        loading: false,
+        error: '',
+      });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to load revision');
+      setReviewing({
+        revision,
+        destinations: [],
+        configuration: null,
+        loading: false,
+        error: e instanceof Error ? e.message : 'Unable to load revision. Try again.',
+      });
+    } finally {
+      setBusy(false);
     }
   }
   async function edit(revision: number) {
@@ -456,7 +484,12 @@ export function RevisionPanel({
               Compare revision {row.revision}
             </label>
             <div className="heading-actions">
-              <Button variant="secondary" onClick={() => void view(row.revision)}>
+              <Button
+                variant="secondary"
+                disabled={busy}
+                aria-expanded={reviewing?.revision === row.revision}
+                onClick={() => void view(row.revision)}
+              >
                 Review configuration
               </Button>
               {row.state === 'DRAFT' && !readOnly && (
@@ -493,32 +526,85 @@ export function RevisionPanel({
                   </Button>
                 )}
             </div>
+            {reviewing?.revision === row.revision && (
+              <section
+                ref={reviewRef}
+                tabIndex={-1}
+                className="form-section"
+                aria-label={`Configuration review · revision ${row.revision}`}
+              >
+                <h3>Configuration · revision {row.revision}</h3>
+                {reviewing.loading && <p role="status">Loading configuration…</p>}
+                {reviewing.error && (
+                  <p role="alert" className="alert error">
+                    {reviewing.error}
+                  </p>
+                )}
+                {reviewing.configuration && (
+                  <>
+                    <p>
+                      <strong>{reviewing.configuration.name || channel.name}</strong>
+                    </p>
+                    <p>
+                      Source: {reviewing.configuration.source?.type || 'Not configured'} /{' '}
+                      {reviewing.configuration.source?.inboundDataType || 'Not specified'}
+                    </p>
+                    <p>
+                      Transformation:{' '}
+                      {reviewing.configuration.processingScript ? 'Configured' : 'Pass-through'}
+                    </p>
+                    {!reviewing.destinations.length && <p>No destinations configured.</p>}
+                    {(reviewing.configuration.destinations || []).map((destination, index) => (
+                      <div key={index} className="form-section">
+                        <strong>{destination.name}</strong>
+                        <p>
+                          {destination.type} / {destination.outboundDataType || 'Not specified'}
+                        </p>
+                        <code className="code-box break-anywhere">{destination.endpoint}</code>
+                        <p>
+                          Retry:{' '}
+                          {destination.retryEnabled
+                            ? `Enabled · up to ${destination.maxRetries ?? 3} retries`
+                            : 'Disabled'}{' '}
+                          · Timeout: {(destination.timeoutMs ?? 10000) / 1000} seconds
+                        </p>
+                      </div>
+                    ))}
+                    <details>
+                      <summary>Configuration details (sanitized)</summary>
+                      <pre className="code-box">
+                        {JSON.stringify(reviewing.configuration, null, 2)}
+                      </pre>
+                    </details>
+                    {!readOnly &&
+                      ['DRAFT', 'PUBLISHED'].includes(row.state) &&
+                      reviewing.destinations.length > 0 && (
+                        <div className="form-section">
+                          <p>
+                            Connection tests open a TCP/TLS connection and send no patient data.
+                          </p>
+                          {reviewing.destinations.map((destination, index) => (
+                            <Button
+                              key={index}
+                              variant="secondary"
+                              disabled={busy}
+                              onClick={() => void probe(row.revision, index)}
+                            >
+                              Test connection · {destination.name}
+                            </Button>
+                          ))}
+                        </div>
+                      )}
+                  </>
+                )}
+              </section>
+            )}
           </section>
         ))}
         <Button variant="secondary" disabled={selected.length !== 2} onClick={() => void compare()}>
           Compare selected revisions
         </Button>
         {preview && <pre className="code-box">{preview}</pre>}
-        {reviewing &&
-          rows.find((r) => r.revision === reviewing.revision)?.state !== 'ARCHIVED' &&
-          reviewing.destinations.length > 0 && (
-            <section className="form-section">
-              <p>
-                Connection tests perform DNS and TCP/TLS handshake only. They open a network
-                connection and send no patient data.
-              </p>
-              {reviewing.destinations.map((destination, index) => (
-                <Button
-                  key={index}
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() => void probe(reviewing.revision, index)}
-                >
-                  Test connection · {destination.name}
-                </Button>
-              ))}
-            </section>
-          )}
         {dryRunResult && (
           <div aria-label="Revision dry-run result">
             <DryRunPreview result={dryRunResult} />

@@ -139,6 +139,106 @@ test('unused duplicate deletion confirms once and removes the row', async ({ pag
   await expect(page.getByText('No channels found', { exact: true })).toBeVisible();
   expect(deleted).toBe(true);
 });
+test('configuration review appears inline, receives focus and stays visible with a long revision history', async ({
+  page,
+}) => {
+  await session(page, 'DEVELOPER');
+  await page.route('**/api/channel/1/revisions', (r) =>
+    r.fulfill({
+      json: {
+        data: Array.from({ length: 20 }, (_, i) => ({
+          revision: 20 - i,
+          state: 'PUBLISHED',
+          change_summary: `Synthetic revision ${20 - i}`,
+        })),
+      },
+    }),
+  );
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route('**/api/channel/1/revisions/20', async (r) => {
+    await gate;
+    return r.fulfill({
+      json: {
+        data: {
+          name: 'Reviewed synthetic configuration',
+          source: { type: 'HTTP', inboundDataType: 'JSON' },
+          processingScript: '[CONFIGURED]',
+          destinations: [
+            {
+              name: 'Synthetic XML receiver',
+              type: 'REST',
+              outboundDataType: 'XML',
+              endpoint: 'https://receiver.example.invalid/send?token=REDACTED',
+              retryEnabled: true,
+              maxRetries: 3,
+              timeoutMs: 5000,
+            },
+          ],
+        },
+      },
+    });
+  });
+  await page.getByLabel('More actions for Test Channel').click();
+  await page.getByRole('button', { name: 'Revisions', exact: true }).click();
+  await page.getByRole('button', { name: 'Review configuration', exact: true }).first().click();
+  const review = page.getByRole('region', {
+    name: 'Configuration review · revision 20',
+    exact: true,
+  });
+  try {
+    await expect(review.getByRole('status')).toHaveText('Loading configuration…');
+  } finally {
+    release?.();
+  }
+  await expect(review).toContainText('Reviewed synthetic configuration');
+  await expect(review).toContainText('Source: HTTP / JSON');
+  await expect(review).toContainText('REST / XML');
+  await expect(review).toContainText('Timeout: 5 seconds');
+  await expect(review).toBeFocused();
+  const heading = review.getByRole('heading', { name: 'Configuration · revision 20', exact: true });
+  await expect(heading).toBeInViewport();
+  await expect(review.locator('pre')).toBeHidden();
+  await review.getByText('Configuration details (sanitized)', { exact: true }).click();
+  await expect(review.locator('pre')).toContainText('[CONFIGURED]');
+  const axe = await new AxeBuilder({ page }).analyze();
+  expect(axe.violations).toEqual([]);
+});
+
+test('failed configuration review shows an inline error and retry replaces it with the correct revision', async ({
+  page,
+}) => {
+  await session(page, 'DEVELOPER');
+  await page.route('**/api/channel/1/revisions', (r) =>
+    r.fulfill({
+      json: { data: [{ revision: 2, state: 'DRAFT', change_summary: 'Synthetic pending change' }] },
+    }),
+  );
+  let attempts = 0;
+  await page.route('**/api/channel/1/revisions/2', (r) => {
+    attempts++;
+    return attempts === 1
+      ? r.fulfill({ status: 403, json: { code: 'FORBIDDEN', message: 'Permission denied' } })
+      : r.fulfill({
+          json: { data: { name: 'Recovered synthetic configuration', destinations: [] } },
+        });
+  });
+  await page.getByLabel('More actions for Test Channel').click();
+  await page.getByRole('button', { name: 'Revisions', exact: true }).click();
+  await page.getByRole('button', { name: 'Review configuration', exact: true }).click();
+  const review = page.getByRole('region', {
+    name: 'Configuration review · revision 2',
+    exact: true,
+  });
+  await expect(review.getByRole('alert')).toContainText('Permission denied');
+  await expect(review).toBeFocused();
+  await page.getByRole('button', { name: 'Review configuration', exact: true }).click();
+  await expect(review).toContainText('Recovered synthetic configuration');
+  await expect(review.getByRole('alert')).toHaveCount(0);
+  expect(attempts).toBe(2);
+});
 test('saved draft is directly discoverable and editing active configuration warns before replacement', async ({
   page,
 }) => {
