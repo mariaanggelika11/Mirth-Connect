@@ -16,9 +16,10 @@ import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
 import { ScriptEditorModal } from '../../components/status/ScriptEditorModal';
 import type { Channel, ChannelFormData, Destination } from '../../types';
 import { DataType } from '../../types';
-import { FlowLabel } from '../../components/ui/OperationalUI';
+import { TransformationEditor } from './TransformationEditor';
+import { readFieldMapping } from '../../../../server/src/utils/fieldMapping';
 import { SourceEndpoint } from './SourceEndpoint';
-import { DryRunPreview, type DryRunResult } from './DryRunPreview';
+import type { DryRunResult } from './DryRunPreview';
 import { useAuth } from '../../contexts/AuthContext';
 interface Props {
   isOpen: boolean;
@@ -61,6 +62,11 @@ function CopySourceKey({ value }: { value: string }) {
 export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, seedData }: Props) {
   const { can } = useAuth();
   const canViewRaw = can('message:raw');
+  const [transformationValid, setTransformationValid] = useState(true);
+  const [sourceConfiguration, setSourceConfiguration] = useState<{
+    baseUrl: string;
+    path: string;
+  } | null>(null);
   const [draft, setDraft] = useState<ChannelFormData>(() => initialDraft(initialData));
   const [baseline, setBaseline] = useState(''),
     [step, setStep] = useState(0),
@@ -107,15 +113,40 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       setEditor(null);
       setTestResult(null);
       setRawPreview(false);
+      setTransformationValid(true);
       setSample(syntheticSample(value.source.inboundDataType));
     } else {
       setKey('');
       setTestResult(null);
     }
   }, [isOpen, initialData, seedData]);
+  useEffect(() => {
+    if (!isOpen || initialData) return;
+    let active = true;
+    setSourceConfiguration(null);
+    void api
+      .get('/channel/source-configuration')
+      .then(({ data }) => {
+        if (active && typeof data.baseUrl === 'string' && typeof data.path === 'string')
+          setSourceConfiguration(data);
+      })
+      .catch(() => {
+        /* The assigned endpoint remains available after Save. */
+      });
+    return () => {
+      active = false;
+    };
+  }, [isOpen, initialData]);
   useEffect(() => setTestResult(null), [draft, profileText, sample, rawPreview]);
+  useEffect(() => {
+    if (!canViewRaw) {
+      setRawPreview(false);
+      setTestResult(null);
+    }
+  }, [canViewRaw]);
   useEffect(() => setKey(''), [step, draft.source.type]);
-  const dirty = JSON.stringify(draft) !== baseline || profileText !== profileBaseline;
+  const dirty =
+    JSON.stringify(draft) !== baseline || profileText !== profileBaseline || !transformationValid;
   const closeAndClear = () => {
     setKey('');
     setTestResult(null);
@@ -148,15 +179,19 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       setError('Give this channel a name before continuing.');
       return;
     }
-    if (step === 1 && draft.destinations.some((d) => !d.name.trim() || !d.endpoint.trim())) {
+    if (step === 1 && !transformationValid) {
+      setError('Complete or remove the unfinished field mapping.');
+      return;
+    }
+    if (step === 2 && draft.destinations.some((d) => !d.name.trim() || !d.endpoint.trim())) {
       setError('Each destination needs a name and endpoint.');
       return;
     }
-    setStep((s) => Math.min(2, s + 1));
+    setStep((s) => Math.min(3, s + 1));
   }
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    if (step < 2) {
+    if (step < 3) {
       next();
       return;
     }
@@ -166,12 +201,13 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       return;
     }
     if (draft.destinations.some((d) => !d.name.trim() || !d.endpoint.trim())) {
-      setStep(1);
+      setStep(2);
       setError('Each destination needs a name and endpoint.');
       return;
     }
-    if (initialData && !draft.changeSummary?.trim()) {
-      setError('Describe the configuration change before saving.');
+    if (!transformationValid) {
+      setStep(1);
+      setError('Complete or remove the unfinished field mapping.');
       return;
     }
     let validationProfile: Record<string, unknown>;
@@ -190,7 +226,9 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       await onSubmit({
         ...draft,
         validationProfile,
-        changeSummary: draft.changeSummary?.trim() || 'Initial channel configuration',
+        changeSummary:
+          draft.changeSummary?.trim() ||
+          (initialData ? 'Channel configuration updated' : 'Initial channel configuration'),
       });
       closeAndClear();
     } catch (e) {
@@ -218,7 +256,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     try {
       const payload = draft.source.inboundDataType === 'JSON' ? JSON.parse(sample) : sample;
       const validationProfile = selectedValidationProfile(validation, profileText);
-      const { data } = await api.post<DryRunResult>('/channel/dry-run', {
+      const { data } = await api.post<DryRunResult>('/channel/preview-transformation', {
         configuration: { ...draft, validationProfile },
         payload,
         raw: rawPreview && canViewRaw,
@@ -245,9 +283,10 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       setRotating(false);
     }
   }
-  const steps = ['Source', 'Destinations', 'Review'];
+  const steps = ['Source', 'Transformation', 'Destinations', 'Review'];
+  const fieldMapping = readFieldMapping(draft.processingScript || '');
   const customSource = Boolean(
-    draft.processingScript?.trim() ||
+    (!fieldMapping && draft.processingScript?.trim()) ||
     draft.filterScript?.trim() ||
     draft.responseScript?.trim() ||
     validation !== 'NONE' ||
@@ -265,6 +304,11 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                 disabled={saving || rotating}
                 className={step === i ? 'active' : step > i ? 'complete' : ''}
                 onClick={() => {
+                  if (i > 1 && !transformationValid) {
+                    setStep(1);
+                    setError('Complete or remove the unfinished field mapping.');
+                    return;
+                  }
                   setStep(i);
                   setError('');
                 }}
@@ -290,8 +334,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
             {step === 0 && (
               <div className="form-section">
                 <div className="section-intro">
-                  <h3>Where do messages come from?</h3>
-                  <p>Name your connection and choose how it receives messages.</p>
+                  <h3>Connect the sending system</h3>
                 </div>
                 <label className="field">
                   <span>
@@ -301,7 +344,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                     autoComplete="off"
                     value={draft.name}
                     maxLength={150}
-                    placeholder="e.g. HIS → Laboratory results"
+                    placeholder="e.g. JSON_TO_XML_PATIENT"
                     onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
                   />
                 </label>
@@ -333,37 +376,41 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                           chooseValidation('NONE');
                       }}
                     >
-                      {dataOptions.map((t) => (
-                        <option key={t}>{t}</option>
+                      {dataOptions.map((format) => (
+                        <option key={format}>{format}</option>
                       ))}
                     </select>
                   </label>
                 </div>
-                {initialData &&
-                  draft.source.type === initialData.source.type &&
-                  draft.source.type === 'HTTP' && (
-                    <details
-                      className="advanced-section connection-access"
-                      onToggle={(event) => {
-                        if (!event.currentTarget.open) {
-                          setKey('');
-                          if (rotating) event.currentTarget.open = true;
-                        }
-                      }}
-                    >
-                      <summary
-                        onClick={(event) => {
-                          if (rotating) event.preventDefault();
-                        }}
-                      >
-                        Connection &amp; API key
-                      </summary>
+                {draft.source.type === 'HTTP' && (
+                  <>
+                    {initialData?.source.type === 'HTTP' ? (
                       <SourceEndpoint channel={initialData} />
-                      <div className="source-key-tools">
-                        <div>
-                          <strong>Source API key</strong>
-                          <p className="muted">Used by the source system to send messages.</p>
-                        </div>
+                    ) : (
+                      <div className="field">
+                        <span>Source endpoint</span>
+                        <code className="code-box break-anywhere">
+                          {sourceConfiguration
+                            ? `${sourceConfiguration.baseUrl}${sourceConfiguration.path}/{channelId}`
+                            : 'Assigned after Save'}
+                        </code>
+                        <small>A channel ID is assigned when you save.</small>
+                      </div>
+                    )}
+                    <section className="source-authentication" aria-label="Source authentication">
+                      <div>
+                        <strong>Source API key</strong>
+                        <p className="muted">
+                          {!initialData
+                            ? 'Create the source access key after saving.'
+                            : initialData.apiKeyConfigured === true
+                              ? 'API key configured'
+                              : initialData.apiKeyConfigured === false
+                                ? 'No API key configured'
+                                : 'Create or rotate the key used by the sending system.'}
+                        </p>
+                      </div>
+                      {initialData && (
                         <Button
                           type="button"
                           variant="secondary"
@@ -372,224 +419,179 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                         >
                           Create / rotate source API key
                         </Button>
-                        {key && (
-                          <div className="alert success break-anywhere">
-                            <strong>Copy this key now. It is shown only once.</strong>
-                            <code>{key}</code>
-                            <CopySourceKey value={key} />
-                          </div>
-                        )}
-                      </div>
-                    </details>
-                  )}
+                      )}
+                      {key && (
+                        <div className="alert success break-anywhere">
+                          <strong>Copy this key now. It is shown only once.</strong>
+                          <code>{key}</code>
+                          <CopySourceKey value={key} />
+                        </div>
+                      )}
+                    </section>
+                  </>
+                )}
+                {draft.source.type === 'HL7' && (
+                  <div className="field">
+                    <span>Source endpoint</span>
+                    <code>
+                      {initialData?.source.type === 'HL7'
+                        ? initialData.source.endpoint
+                        : 'Uses the configured MLLP listener'}
+                    </code>
+                    <small>Access is controlled by the listener network and TLS settings.</small>
+                  </div>
+                )}
                 <details className="advanced-section">
                   <summary>
                     <span>Advanced source settings</span>
-                    {customSource && (
-                      <span className="configured-hint">Custom settings active</span>
-                    )}
+                    {customSource && <span className="configured-hint">Configured</span>}
                   </summary>
-                  <fieldset className="validation-options">
-                    <legend>Message validation</legend>
+                  <section className="form-section">
                     <label className="check-field">
                       <input
-                        type="radio"
-                        name="message-validation"
-                        checked={validation === 'NONE'}
-                        onChange={() => chooseValidation('NONE')}
+                        type="checkbox"
+                        checked={filterEnabled}
+                        onChange={(e) => {
+                          setFilterEnabled(e.target.checked);
+                          if (!e.target.checked) setRetainedFilter(draft.filterScript || '');
+                          setDraft((d) => ({
+                            ...d,
+                            filterScript: e.target.checked ? retainedFilter : '',
+                          }));
+                        }}
                       />
-                      No additional validation
+                      Enable source filter
                     </label>
-                    <label className="check-field">
-                      <input
-                        type="radio"
-                        name="message-validation"
-                        checked={validation === 'BASIC_JSON'}
-                        disabled={draft.source.inboundDataType !== DataType.JSON}
-                        onChange={() => chooseValidation('BASIC_JSON')}
-                      />
-                      Basic JSON validation
-                    </label>
-                    <small>
-                      Basic JSON validation requires a JSON object. Built-in format checks still
-                      apply without an additional profile.
-                    </small>
-                    <label className="check-field">
-                      <input
-                        type="radio"
-                        name="message-validation"
-                        checked={validation === 'CUSTOM'}
-                        onChange={() => chooseValidation('CUSTOM')}
-                      />
-                      Custom validation schema
-                    </label>
-                    {validation === 'CUSTOM' && (
+                    {filterEnabled ? (
                       <label className="field">
-                        <span>Custom validation profile (JSON)</span>
-                        <small>
-                          Gunakan hanya jika sistem sumber memiliki schema khusus. Supported keys:
-                          jsonSchema, xml, hl7, script.
-                        </small>
+                        <span>Source filter script</span>
+                        <small>Return true to accept, false to filter.</small>
                         <textarea
-                          rows={6}
+                          rows={4}
                           className="code-input"
-                          spellCheck={false}
-                          value={profileText}
+                          value={draft.filterScript || ''}
                           onChange={(e) => {
-                            setProfileText(e.target.value);
-                            try {
-                              setDraft((d) => ({
-                                ...d,
-                                validationProfile: selectedValidationProfile(
-                                  'CUSTOM',
-                                  e.target.value,
-                                ),
-                              }));
-                            } catch {
-                              /* Validate before save or preview. */
-                            }
+                            setRetainedFilter(e.target.value);
+                            setDraft((d) => ({ ...d, filterScript: e.target.value }));
                           }}
                         />
                       </label>
+                    ) : (
+                      <p className="muted">All messages are accepted.</p>
                     )}
-                  </fieldset>
-                  <label className="field">
-                    <span>Duplicate message protection</span>
-                    <select
-                      value={draft.idempotencyMode || 'OPTIONAL'}
-                      onChange={(e) =>
-                        setDraft((d) => ({
-                          ...d,
-                          idempotencyMode: e.target.value as ChannelFormData['idempotencyMode'],
-                        }))
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() =>
+                        setEditor({
+                          field: 'processingScript',
+                          title: 'Advanced source transformer',
+                        })
                       }
                     >
-                      <option value="DISABLED">Disabled</option>
-                      <option value="OPTIONAL">Optional</option>
-                      <option value="REQUIRED">Required</option>
-                    </select>
-                    <small>
-                      Membantu mencegah request yang sama diproses lebih dari satu kali. Technical
-                      name: Inbound idempotency.
-                    </small>
-                  </label>
-                  <details className="advanced-section">
-                    <summary>Message processing</summary>
-                    <div className="script-setting">
-                      <div>
-                        <strong>Message transformation</strong>
-                        <p>
-                          {draft.processingScript
-                            ? 'Custom transformation enabled'
-                            : 'No source transformation · Pass-through'}
-                        </p>
-                        <small>
-                          Gunakan hanya jika pesan perlu diubah sebelum masuk ke destination.
-                        </small>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() =>
-                          setEditor({ field: 'processingScript', title: 'Source transformation' })
-                        }
-                      >
-                        <Code2 size={15} />
-                        {draft.processingScript
-                          ? 'Edit source transformation'
-                          : 'Add source transformer'}
-                      </Button>
-                    </div>
-                    {draft.processingScript && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => setDraft((d) => ({ ...d, processingScript: '' }))}
-                      >
-                        Use pass-through
-                      </Button>
+                      <Code2 size={14} />
+                      Advanced source transformer
+                    </Button>
+                    {draft.responseScript?.trim() && (
+                      <small>Existing source response script is retained.</small>
                     )}
-                    <section className="destination-settings-group" aria-label="Message filtering">
-                      <h4>Message filtering</h4>
-                      <label className="check-field">
-                        <input
-                          type="checkbox"
-                          checked={filterEnabled}
-                          onChange={(e) => {
-                            setFilterEnabled(e.target.checked);
-                            if (!e.target.checked) setRetainedFilter(draft.filterScript || '');
-                            setDraft((d) => ({
-                              ...d,
-                              filterScript: e.target.checked ? retainedFilter : '',
-                            }));
-                          }}
-                        />
-                        Enable source filter
-                      </label>
-                      <p className="muted">
-                        {filterEnabled
-                          ? 'Gunakan filter jika hanya pesan tertentu yang boleh dilanjutkan.'
-                          : 'All messages are accepted.'}
-                      </p>
-                      {filterEnabled && (
-                        <details className="advanced-section" open>
-                          <summary>Edit filter script</summary>
+                    <details className="advanced-section">
+                      <summary>
+                        Advanced validation
+                        {validation !== 'NONE' && (
+                          <span className="configured-hint">Configured</span>
+                        )}
+                      </summary>
+                      <fieldset className="validation-options">
+                        <legend>Message validation</legend>
+                        <label className="check-field">
+                          <input
+                            type="radio"
+                            name="message-validation"
+                            checked={validation === 'NONE'}
+                            onChange={() => chooseValidation('NONE')}
+                          />
+                          No additional validation
+                        </label>
+                        <label className="check-field">
+                          <input
+                            type="radio"
+                            name="message-validation"
+                            checked={validation === 'BASIC_JSON'}
+                            disabled={draft.source.inboundDataType !== DataType.JSON}
+                            onChange={() => chooseValidation('BASIC_JSON')}
+                          />
+                          Basic JSON validation
+                        </label>
+                        <label className="check-field">
+                          <input
+                            type="radio"
+                            name="message-validation"
+                            checked={validation === 'CUSTOM'}
+                            onChange={() => chooseValidation('CUSTOM')}
+                          />
+                          Custom validation schema
+                        </label>
+                        {validation === 'CUSTOM' && (
                           <label className="field">
-                            <span>Source filter script</span>
-                            <small>
-                              Return true = pesan diterima. Return false = pesan difilter. An empty
-                              filter accepts all messages.
-                            </small>
+                            <span>Custom validation profile (JSON)</span>
                             <textarea
                               rows={5}
                               className="code-input"
-                              spellCheck={false}
-                              placeholder="return Boolean(msg && msg.patient_id && msg.name);"
-                              value={draft.filterScript || ''}
+                              value={profileText}
                               onChange={(e) => {
-                                setDraft((d) => ({ ...d, filterScript: e.target.value }));
-                                setRetainedFilter(e.target.value);
+                                setProfileText(e.target.value);
+                                try {
+                                  setDraft((d) => ({
+                                    ...d,
+                                    validationProfile: selectedValidationProfile(
+                                      'CUSTOM',
+                                      e.target.value,
+                                    ),
+                                  }));
+                                } catch {
+                                  /* Validate on Test or Save. */
+                                }
                               }}
                             />
                           </label>
-                        </details>
-                      )}
-                    </section>
-                    <div className="script-setting">
-                      <div>
-                        <strong>Response to the source</strong>
-                        <p>
-                          {draft.responseScript
-                            ? 'Custom source response enabled.'
-                            : 'Use default response.'}
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() =>
-                          setEditor({ field: 'responseScript', title: 'Source response' })
-                        }
-                      >
-                        {draft.responseScript
-                          ? 'Edit custom response'
-                          : 'Configure custom response'}
-                      </Button>
-                    </div>
-                    {draft.responseScript && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => setDraft((d) => ({ ...d, responseScript: '' }))}
-                      >
-                        Use default response
-                      </Button>
-                    )}
-                  </details>
+                        )}
+                      </fieldset>
+                    </details>
+                  </section>
                 </details>
               </div>
             )}
-            {step === 1 && (
+            <div style={{ display: step === 1 ? 'block' : 'none' }} aria-hidden={step !== 1}>
+              <TransformationEditor
+                inboundFormat={draft.source.inboundDataType || DataType.JSON}
+                destinations={draft.destinations}
+                processingScript={draft.processingScript || ''}
+                onScriptChange={(script) => setDraft((d) => ({ ...d, processingScript: script }))}
+                onOutputFormatChange={(format) =>
+                  setDraft((d) => ({
+                    ...d,
+                    destinations: d.destinations.map((destination) => ({
+                      ...destination,
+                      outboundDataType: format,
+                    })),
+                  }))
+                }
+                onPreview={() => void previewOutput()}
+                sample={sample}
+                onSampleChange={setSample}
+                result={testResult}
+                testing={testing}
+                rawPreview={rawPreview}
+                onRawPreviewChange={setRawPreview}
+                canViewRaw={canViewRaw}
+                onValidityChange={(valid) => {
+                  setTransformationValid(valid);
+                  if (!valid) setTestResult(null);
+                }}
+              />
+            </div>
+            {step === 2 && (
               <div className="form-section">
                 <div className="section-intro">
                   <h3>Where should messages go?</h3>
@@ -621,7 +623,19 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                   type="button"
                   variant="secondary"
                   onClick={() =>
-                    setDraft((d) => ({ ...d, destinations: [...d.destinations, newDestination()] }))
+                    setDraft((d) => ({
+                      ...d,
+                      destinations: [
+                        ...d.destinations,
+                        {
+                          ...newDestination(),
+                          outboundDataType:
+                            d.destinations[0]?.outboundDataType ||
+                            d.source.inboundDataType ||
+                            DataType.JSON,
+                        },
+                      ],
+                    }))
                   }
                 >
                   <Plus size={16} />
@@ -629,115 +643,94 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                 </Button>
               </div>
             )}
-            {step === 2 && (
+            {step === 3 && (
               <div className="form-section">
                 <div className="section-intro">
                   <h3>Review your connection</h3>
-                  <p>Confirm the configuration before saving.</p>
                 </div>
-                <div className="review-connection">
-                  <h3>{draft.name || 'Unnamed channel'}</h3>
-                  <FlowLabel
-                    source={`${draft.source.type} ${draft.source.inboundDataType}`}
-                    destinations={draft.destinations.map(
-                      (d) => `${d.type} ${d.outboundDataType} → ${d.name || 'Unnamed destination'}`,
-                    )}
-                  />
-                </div>
-                {customSource && (
-                  <p className="configuration-notice">
-                    Custom source settings are active
-                    {draft.processingScript?.trim() ? ' · Transformation' : ''}
-                    {draft.filterScript?.trim() ? ' · Filter' : ''}
-                    {draft.responseScript?.trim() ? ' · Response' : ''}
-                    {validation !== 'NONE' ? ' · Validation' : ''}
-                    {draft.idempotencyMode && draft.idempotencyMode !== 'OPTIONAL'
-                      ? ` · Duplicate protection: ${draft.idempotencyMode.toLowerCase()}`
-                      : ''}
-                    .
-                  </p>
-                )}
-                {draft.destinations.map((d, i) => (
-                  <div key={i} className="review-destination">
-                    <span className="step-number">{i + 1}</span>
-                    <div>
-                      <strong>{d.name || 'Unnamed destination'}</strong>
-                      <small className="break-anywhere">{d.endpoint || 'Endpoint required'}</small>
-                      <small>
-                        Sends: {d.outboundDataType} over {d.type} ·{' '}
-                        {d.isEnabled === false ? 'Disabled' : 'Enabled'}
-                      </small>
-                      {(d.retryEnabled || (d.timeoutMs ?? 10000) !== 10000) && (
-                        <small>
-                          Retry:{' '}
-                          {d.retryEnabled
-                            ? `${d.maxRetries ?? 3} attempts, initial delay ${d.retryIntervalSeconds ?? 30} seconds`
-                            : 'Off'}{' '}
-                          · Timeout: {(d.timeoutMs ?? 10000) / 1000} seconds
-                        </small>
-                      )}
-                    </div>
+                <div className="integration-flow" aria-label="Integration flow">
+                  <div>
+                    <strong>
+                      {draft.source.type} / {draft.source.inboundDataType}
+                    </strong>
                   </div>
-                ))}
-                <details className="advanced-section preview-panel">
-                  <summary>Test sample message (optional)</summary>
-                  <div className="form-section">
-                    <p className="muted">
-                      Use synthetic data to follow the message from input to the generated outbound
-                      payload. Nothing is sent to the destination.
-                    </p>
-                    <label className="field">
-                      <span>Input message (synthetic only)</span>
-                      <textarea
-                        rows={4}
-                        value={sample}
-                        onChange={(e) => setSample(e.target.value)}
-                      />
-                    </label>
-                    {canViewRaw && (
-                      <label className="check-field">
-                        <input
-                          type="checkbox"
-                          checked={rawPreview}
-                          onChange={(e) => setRawPreview(e.target.checked)}
-                        />
-                        View raw synthetic preview (audited)
-                      </label>
-                    )}
-                    <p className="muted">
-                      {rawPreview && canViewRaw
-                        ? 'Melihat raw payload akan dicatat pada audit log. Use synthetic data only.'
-                        : 'Sensitive values are redacted. XML and text previews may be fully masked; raw preview requires explicit permission.'}
-                    </p>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={testing}
-                      onClick={() => void previewOutput()}
-                    >
-                      {testing ? 'Generating preview…' : 'Preview output'}
-                    </Button>
-                    {testResult && <DryRunPreview result={testResult} />}
+                  <span aria-hidden="true">↓</span>
+                  <div>
+                    <strong>{draft.name || 'Unnamed channel'}</strong>
                   </div>
-                </details>
-                {initialData ? (
-                  <label className="field">
-                    <span>Change summary *</span>
-                    <input
-                      required
-                      maxLength={500}
-                      value={draft.changeSummary || ''}
-                      onChange={(e) => setDraft((d) => ({ ...d, changeSummary: e.target.value }))}
-                    />
+                  <span aria-hidden="true">↓</span>
+                  <div>
+                    <strong>
+                      {draft.source.inboundDataType} →{' '}
+                      {draft.destinations
+                        .map((d) => d.outboundDataType)
+                        .filter((format, index, values) => values.indexOf(format) === index)
+                        .join(' / ') || 'No outbound delivery'}
+                    </strong>
                     <small>
-                      Briefly describe what changed for reviewers and the revision history.
+                      {fieldMapping
+                        ? `${fieldMapping.rows.length} mapped fields`
+                        : draft.processingScript?.trim()
+                          ? 'Advanced transformation'
+                          : 'Format conversion'}
                     </small>
-                  </label>
-                ) : null}
+                  </div>
+                  {draft.destinations.map((destination, index) => (
+                    <div className="integration-flow-destination" key={destination.id ?? index}>
+                      <span aria-hidden="true">↓</span>
+                      <strong>
+                        {destination.type} / {destination.outboundDataType}
+                      </strong>
+                      <span aria-hidden="true">↓</span>
+                      <strong>{destination.name || 'Unnamed destination'}</strong>
+                    </div>
+                  ))}
+                </div>
+                <dl className="definition-list">
+                  <div>
+                    <dt>Source</dt>
+                    <dd>
+                      {draft.source.type} / {draft.source.inboundDataType}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Transformation</dt>
+                    <dd>
+                      {fieldMapping
+                        ? `${fieldMapping.rows.length} field mappings`
+                        : draft.processingScript?.trim()
+                          ? 'Advanced script'
+                          : 'Original fields with output format conversion'}
+                    </dd>
+                  </div>
+                </dl>
+                {draft.destinations.map((destination, index) => (
+                  <section className="review-destination" key={destination.id ?? index}>
+                    <div>
+                      <strong>Destination: {destination.name || 'Unnamed destination'}</strong>
+                      <small className="break-anywhere">{destination.endpoint}</small>
+                      <dl className="definition-list">
+                        <div>
+                          <dt>Retry</dt>
+                          <dd>
+                            {destination.retryEnabled
+                              ? `${destination.maxRetries ?? 3} retries`
+                              : 'Off'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Timeout</dt>
+                          <dd>{(destination.timeoutMs ?? 10000) / 1000} seconds</dd>
+                        </div>
+                      </dl>
+                      {destination.isEnabled === false && <small>Destination disabled</small>}
+                    </div>
+                  </section>
+                ))}
                 <p className="muted">
                   {initialData
-                    ? 'Changes are saved as a draft. Open Revisions to review and publish them.'
-                    : 'New channels are saved as Stopped. Start the channel when its destination is ready.'}
+                    ? 'Changes are saved as a draft. Review and publish the draft to activate it.'
+                    : 'Save creates a stopped channel. Start it when ready.'}
                 </p>
               </div>
             )}
@@ -761,7 +754,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                   Back
                 </Button>
               )}
-              {step < 2 ? (
+              {step < 3 ? (
                 <Button
                   type="button"
                   disabled={saving || rotating}
@@ -774,9 +767,22 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                   <ArrowRight size={14} />
                 </Button>
               ) : (
-                <Button type="submit" disabled={saving}>
-                  {saving ? 'Saving…' : 'Save Channel'}
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={saving || testing || !transformationValid}
+                    onClick={() => {
+                      setStep(1);
+                      void previewOutput();
+                    }}
+                  >
+                    Test
+                  </Button>
+                  <Button type="submit" disabled={saving}>
+                    {saving ? 'Saving…' : 'Save Channel'}
+                  </Button>
+                </>
               )}
             </div>
           </div>

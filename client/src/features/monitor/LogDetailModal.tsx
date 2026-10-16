@@ -1,5 +1,5 @@
 import { api } from '../../services/api';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowRight, ChevronDown, RotateCcw } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchLogDetail, resendMessage } from '../../services/message.api';
@@ -18,6 +18,7 @@ export default function LogDetailModal({
   const [log, setLog] = useState(initialLog),
     [tab, setTab] = useState('summary'),
     [loading, setLoading] = useState(false),
+    [accessRefreshing, setAccessRefreshing] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
     [confirm, setConfirm] = useState<DestinationLog | null>(null),
@@ -26,11 +27,45 @@ export default function LogDetailModal({
     [resolutionNote, setResolutionNote] = useState(''),
     [category, setCategory] = useState('UNKNOWN');
   const { can } = useAuth();
+  const canPayload = can('message:payload');
+  const canRaw = can('message:raw');
+  const canResend = can('message:resend');
+  const payloadAllowed = !!log.payloadAllowed && canPayload;
+  const rawAccessRevoked = !!log.rawPayload && !canRaw;
+  const payloadVisible = payloadAllowed && !rawAccessRevoked;
+  useEffect(() => {
+    if (!canResend) setConfirm(null);
+  }, [canResend]);
+  useEffect(() => {
+    if (!canPayload) setTab('summary');
+    if (canRaw || !log.rawPayload) {
+      setAccessRefreshing(false);
+      return;
+    }
+    // Cached raw content is hidden synchronously by payloadVisible above. Fetch a
+    // fresh redacted response without allowing a late request to restore raw access.
+    let active = true;
+    setAccessRefreshing(true);
+    void fetchLogDetail(log.id, log.destinationPagination?.page || 1, false)
+      .then((redacted) => {
+        if (active) setLog(redacted);
+      })
+      .catch((error) => {
+        if (active)
+          setError(error instanceof Error ? error.message : 'Unable to refresh redacted message');
+      })
+      .finally(() => {
+        if (active) setAccessRefreshing(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [canPayload, canRaw, log.id, log.rawPayload, log.destinationPagination?.page]);
   async function loadPage(page: number) {
     setLoading(true);
     setError('');
     try {
-      setLog(await fetchLogDetail(log.id, page, !!log.rawPayload));
+      setLog(await fetchLogDetail(log.id, page, !!log.rawPayload && canRaw));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load delivery history');
     } finally {
@@ -38,7 +73,7 @@ export default function LogDetailModal({
     }
   }
   async function retry() {
-    if (!confirm?.messageId) return;
+    if (!canResend || !confirm?.messageId) return;
     setResending(true);
     setError('');
     try {
@@ -87,7 +122,7 @@ export default function LogDetailModal({
             <StatusBadge status={log.status} />
           </div>
           <div className="tabs" role="tablist" aria-label="Message detail sections">
-            {['summary', ...(log.payloadAllowed ? ['payload'] : []), 'history'].map((t) => (
+            {['summary', ...(payloadAllowed ? ['payload'] : []), 'history'].map((t) => (
               <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
                 {t === 'summary' ? 'Summary' : t === 'payload' ? 'Payload' : 'Delivery history'}
               </button>
@@ -106,11 +141,64 @@ export default function LogDetailModal({
           {tab === 'summary' && (
             <div className="form-section">
               <h3>Message overview</h3>
-              <p>
-                Revision {log.channelRevision || 'legacy'} · Idempotency{' '}
-                {log.idempotencyApplied ? 'applied' : 'not applied'}
-              </p>
-              {log.status === 'DEAD_LETTER' && can('message:resend') && (
+              <dl className="definition-list">
+                <div>
+                  <dt>Inbound</dt>
+                  <dd>{log.inboundFormat || 'Not recorded'}</dd>
+                </div>
+                <div>
+                  <dt>Outbound</dt>
+                  <dd>
+                    {[
+                      ...new Set(
+                        log.destinationLogs?.flatMap((dest) =>
+                          dest.outboundFormat ? [dest.outboundFormat] : [],
+                        ),
+                      ),
+                    ].join(', ') || 'Not recorded'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Status</dt>
+                  <dd>
+                    <StatusBadge status={log.status} />
+                  </dd>
+                </div>
+              </dl>
+              <section aria-label="Delivery Result" className="form-section">
+                <h3>Delivery Result</h3>
+                {!log.destinationLogs?.length ? (
+                  <p className="muted">No destination attempts recorded.</p>
+                ) : (
+                  log.destinationLogs.map((dest, i) => (
+                    <div key={`${dest.messageId}-${dest.sentAt}-${i}`} className="delivery-card">
+                      <div className="delivery-heading">
+                        <strong>{dest.destinationName || 'Destination'}</strong>
+                        <StatusBadge status={dest.status} />
+                      </div>
+                      <dl className="definition-list">
+                        <div>
+                          <dt>Outbound</dt>
+                          <dd>{dest.outboundFormat || 'Not recorded'}</dd>
+                        </div>
+                        <div>
+                          <dt>Response</dt>
+                          <dd>
+                            {dest.httpStatus
+                              ? `HTTP ${dest.httpStatus}`
+                              : dest.ackCode
+                                ? `ACK ${dest.ackCode}`
+                                : 'Not recorded'}
+                          </dd>
+                        </div>
+                      </dl>
+                      <small>{formatTime(dest.sentAt)}</small>
+                    </div>
+                  ))
+                )}
+                {pagination}
+              </section>
+              {log.status === 'DEAD_LETTER' && canResend && (
                 <section className="form-section">
                   <h3>Dead-letter reconciliation</h3>
                   <p>Current state: {log.reconciliation?.state || 'OPEN'}</p>
@@ -159,54 +247,61 @@ export default function LogDetailModal({
                   </Button>
                 </section>
               )}
-              <dl className="definition-list">
-                <div>
-                  <dt>Message ID</dt>
-                  <dd>#{log.id}</dd>
-                </div>
-                <div>
-                  <dt>Channel</dt>
-                  <dd>
-                    {log.channelName} <span className="muted">#{log.channelId}</span>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Direction</dt>
-                  <dd>{log.direction || 'IN'}</dd>
-                </div>
-                <div>
-                  <dt>Received</dt>
-                  <dd>{formatTime(log.timestamp)}</dd>
-                </div>
-                <div>
-                  <dt>Status</dt>
-                  <dd>
-                    <StatusBadge status={log.status} />
-                  </dd>
-                </div>
-                <div>
-                  <dt>Retry attempts</dt>
-                  <dd>{log.retryCount ?? 0}</dd>
-                </div>
-                {log.nextRetryAt && (
+              <details className="advanced-section">
+                <summary>Technical details</summary>
+                <p>
+                  Revision {log.channelRevision || 'legacy'} · Idempotency{' '}
+                  {log.idempotencyApplied ? 'applied' : 'not applied'}
+                </p>
+                <dl className="definition-list">
                   <div>
-                    <dt>Next retry</dt>
-                    <dd>{formatTime(log.nextRetryAt)}</dd>
+                    <dt>Message ID</dt>
+                    <dd>#{log.id}</dd>
                   </div>
-                )}
-                {log.errorCode && (
                   <div>
-                    <dt>Diagnostic</dt>
-                    <dd className="break-anywhere">{log.errorCode}</dd>
+                    <dt>Channel</dt>
+                    <dd>
+                      {log.channelName} <span className="muted">#{log.channelId}</span>
+                    </dd>
                   </div>
-                )}
-                {log.correlationId && (
                   <div>
-                    <dt>Correlation ID</dt>
-                    <dd className="break-anywhere">{log.correlationId}</dd>
+                    <dt>Direction</dt>
+                    <dd>{log.direction || 'IN'}</dd>
                   </div>
-                )}
-              </dl>
+                  <div>
+                    <dt>Received</dt>
+                    <dd>{formatTime(log.timestamp)}</dd>
+                  </div>
+                  <div>
+                    <dt>Status</dt>
+                    <dd>
+                      <StatusBadge status={log.status} />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Retry attempts</dt>
+                    <dd>{log.retryCount ?? 0}</dd>
+                  </div>
+                  {log.nextRetryAt && (
+                    <div>
+                      <dt>Next retry</dt>
+                      <dd>{formatTime(log.nextRetryAt)}</dd>
+                    </div>
+                  )}
+                  {log.errorCode && (
+                    <div>
+                      <dt>Diagnostic</dt>
+                      <dd className="break-anywhere">{log.errorCode}</dd>
+                    </div>
+                  )}
+                  {log.correlationId && (
+                    <div>
+                      <dt>Correlation ID</dt>
+                      <dd className="break-anywhere">{log.correlationId}</dd>
+                    </div>
+                  )}
+                </dl>
+              </details>
               <div className="summary-help">
                 <strong>
                   {['FAILED', 'IN-ERROR', 'OUT-ERROR', 'DEAD_LETTER', 'PARTIAL'].includes(
@@ -221,21 +316,28 @@ export default function LogDetailModal({
                     : 'This message has no destination attempts recorded.'}
                 </p>
               </div>
-              {!log.payloadAllowed && (
+              {!payloadAllowed && (
                 <p className="muted">
                   Payload access requires an authorized role. Your current role can view metadata.
                 </p>
               )}
             </div>
           )}
-          {tab === 'payload' && log.payloadAllowed && (
+          {tab === 'payload' && rawAccessRevoked && canPayload && (
+            <p className="muted" role="status">
+              {accessRefreshing
+                ? 'Refreshing the redacted message after your permissions changed.'
+                : 'The redacted message is unavailable. Reopen this message to try again.'}
+            </p>
+          )}
+          {tab === 'payload' && payloadVisible && (
             <div className="form-section">
               <p className="muted" role="status">
                 {log.rawPayload
                   ? 'Raw payload access is audited. Copies contain the raw content displayed below.'
                   : 'Redacted view. Copies use the displayed content.'}
               </p>
-              {can('message:raw') && (
+              {canRaw && (
                 <div className="raw-access-controls">
                   {!log.rawPayload && (
                     <p className="muted">Viewing raw payload will be recorded in the audit log.</p>
@@ -268,18 +370,18 @@ export default function LogDetailModal({
                     whether it was accepted.
                   </p>
                   <PayloadViewer
-                    title="Stored outbound payload"
+                    title="Outbound Message (stored)"
                     value={log.transformedPayload ?? log.originalPayload}
                   />
                 </>
               ) : (
                 <>
-                  <PayloadViewer title="Original inbound payload" value={log.originalPayload} />
+                  <PayloadViewer title="Inbound Message" value={log.originalPayload} />
                   <p className="muted">The message received from the source.</p>
                   {log.sourceTransformed === false && (
                     <span className="status-pill status-stopped">No source transformation</span>
                   )}
-                  <PayloadViewer title="Source processed payload" value={log.transformedPayload} />
+                  <PayloadViewer title="Source Processed Message" value={log.transformedPayload} />
                   <p className="muted">
                     The result of source processing, before each destination converts the message to
                     its outbound format.
@@ -339,6 +441,12 @@ export default function LogDetailModal({
                         <dt>Delivery status</dt>
                         <dd>{dest.status}</dd>
                       </div>
+                      {dest.httpStatus && (
+                        <div>
+                          <dt>Response</dt>
+                          <dd>HTTP {dest.httpStatus}</dd>
+                        </div>
+                      )}
                       {dest.ackCode && (
                         <div>
                           <dt>Acknowledgement</dt>
@@ -359,8 +467,8 @@ export default function LogDetailModal({
                         payload alone does not prove it was sent.
                       </p>
                     )}
-                    <PayloadViewer title="Outbound payload" value={dest.outboundData} />
-                    <PayloadViewer title="Destination response" value={dest.responseText} />
+                    <PayloadViewer title="Outbound Message" value={dest.outboundData} />
+                    <PayloadViewer title="Delivery Result" value={dest.responseText} />
                   </section>
                 ))
               )}
@@ -383,12 +491,13 @@ export default function LogDetailModal({
                         <h3>{dest.destinationName || 'Destination'}</h3>
                         <small>
                           {formatTime(dest.sentAt)}
+                          {dest.httpStatus ? ` · HTTP ${dest.httpStatus}` : ''}
                           {dest.ackCode ? ` · ACK ${dest.ackCode}` : ''}
                         </small>
                       </div>
                       <StatusBadge status={dest.status} />
                     </div>
-                    {can('message:resend') &&
+                    {canResend &&
                       dest.canResend === true &&
                       ['OUT-ERROR', 'DEAD_LETTER'].includes(dest.status) &&
                       dest.messageId && (
@@ -404,7 +513,7 @@ export default function LogDetailModal({
                           Review & resend
                         </button>
                       )}
-                    {log.payloadAllowed && (
+                    {payloadVisible && (
                       <details className="delivery-payload">
                         <summary>
                           Request, outbound & response
@@ -414,8 +523,8 @@ export default function LogDetailModal({
                           title="Destination processing input"
                           value={dest.requestData}
                         />
-                        <PayloadViewer title="Outbound payload" value={dest.outboundData} />
-                        <PayloadViewer title="Destination response" value={dest.responseText} />
+                        <PayloadViewer title="Outbound Message" value={dest.outboundData} />
+                        <PayloadViewer title="Delivery Result" value={dest.responseText} />
                       </details>
                     )}
                   </section>
@@ -447,7 +556,7 @@ export default function LogDetailModal({
             The stored final payload and destination snapshot are reused. The channel must be
             running. Confirm the receiving system has not already accepted this message.
           </p>
-          {confirm && log.payloadAllowed && (
+          {confirm && payloadVisible && (
             <PayloadViewer title="Payload to resend" value={confirm.outboundData} />
           )}
           <div className="form-actions">

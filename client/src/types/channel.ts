@@ -53,6 +53,7 @@ export interface Destination {
 
 // CHANNEL ENTITY
 export interface Channel {
+  apiKeyConfigured?: boolean;
   validationProfile?: Record<string, unknown>;
   activeRevision?: number;
   idempotencyMode?: 'OPTIONAL' | 'REQUIRED' | 'DISABLED';

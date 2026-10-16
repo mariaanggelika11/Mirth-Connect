@@ -36,6 +36,7 @@ import {
   processRetry,
 } from '../src/services/messageProcessor.services.js';
 import { encrypt } from '../src/utils/secrets.js';
+import { AppError } from '../src/utils/errors.js';
 import type { Destination } from '../src/models/Destination.js';
 const dest: Destination = {
   id: 2,
@@ -163,7 +164,13 @@ describe('Engine aggregation and durable retry policy', () => {
       rowsAffected: [1],
     }));
     await processRetry(row);
-    expect(mock.send).toHaveBeenCalledWith(dest.endpoint, '{"data":1}', expect.any(Object), 1000);
+    expect(mock.send).toHaveBeenCalledWith(
+      dest.endpoint,
+      '{"data":1}',
+      expect.any(Object),
+      1000,
+      expect.any(Function),
+    );
     expect(mock.script).not.toHaveBeenCalled();
   });
   it('converts incoming JSON to escaped HL7 before delivery', async () => {
@@ -191,7 +198,36 @@ describe('Engine aggregation and durable retry policy', () => {
       expect.stringContaining('PID|||||Budi\\F\\Santoso\\X0D\\OBX\\F\\1\r'),
       expect.objectContaining({ 'Content-Type': 'application/hl7-v2' }),
       1000,
+      expect.any(Function),
     );
+  });
+  for (const status of [201, 204, 400, 503])
+    it('persists actual HTTP ' + status + ' metadata for the attempt', async () => {
+      mock.send.mockImplementationOnce(
+        async (
+          _endpoint: string,
+          _body: string,
+          _headers: Record<string, string>,
+          _timeout: number,
+          onResponse: (code: number) => void,
+        ) => {
+          onResponse(status);
+          if (status >= 300)
+            throw new AppError(502, 'HTTP_' + status, 'Destination HTTP request failed');
+          return status === 204 ? '' : 'created';
+        },
+      );
+      await processRetry(row);
+      expect(mock.inputs.httpStatus).toBe(status);
+      expect(mock.inputs.response).toBe(
+        status >= 300 ? 'HTTP_' + status : status === 204 ? '' : 'created',
+      );
+    });
+  it('does not invent an HTTP status for a network failure', async () => {
+    mock.send.mockRejectedValueOnce({ code: 'ECONNREFUSED' });
+    await processRetry(row);
+    expect(mock.inputs.httpStatus).toBeNull();
+    expect(mock.inputs.response).toBe('ECONNREFUSED');
   });
   it('retry failure becomes dead letter after max retries', async () => {
     mock.send.mockRejectedValue(new Error('patient data should be private'));

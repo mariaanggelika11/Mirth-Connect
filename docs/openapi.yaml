@@ -3,7 +3,7 @@
   "info": {
     "title": "Mini Mirth Connect",
     "version": "2.0.0-draft",
-    "description": "Static documentation of implemented routes. Synthetic examples only. No production readiness claim. Existing success envelopes vary by endpoint. Follow-up: schema version 5 operational controls; draft patches omit private configuration. JSON idempotency uses canonical hashes with legacy digest compatibility; IDEMPOTENCY_RETENTION_HOURS=0 retains prior behavior. Expired HTTP reservations only release after active/failed delivery guards; message evidence is retained. XML supports bounded literal path rules, not full XSD."
+    "description": "Static documentation of implemented routes. Synthetic examples only. No production readiness claim. Existing success envelopes vary by endpoint. Follow-up: schema version 6 delivery HTTP metadata and operational controls; draft patches omit private configuration. JSON idempotency uses canonical hashes with legacy digest compatibility; IDEMPOTENCY_RETENTION_HOURS=0 retains prior behavior. Expired HTTP reservations only release after active/failed delivery guards; message evidence is retained. XML supports bounded literal path rules, not full XSD."
   },
   "servers": [
     {
@@ -1831,7 +1831,48 @@
         "operationId": "get__api_message__id_",
         "responses": {
           "200": {
-            "description": "Message detail retains originalPayload/transformedPayload fields with existing redaction and audited raw access. inboundFormat comes from the captured inbound message; optional sourceTransformed comes only from its immutable channel revision. Destination logs add outboundFormat, connectorType and snapshotCaptured from captured transport configuration. Missing historical metadata is unknown. HTTP response codes are not inferred. Failed/filtered attempts may precede conversion or network submission."
+            "description": "Message detail retains originalPayload/transformedPayload fields with existing redaction and audited raw access. inboundFormat comes from the captured inbound message; optional sourceTransformed comes only from its immutable channel revision. Destination logs add outboundFormat, connectorType and snapshotCaptured from captured transport configuration. Missing historical metadata is unknown. HTTP response codes are not inferred. Failed/filtered attempts may precede conversion or network submission. Optional destinationLogs[].httpStatus is the actual HTTP response status recorded for each new REST attempt (2xx and non-2xx). It is available to message:read roles without revealing response bodies. Missing/legacy status, network failures, and non-HTTP connectors omit this field; no status is guessed or backfilled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "inboundFormat": {
+                          "type": "string"
+                        },
+                        "sourceTransformed": {
+                          "type": "boolean"
+                        },
+                        "payloadAllowed": {
+                          "type": "boolean"
+                        },
+                        "rawPayload": {
+                          "type": "boolean"
+                        },
+                        "originalPayload": {
+                          "description": "Present only with message:payload; masked unless explicitly audited administrator raw access."
+                        },
+                        "transformedPayload": {
+                          "description": "Source processed message (inbound record) or stored outbound message (outbound record), with the existing payload access rules."
+                        },
+                        "destinationLogs": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/MessageDestinationLog"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Safe validation error",
@@ -3476,6 +3517,185 @@
           }
         }
       }
+    },
+    "/api/channel/preview-transformation": {
+      "post": {
+        "summary": "Preview transformation before configuring a destination; no network or connection validation",
+        "operationId": "post__api_channel_preview_transformation",
+        "responses": {
+          "200": {
+            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes only. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing. Connection settings are deliberately not validated; warnings explicitly state this. No application request, DNS lookup or connection probe is made.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "accepted",
+                    "input",
+                    "source",
+                    "networkDelivery",
+                    "results",
+                    "rawPayload"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "accepted": {
+                      "type": "boolean"
+                    },
+                    "networkDelivery": {
+                      "const": "NOT_SENT"
+                    },
+                    "rawPayload": {
+                      "type": "boolean"
+                    },
+                    "input": {
+                      "type": "object",
+                      "properties": {
+                        "format": {
+                          "type": "string"
+                        },
+                        "payload": {}
+                      }
+                    },
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "format": {
+                          "type": "string"
+                        },
+                        "payload": {},
+                        "validation": {
+                          "enum": [
+                            "PASSED",
+                            "ERROR",
+                            "SKIPPED"
+                          ]
+                        },
+                        "filter": {
+                          "enum": [
+                            "ACCEPTED",
+                            "FILTERED",
+                            "ERROR",
+                            "SKIPPED"
+                          ]
+                        },
+                        "transformation": {
+                          "enum": [
+                            "TRANSFORMED",
+                            "PASS_THROUGH",
+                            "SKIPPED",
+                            "ERROR"
+                          ]
+                        },
+                        "code": {
+                          "type": "string",
+                          "description": "Safe diagnostic code for a failed source stage; no exception text."
+                        }
+                      }
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "outputFormat": {
+                            "type": "string"
+                          },
+                          "connectorType": {
+                            "type": "string"
+                          },
+                          "finalPayload": {},
+                          "status": {
+                            "enum": [
+                              "VALID",
+                              "ERROR"
+                            ]
+                          },
+                          "stages": {
+                            "type": "object"
+                          },
+                          "code": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Safe validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication invalid or expired"
+          },
+          "403": {
+            "description": "Permission/origin/CSRF denied"
+          },
+          "409": {
+            "description": "State, revision or idempotency conflict"
+          },
+          "429": {
+            "description": "Management/authentication rate limit"
+          },
+          "503": {
+            "description": "Database or capacity unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "raw",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Explicit audited administrator raw preview; otherwise every input/source/final payload is masked. Use synthetic messages only."
+          }
+        ],
+        "x-required-permission": "channel:write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "configuration",
+                  "payload"
+                ],
+                "properties": {
+                  "configuration": {
+                    "$ref": "#/components/schemas/TransformationPreviewConfiguration"
+                  },
+                  "payload": {},
+                  "raw": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Explicit administrator-only audited raw preview; equivalent to raw=true query parameter."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "description": "Runs the same isolated source and destination filter/transform/template/conversion pipeline as dry-run. Empty destination names and endpoints are permitted only for this preview. DNS, sockets, host allowlist and delivery are not tested. The normal channel save/dry-run endpoint still requires valid connection settings. Synthetic payloads only; normal redaction and audited administrator raw access apply."
+      }
     }
   },
   "components": {
@@ -4261,6 +4481,171 @@
             }
           }
         }
+      },
+      "MessageDestinationLog": {
+        "type": "object",
+        "description": "One captured destination delivery attempt. Format/name/type come from the immutable destination snapshot when readable. Payload fields require message:payload; ordinary metadata including HTTP status does not.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "messageId": {
+            "type": "integer"
+          },
+          "destinationId": {
+            "type": "integer"
+          },
+          "destinationName": {
+            "type": "string"
+          },
+          "outboundFormat": {
+            "type": "string"
+          },
+          "connectorType": {
+            "type": "string"
+          },
+          "snapshotCaptured": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          },
+          "sentAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "httpStatus": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599,
+            "description": "Actual HTTP status from this attempt. Omitted for legacy attempts, non-HTTP transports, and failures before an HTTP response. The receiving system’s HTTP acceptance does not prove downstream business processing.",
+            "examples": [
+              201,
+              204,
+              400,
+              503
+            ]
+          },
+          "ackCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "HL7 acknowledgement code; never overloaded with an HTTP response code."
+          },
+          "canResend": {
+            "type": "boolean"
+          },
+          "requestData": {
+            "description": "Destination input; omitted without message:payload."
+          },
+          "outboundData": {
+            "description": "Stored outbound message; omitted without message:payload."
+          },
+          "responseText": {
+            "description": "Delivery response body or safe diagnostic code; omitted without message:payload. Redacted unless administrator raw access is explicitly requested and audited."
+          }
+        }
+      },
+      "TransformationPreviewConfiguration": {
+        "type": "object",
+        "properties": {
+          "validationProfile": {
+            "$ref": "#/components/schemas/Channel/properties/validationProfile"
+          },
+          "idempotencyMode": {
+            "$ref": "#/components/schemas/Channel/properties/idempotencyMode"
+          },
+          "changeSummary": {
+            "$ref": "#/components/schemas/Channel/properties/changeSummary"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Channel/properties/name"
+          },
+          "source": {
+            "$ref": "#/components/schemas/Channel/properties/source"
+          },
+          "destinations": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/TransformationPreviewDestination"
+            }
+          },
+          "processingScript": {
+            "$ref": "#/components/schemas/Channel/properties/processingScript"
+          },
+          "responseScript": {
+            "$ref": "#/components/schemas/Channel/properties/responseScript"
+          },
+          "filterScript": {
+            "$ref": "#/components/schemas/Channel/properties/filterScript"
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "destinations"
+        ],
+        "additionalProperties": false
+      },
+      "TransformationPreviewDestination": {
+        "type": "object",
+        "properties": {
+          "deliveryPolicy": {
+            "$ref": "#/components/schemas/Destination/properties/deliveryPolicy"
+          },
+          "id": {
+            "$ref": "#/components/schemas/Destination/properties/id"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 150,
+            "default": ""
+          },
+          "type": {
+            "$ref": "#/components/schemas/Destination/properties/type"
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2048,
+            "default": ""
+          },
+          "outboundDataType": {
+            "$ref": "#/components/schemas/Destination/properties/outboundDataType"
+          },
+          "processingScript": {
+            "$ref": "#/components/schemas/Destination/properties/processingScript"
+          },
+          "responseScript": {
+            "$ref": "#/components/schemas/Destination/properties/responseScript"
+          },
+          "templateScript": {
+            "$ref": "#/components/schemas/Destination/properties/templateScript"
+          },
+          "filterScript": {
+            "$ref": "#/components/schemas/Destination/properties/filterScript"
+          },
+          "isEnabled": {
+            "$ref": "#/components/schemas/Destination/properties/isEnabled"
+          },
+          "retryEnabled": {
+            "$ref": "#/components/schemas/Destination/properties/retryEnabled"
+          },
+          "maxRetries": {
+            "$ref": "#/components/schemas/Destination/properties/maxRetries"
+          },
+          "retryIntervalSeconds": {
+            "$ref": "#/components/schemas/Destination/properties/retryIntervalSeconds"
+          },
+          "timeoutMs": {
+            "$ref": "#/components/schemas/Destination/properties/timeoutMs"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false
       }
     }
   }

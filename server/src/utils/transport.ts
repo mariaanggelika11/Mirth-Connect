@@ -159,6 +159,7 @@ export async function sendRest(
   body: string,
   headers: Record<string, string>,
   timeout = config.transport.timeout,
+  onResponse?: (status: number) => void,
 ): Promise<string> {
   const url = validateEndpoint(decrypt(endpoint), 'REST');
   const addresses = await resolveHost(url.hostname, timeout);
@@ -180,6 +181,9 @@ export async function sendRest(
       proxy: false,
       validateStatus: () => true,
     });
+    // Record transport metadata without changing the existing response-body contract.
+    // Notify before rejecting non-2xx responses so failed attempts retain their actual status too.
+    onResponse?.(response.status);
     if (response.status < 200 || response.status >= 300)
       throw new AppError(502, 'HTTP_' + response.status, 'Destination HTTP request failed');
     return typeof response.data === 'string' ? response.data : JSON.stringify(response.data);

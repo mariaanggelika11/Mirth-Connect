@@ -8,6 +8,7 @@ import { dryRun } from '../services/dryRun.services.js';
 import { AppError } from '../utils/errors.js';
 import { config } from '../config/env.js';
 import { connectionProbeSchema, probeDestination } from '../services/connectionProbe.services.js';
+import { previewTransformation } from '../services/transformationPreview.services.js';
 const router = Router();
 router.get('/source-configuration', requirePermission('channel:read'), (_req, res) =>
   res.json({ success: true, baseUrl: config.inbound.baseUrl, path: config.inbound.path }),
@@ -19,6 +20,7 @@ router.post(
   probeDestination,
 );
 router.post('/dry-run', requirePermission('channel:write'), dryRun);
+router.post('/preview-transformation', requirePermission('channel:write'), previewTransformation);
 const revisionId = (
   req: Parameters<typeof validateId>[0],
   res: Parameters<typeof validateId>[1],

@@ -24,6 +24,7 @@ export interface DestinationLog {
   canResend?: boolean;
   destinationId?: number;
   ackCode?: string;
+  httpStatus?: number;
   destinationName: string;
   outboundFormat?: string;
   connectorType?: string;

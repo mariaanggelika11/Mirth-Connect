@@ -5,6 +5,9 @@ Existing React UI and Express/PostgreSQL architecture are preserved. Root enviro
 ```mermaid
 flowchart TD
   UI[React UI] --> LOGIN[Login / JWT / current DB role]
+  UI --> WIZARD[Source / Transformation / Destinations / Review]
+  WIZARD --> MAP[Visual mapping / optional advanced scripts]
+  MAP -. Compile mapping into existing source transformer .-> CONFIG
   LOGIN --> API[Management API / RBAC]
   API --> CONFIG[Transactional channel and connector configuration]
   API --> MONITOR[Paginated metadata / permission-gated detail]
@@ -36,6 +39,8 @@ flowchart TD
 Monitor HTTP handlers stay in `services/message.services.ts`; `monitor/query.ts` validates filters, `monitor/repository.ts` contains PostgreSQL reads, and `monitor/mapping.ts` controls response and payload projection. Payload authorization and audit remain in the HTTP handler. Repository modules do not depend on Express request/response objects.
 
 Frontend domain types have one definition in `client/src/types/`, exported through the existing `types.ts` entry point. API calls belong in `services/`; page components own UI state. The channel wizard delegates destination fields to `DestinationEditor` and draft defaults to `channelDraft`; message details delegate payload rendering to `PayloadViewer`. Add new connector or conversion behavior to the corresponding engine module instead of enlarging page components or orchestration code.
+
+`TransformationEditor` uses the pure `utils/fieldMapping.ts` compiler shared with the server. Versioned mapping metadata lives in the existing source-transformer script, so export/import and revision snapshots retain it. Custom scripts require explicit replacement. `preview-transformation` runs the same processing pipeline with connection validation disabled and no network operations; full dry-run and explicit destination probes retain their own validation. See [Lite UI behavior and limits](MIRTH_LITE_UI.md).
 
 Use TypeScript strict checking, separate `import type` statements, and explicit `_` prefixes for intentionally unused handler parameters. Unused variables/parameters and explicit `any` fail checks. Prettier supplies the repository's formatting rules. Run `npm run format` for formatting, and `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`, `npm run build`, and `npm run test:e2e` before submitting changes. Real PostgreSQL verification uses only a newly created `mirth_test_*` schema via `npm run test:sql`.
 
@@ -69,7 +74,7 @@ Retention uses bounded batches of resolved messages and independent audit retent
 
 ## Verification boundaries
 
-Automated API/channel/worker tests mock database sessions; a separate PostgreSQL adapter test verifies binding and same-client transaction behavior. REST/MLLP tests use real loopback sockets. Browser tests use explicit synthetic fixtures. `npm run test:sql` validates native PostgreSQL on a newly created `mirth_test_*` schema which is deleted afterward. Six live PostgreSQL scenarios have passed. Docker image, hospital-specific HL7 profiles, load and disaster recovery still require deployment validation.
+Automated API/channel/worker tests mock database sessions; a separate PostgreSQL adapter test verifies binding and same-client transaction behavior. REST/MLLP tests use real loopback sockets. Browser tests use explicit synthetic fixtures. `npm run test:sql` validates native PostgreSQL on a newly created `mirth_test_*` schema which is deleted afterward. The latest run passed 19 scenarios, including visual mapping preview versus the actual HTTP payload and repeat migrations through schema 6. Compiled runtime startup/drain was also verified on disposable PostgreSQL. Docker image, hospital-specific HL7 profiles, load and disaster recovery still require deployment validation.
 
 
 ## V2 runtime boundaries

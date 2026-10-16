@@ -51,7 +51,7 @@ Konfigurasi penting:
 
 Atur `PUBLIC_BASE_URL=https://connect.bulmar.tech` pada server di balik reverse proxy; untuk development gunakan `PUBLIC_BASE_URL=http://localhost:9000`. UI menerima endpoint dari backend, tanpa menebak dari hostname browser. `PUBLIC_BASE_URL` mengungguli `INBOUND_BASE_URL`; hapus override `INBOUND_PATH` lama bila ingin memakai path default baru. Path source yang dikonfigurasi, `/api/inbound/:channelId`, dan `/api/message/inbound/:channelId` tetap dapat menerima source API key. Alur Bearer pada endpoint management tetap memerlukan permission `inbound:send`. `VITE_API_BASE_URL` kosong memakai same origin; `VITE_API_PROXY_URL` menentukan backend development. Jangan masukkan secret dalam variable `VITE_`.
 
-Panduan wizard, preview output, API key dan pemeriksaan hasil akhir tersedia di [manual UI/UX](docs/UI_UX.md#simplifikasi-usability--16-oktober-2026).
+Wizard channel memakai **Source → Transformation → Destinations → Review**. Mapping field visual mendukung Required, default value dan preview; filter, script, routing, multi destination, retry dan timeout tetap tersedia melalui Advanced. Panduan terbaru dan bukti pengujian tersedia di [Mirth Connect Lite UI](docs/MIRTH_LITE_UI.md).
 
 ## Database setup dan migration
 
@@ -71,6 +71,8 @@ npm run bootstrap:admin
 Migration `001_engine.sql` membuat tabel yang belum ada, menambah field engine, audit/revocation, index pagination/retry/deduplikasi, dan menormalkan role. Migrator mengenkripsi endpoint connector lama. Jalankan dahulu di salinan database; duplikasi username/constraint/schema custom harus direkonsiliasi, bukan dihapus otomatis. Script memakai satu client PostgreSQL, transaction dan advisory lock. Nama tabel mixed-case (`"Users"`, `"Channels"`) dipertahankan untuk kompatibilitas dengan database existing. Migration tidak memindahkan data dari SQL Server; target PostgreSQL existing dipakai langsung.
 
 `bootstrap:admin` meminta username, nama, dan password tersembunyi (minimal 12 karakter). Tidak memakai admin/password default. Gunakan account migration dengan izin DDL, lalu account runtime dengan hak minimum yang diperlukan. Aplikasi tidak menjalankan migration secara otomatis.
+
+Build terbaru memerlukan migration **001–006**. Migration 006 menambah nullable HTTP status pada log delivery tanpa mengubah data lama. Jalankan preflight, backup dan migration sebelum restart; lihat [compatibility dan rollback](docs/MIRTH_LITE_UI.md#migration-006-dan-compatibility).
 
 ## Run development / production
 

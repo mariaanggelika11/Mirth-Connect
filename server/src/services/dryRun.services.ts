@@ -23,7 +23,11 @@ function outputFormat(payload: unknown) {
     return 'TEXT';
   }
 }
-export async function runConfiguration(data: RevisionConfig, syntheticPayload: unknown) {
+export async function runConfiguration(
+  data: RevisionConfig,
+  syntheticPayload: unknown,
+  options: { validateConnections?: boolean } = {},
+) {
   const started = performance.now();
   let payload: unknown = structuredClone(syntheticPayload);
   const input = { format: data.source.inboundDataType, payload: structuredClone(payload) };
@@ -87,7 +91,8 @@ export async function runConfiguration(data: RevisionConfig, syntheticPayload: u
     };
     let stage: keyof typeof stages = 'filter';
     try {
-      validateEndpoint(destination.endpoint, destination.type);
+      if (options.validateConnections !== false)
+        validateEndpoint(destination.endpoint, destination.type);
       let outbound = structuredClone(payload);
       const routed = Boolean(
         accepted &&

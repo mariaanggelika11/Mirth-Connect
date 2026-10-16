@@ -28,7 +28,7 @@ export async function listMessages(q: MonitorQuery) {
           .request()
           .input('ids', ids.join(','))
           .query<DestinationLogRow>(
-            `WITH latest AS (SELECT l.id,l.message_id,l.destination_id,l.status,l.sent_at,ROW_NUMBER() OVER(PARTITION BY l.message_id ORDER BY l.id DESC) rn FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id WHERE o.inbound_message_id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[])) OR o.id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[]))) SELECT l.*,d.name destination_name,o.inbound_message_id,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING' AND d.is_enabled=true AND d.is_deleted=false) retry_eligible FROM latest l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE l.rn=1 ORDER BY l.id DESC`,
+            `WITH latest AS (SELECT l.id,l.message_id,l.destination_id,l.status,l.http_status,l.sent_at,ROW_NUMBER() OVER(PARTITION BY l.message_id ORDER BY l.id DESC) rn FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id WHERE o.inbound_message_id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[])) OR o.id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[]))) SELECT l.*,d.name destination_name,o.inbound_message_id,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING' AND d.is_enabled=true AND d.is_deleted=false) retry_eligible FROM latest l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE l.rn=1 ORDER BY l.id DESC`,
           )
       ).recordset
     : [];

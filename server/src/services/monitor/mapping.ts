@@ -30,6 +30,7 @@ export interface DestinationLogRow {
   status: string;
   sent_at: Date;
   ack_code: string;
+  http_status?: number | null;
   message_control_id: string;
   request_data: string;
   outbound_data: string;
@@ -81,6 +82,7 @@ export function logRow(row: DestinationLogRow, payload: boolean) {
     status: row.status,
     sentAt: row.sent_at,
     ackCode: row.ack_code,
+    httpStatus: row.http_status ?? undefined,
     messageControlId: payload && row.message_control_id ? '[REDACTED]' : undefined,
     canResend: row.retry_eligible === true,
     ...(payload

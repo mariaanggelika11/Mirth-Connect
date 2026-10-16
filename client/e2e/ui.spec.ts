@@ -56,7 +56,7 @@ test('revision review, compare and publish are permission-aware and functional',
   await page.getByLabel('Compare revision 1').check();
   await page.getByRole('button', { name: 'Compare selected revisions' }).click();
   await expect(page.locator('pre').filter({ hasText: 'Before synthetic' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
   await page.getByLabel('Publish / rollback summary').fill('Synthetic reviewed activation');
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -266,6 +266,8 @@ test('channel wizard prevents accidental loss and requires review before saving'
   await page.getByRole('button', { name: 'New Channel' }).click();
   await page.getByLabel('Channel name', { exact: false }).fill('New integration');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'How should the message change?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByText('Where should messages go?')).toBeVisible();
   await page.getByLabel('Destination name').fill('REST receiver');
   await page.getByLabel('Endpoint', { exact: false }).fill('https://api.example.com/messages');
@@ -358,6 +360,7 @@ test('duplicate uses a new draft and XML export has no runtime IDs', async ({ pa
   await expect(page.getByLabel('Channel name', { exact: false })).toHaveValue(
     'Test Channel (copy)',
   );
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(
     page.getByText('This channel will receive messages without outbound delivery.', {

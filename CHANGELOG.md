@@ -1,5 +1,14 @@
 # Changelog
 
+## Visual transformation and four-step wizard — 2026-10-16
+
+- Use Source → Transformation → Destinations → Review, with visual field mapping, Required/default values, input/output previews and optional scripts.
+- Preserve source/destination filters and transformers, routing, multi destination, retry, timeout, monitoring and start/stop. Keep advanced configuration and custom scripts intact; make change summaries optional in the UI with automatic audit descriptions.
+- Add a permission-controlled transformation preview before endpoint setup, using the existing sandboxed engine without network operations.
+- Show Inbound Message, Source Processed Message, Outbound Message and Delivery Result. Record actual HTTP status through nullable schema-6 migration; immediately hide raw payload when permissions change.
+- Verify 300 unit/API tests, 41 browser tests, 19 disposable PostgreSQL integration tests, CLI migration twice and compiled runtime startup/drain. Coverage increases to 81.11% statements, 76.82% branches, 82.75% functions and 82.25% lines.
+- Migration 006 is required before deploying this build. No remote database migration was performed. See [usage, limitations and migration notes](docs/MIRTH_LITE_UI.md).
+
 ## Compact channel editor — 2026-10-16
 
 - Reduce setup to Source → Destinations → Review; move optional source processing into Advanced.

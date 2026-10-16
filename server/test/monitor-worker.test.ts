@@ -82,6 +82,7 @@ describe('Monitor pagination and PHI separation', () => {
             response_text: 'secret-patient',
             request_data: 'secret-patient',
             outbound_data: 'secret-patient',
+            http_status: 201,
           },
         ],
       };
@@ -91,6 +92,7 @@ describe('Monitor pagination and PHI separation', () => {
       .set('Authorization', 'Bearer ' + token);
     expect(res.status).toBe(200);
     expect(res.body.data.payloadAllowed).toBe(false);
+    expect(res.body.data.destinationLogs[0].httpStatus).toBe(201);
     expect(JSON.stringify(res.body)).not.toContain('secret-patient');
   });
 });

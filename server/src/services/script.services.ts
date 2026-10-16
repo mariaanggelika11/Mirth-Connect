@@ -2,6 +2,8 @@ import { increment, gauge } from '../utils/runtimeMetrics.js';
 import { Worker } from 'node:worker_threads';
 import { config } from '../config/env.js';
 import { AppError } from '../utils/errors.js';
+import { readFieldMapping } from '../utils/fieldMapping.js';
+import { Parser } from 'xml2js';
 let active = 0;
 export async function executeScript(
   script: string,
@@ -18,6 +20,38 @@ export async function executeScript(
   active++;
   gauge('script_workers_active', active);
   try {
+    // Visual mappings normalize XML into JSON before entering the existing isolated worker.
+    // Legacy/custom scripts continue to receive their original input unchanged.
+    if (
+      readFieldMapping(script) &&
+      typeof context.msg === 'string' &&
+      context.msg.trim().startsWith('<')
+    ) {
+      if (/<!DOCTYPE|<!ENTITY/i.test(context.msg))
+        throw new AppError(422, 'XML_ENTITIES_DENIED', 'XML entity declarations are not supported');
+      try {
+        let nodes = 0;
+        context = {
+          ...context,
+          msg: await new Parser({
+            strict: true,
+            explicitRoot: true,
+            explicitArray: false,
+            async: true,
+            chunkSize: 8192,
+            validator: (path: string, _old: unknown, value: unknown) => {
+              if (++nodes > 20000 || path.split('/').length > 65)
+                throw new Error('XML_MAPPING_LIMIT');
+              return value;
+            },
+          }).parseStringPromise(context.msg),
+        };
+      } catch {
+        throw new AppError(422, 'FIELD_MAPPING_INPUT_INVALID', 'Invalid XML mapping input');
+      }
+      if (Buffer.byteLength(JSON.stringify(context)) > config.server.payloadLimit)
+        throw new AppError(413, 'SCRIPT_INPUT_LIMIT', 'Script input limit exceeded');
+    }
     return await new Promise((resolve, reject) => {
       // tsx loader is needed only for development. Production always uses compiled JS.
       const isTs = import.meta.url.endsWith('.ts');

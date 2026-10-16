@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { compileFieldMapping, readFieldMapping } from '../../server/src/utils/fieldMapping';
 
 // All API and destination requests are intercepted. These fixtures contain only synthetic data.
 const productionBase = 'https://connect.bulmar.tech';
@@ -11,6 +12,8 @@ const rawInbound = { patient: { name: 'SYNTHETIC EXAMPLE', identifier: 'SYNTHETI
 const xml = '[REDACTED TEXT]';
 const rawXml =
   '<patient>\n  <name>SYNTHETIC EXAMPLE</name>\n  <identifier>SYNTHETIC-001</identifier>\n</patient>';
+const mappedPatientXml =
+  '<Patient>\n  <PatientID>SYNTHETIC-001</PatientID>\n  <PatientName>Example Patient</PatientName>\n  <Gender>U</Gender>\n  <BirthDate>2000-01-01</BirthDate>\n</Patient>';
 const timestamp = '2026-10-16T02:00:00Z';
 const existingChannel = {
   id: 1,
@@ -99,6 +102,8 @@ async function workspace(
       return route.fulfill({
         json: { success: true, data: { id: 1, name: 'Synthetic user', role } },
       });
+    if (path === '/api/channel/source-configuration')
+      return route.fulfill({ json: { baseUrl: base, path: '/api/message/inbound' } });
     if (path === '/api/channel' && method === 'GET') return route.fulfill({ json: state.channels });
     if (path === '/api/channel' && method === 'POST') {
       const channel = {
@@ -142,8 +147,16 @@ async function workspace(
           warnings: [],
         },
       });
-    if (path === '/api/channel/dry-run') {
+    if (path === '/api/channel/dry-run' || path === '/api/channel/preview-transformation') {
       const payload = body.raw ? rawInbound : inbound;
+      const configuration = body.configuration as { processingScript?: string };
+      const mapping = readFieldMapping(configuration.processingScript || '');
+      // This fixed synthetic response exercises the UI contract. Runtime mapping is tested in
+      // server/test/field-mapping.test.ts; this fixture does not claim to execute the engine.
+      const isPatientExample =
+        mapping?.rootElement === 'Patient' &&
+        mapping.rows.map((row) => row.target).join(',') ===
+          'PatientID,PatientName,Gender,BirthDate';
       return route.fulfill({
         json: {
           success: true,
@@ -165,7 +178,7 @@ async function workspace(
               connectorType: 'REST',
               status: 'VALID',
               routed: true,
-              finalPayload: body.raw ? rawXml : xml,
+              finalPayload: body.raw ? (isPatientExample ? mappedPatientXml : rawXml) : xml,
               stages: {
                 filter: 'ACCEPTED',
                 transformation: 'PASS_THROUGH',
@@ -257,6 +270,7 @@ async function workspace(
                 outboundFormat: 'XML',
                 connectorType: 'REST',
                 snapshotCaptured: true,
+                httpStatus: logPage === 1 ? 201 : 503,
                 status: logPage === 1 ? 'OUT-SENT' : 'OUT-ERROR',
                 sentAt: logPage === 1 ? timestamp : '2026-10-16T01:59:00Z',
                 requestData: raw ? rawInbound : inbound,
@@ -291,63 +305,88 @@ async function clipboard(page: Page) {
     () => (window as Window & { __syntheticClipboard?: string }).__syntheticClipboard || '',
   );
 }
+async function step(page: Page, index: number) {
+  await page.getByLabel('Channel setup steps').getByRole('button').nth(index).click();
+}
+async function openExisting(page: Page, name = existingChannel.name) {
+  await page.getByLabel(`More actions for ${name}`).click();
+  await page.getByRole('button', { name: 'Edit channel', exact: true }).click();
+}
 async function newJsonXmlChannel(page: Page) {
   await page.getByRole('button', { name: 'New Channel', exact: true }).click();
   await page.getByLabel('Channel name', { exact: false }).fill('SYNTHETIC_JSON_TO_XML');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('combobox', { name: /^Output format/ }).selectOption('XML');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByLabel('Destination name').fill('PATIENT_XML_RECEIVER');
-  await page.getByLabel('Outbound format', { exact: false }).selectOption('XML');
   await page.getByLabel('Endpoint', { exact: false }).fill(receiver);
 }
+async function preview(page: Page, raw = false) {
+  await step(page, 1);
+  await page.getByLabel('Preview input', { exact: false }).fill(JSON.stringify(rawInbound));
+  if (raw) {
+    await page.getByRole('checkbox', { name: 'Show unmasked preview (access is audited)' }).check();
+  }
+  await page.getByRole('button', { name: 'Test transformation', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Preview output', exact: true })).toContainText(
+    'Preview completed',
+  );
+}
 
-test('compact setup needs only source and destination choices before saving without tests', async ({
+test('four-step setup keeps core choices visible and technical options optional', async ({
   page,
 }) => {
   const state = await workspace(page, { channels: [] });
   await page.getByRole('button', { name: 'New Channel', exact: true }).click();
   const steps = page.getByLabel('Channel setup steps').getByRole('button');
-  await expect(steps).toHaveCount(3);
-  await expect(steps.nth(0)).toContainText('Source');
-  await expect(steps.nth(1)).toContainText('Destinations');
-  await expect(steps.nth(2)).toContainText('Review');
-  await expect(page.getByRole('button', { name: 'Add source transformer' })).not.toBeVisible();
+  await expect(steps).toHaveCount(4);
+  for (const [index, label] of ['Source', 'Transformation', 'Destinations', 'Review'].entries())
+    await expect(steps.nth(index)).toContainText(label);
+  await expect(page.getByRole('region', { name: 'Source authentication' })).toBeVisible();
+  await expect(
+    page.getByText(`${productionBase}/api/message/inbound/{channelId}`, { exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole('checkbox', { name: 'Enable source filter' })).not.toBeVisible();
-  await expect(page.getByRole('button', { name: 'Create / rotate source API key' })).toHaveCount(0);
-  await expect(page.getByRole('region', { name: 'Current source endpoint' })).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: 'Advanced source transformer', exact: true }),
+  ).not.toBeVisible();
+  await expect(page.getByLabel('Duplicate message protection', { exact: false })).toHaveCount(0);
   await page.getByLabel('Channel name', { exact: false }).fill('SYNTHETIC_COMPACT_SETUP');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByLabel('Input format', { exact: true })).toHaveValue('JSON');
+  await expect(page.getByRole('combobox', { name: /^Output format/ })).toHaveValue('JSON');
+  await expect(page.getByRole('button', { name: 'Add mapping', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Open script editor', exact: true }),
+  ).not.toBeVisible();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByLabel('Destination name')).toHaveCount(1);
   await page.getByLabel('Destination name').fill('SYNTHETIC_RECEIVER');
   await page.getByLabel('Endpoint', { exact: false }).fill(receiver);
   await expect(page.getByLabel('Destination filter', { exact: true })).not.toBeVisible();
   await expect(page.getByRole('checkbox', { name: 'Automatic retry' })).not.toBeVisible();
+  await expect(page.getByRole('button', { name: 'Add Destination', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await expect(page.getByText('Review your connection', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Preview output', exact: true })).not.toBeVisible();
+  await expect(page.getByLabel('Integration flow')).toContainText('HTTP / JSON');
+  await expect(page.getByRole('button', { name: 'Test', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Change summary', { exact: false })).toHaveCount(0);
   await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
   const onboarding = page.getByRole('dialog', { name: 'Channel saved', exact: true });
   await expect(onboarding).toBeVisible();
   await expect(onboarding.getByRole('button', { name: 'Create API key' })).toBeVisible();
   await expect(onboarding.getByRole('button', { name: 'Start channel' })).toBeVisible();
-  await expect(
-    onboarding.getByRole('region', { name: 'Current source endpoint' }),
-  ).not.toBeVisible();
-  await expect(
-    onboarding.getByRole('button', { name: 'Send synthetic message' }),
-  ).not.toBeVisible();
-  expect(captured(state, '/api/channel/dry-run')).toEqual([]);
+  expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
   expect(captured(state, '/api/channel/test-connection')).toEqual([]);
   expect(captured(state, '/api/message/inbound/2')).toEqual([]);
   expect(state.rotations).toBe(0);
   expect(state.externalRequests).toEqual([]);
 });
 
-test('jumping to review still directs incomplete destinations back to their fields', async ({
-  page,
-}) => {
+test('jumping to review directs incomplete destinations back to their fields', async ({ page }) => {
   const state = await workspace(page, { channels: [] });
   await page.getByRole('button', { name: 'New Channel', exact: true }).click();
   await page.getByLabel('Channel name', { exact: false }).fill('SYNTHETIC_INCOMPLETE_SETUP');
-  await page.getByLabel('Channel setup steps').getByRole('button').nth(2).click();
+  await step(page, 3);
   await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText(
     'Each destination needs a name and endpoint.',
@@ -359,9 +398,10 @@ test('jumping to review still directs incomplete destinations back to their fiel
   );
 });
 
-test('existing connection tools are opt-in and closing them clears the one-time API key', async ({
+test('visible source authentication rotates explicitly and navigating clears the one-time key', async ({
   page,
 }) => {
+  if (process.env.UI_REVIEW_SCREENSHOT) await page.setViewportSize({ width: 1440, height: 1600 });
   const state = await workspace(page);
   let releaseRotation = () => {};
   const rotationPending = new Promise<void>((resolve) => {
@@ -371,16 +411,13 @@ test('existing connection tools are opt-in and closing them clears the one-time 
     await rotationPending;
     await route.fallback();
   });
-  await page.getByLabel(`More actions for ${existingChannel.name}`).click();
-  await page.getByRole('button', { name: 'Edit channel', exact: true }).click();
-  const connection = page.getByText('Connection & API key', { exact: true });
+  await openExisting(page);
   const rotate = page.getByRole('button', { name: 'Create / rotate source API key' });
   await expect(page.getByLabel('Channel name', { exact: false })).toHaveValue(existingChannel.name);
   await expect(page.getByText('No unsaved changes', { exact: true })).toBeVisible();
-  await expect(rotate).not.toBeVisible();
+  await expect(rotate).toBeVisible();
   if (process.env.UI_REVIEW_SCREENSHOT)
     await page.screenshot({ path: process.env.UI_REVIEW_SCREENSHOT });
-  await connection.click();
   await rotate.click();
   expect(state.rotations).toBe(0);
   await page.getByRole('button', { name: 'Confirm key rotation', exact: true }).click();
@@ -394,60 +431,32 @@ test('existing connection tools are opt-in and closing them clears the one-time 
     releaseRotation();
   }
   await expect(page.getByText(fixtureKey(1), { exact: true })).toBeVisible();
-  await connection.click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByText(fixtureKey(1), { exact: true })).toHaveCount(0);
-  await connection.click();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(page.getByText(fixtureKey(1), { exact: true })).toHaveCount(0);
   expect(state.rotations).toBe(1);
   await page.getByRole('combobox', { name: 'Source connector', exact: true }).selectOption('HL7');
-  await expect(connection).toHaveCount(0);
+  await expect(rotate).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Current source endpoint' })).toHaveCount(0);
 });
 
-test('simple JSON to XML setup previews output, saves without a summary, and guides a confirmed test', async ({
+test('JSON to XML preview, connection test and confirmed onboarding delivery keep separate effects', async ({
   page,
 }) => {
   const state = await workspace(page, { channels: [] });
-  await page.getByRole('button', { name: 'New Channel', exact: true }).click();
-  await expect(page.getByLabel('Inbound format', { exact: false })).toHaveValue('JSON');
-  await expect(page.getByLabel('Duplicate message protection', { exact: false })).not.toBeVisible();
-  await expect(page.getByLabel('Custom validation profile (JSON)', { exact: false })).toHaveCount(
-    0,
-  );
-  await page.getByText('Advanced source settings', { exact: true }).click();
-  await expect(page.getByRole('radio', { name: 'No additional validation' })).toBeChecked();
-  await expect(page.getByLabel('Duplicate message protection', { exact: false })).toHaveValue(
-    'OPTIONAL',
-  );
-  await page.getByText('Advanced source settings', { exact: true }).click();
-  await page.getByLabel('Channel name', { exact: false }).fill('SYNTHETIC_JSON_TO_XML');
-  await expect(page.getByText('No source transformation · Pass-through')).not.toBeVisible();
-  await expect(page.getByRole('checkbox', { name: 'Enable source filter' })).not.toBeVisible();
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.getByLabel('Destination name').fill('PATIENT_XML_RECEIVER');
-  await page.getByLabel('Outbound format', { exact: false }).selectOption('XML');
-  await page.getByLabel('Endpoint', { exact: false }).fill(receiver);
+  await newJsonXmlChannel(page);
   await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect(page.getByText('Endpoint reachable', { exact: true })).toBeVisible();
-  await expect(page.getByText('TLS handshake', { exact: false })).toBeVisible();
   expect(captured(state, '/api/channel/test-connection')[0].body).toEqual({
     endpoint: receiver,
     type: 'REST',
     timeoutMs: 10000,
   });
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await expect(page.getByLabel('Change summary', { exact: false })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Preview output', exact: true })).not.toBeVisible();
-  await page.getByText('Test sample message (optional)', { exact: true }).click();
-  await page
-    .getByRole('textbox', { name: 'Input message (synthetic only)', exact: true })
-    .fill(JSON.stringify(rawInbound));
-  await page.getByRole('button', { name: 'Preview output', exact: true }).click();
-  await expect(page.getByText('Network delivery: NOT_SENT', { exact: true })).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Preview destination processing' })).toContainText(
-    xml,
-  );
-  expect(captured(state, '/api/channel/dry-run')[0].body).toMatchObject({
+  await preview(page);
+  const output = page.getByRole('region', { name: 'Preview output', exact: true });
+  await expect(output).toContainText(xml);
+  expect(captured(state, '/api/channel/preview-transformation')[0].body).toMatchObject({
     raw: false,
     payload: rawInbound,
     configuration: {
@@ -460,20 +469,13 @@ test('simple JSON to XML setup previews output, saves without a summary, and gui
   });
   expect(state.externalRequests).toEqual([]);
   expect(captured(state, '/api/message/inbound/2')).toEqual([]);
-  await page.getByRole('checkbox', { name: 'View raw synthetic preview (audited)' }).check();
-  await page.getByRole('button', { name: 'Preview output', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Preview destination processing' })).toContainText(
-    rawXml,
-  );
-  expect(captured(state, '/api/channel/dry-run').at(-1)?.body.raw).toBe(true);
+  await step(page, 3);
   await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Channel saved', exact: true })).toBeVisible();
+  const onboarding = page.getByRole('dialog', { name: 'Channel saved', exact: true });
+  await expect(onboarding).toBeVisible();
   expect(
     captured(state, '/api/channel').find((request) => request.method === 'POST')?.body,
-  ).toMatchObject({
-    changeSummary: 'Initial channel configuration',
-  });
-  const onboarding = page.getByRole('dialog', { name: 'Channel saved', exact: true });
+  ).toMatchObject({ changeSummary: 'Initial channel configuration' });
   await expect(
     onboarding.getByRole('button', { name: 'Send synthetic message' }),
   ).not.toBeVisible();
@@ -485,19 +487,12 @@ test('simple JSON to XML setup previews output, saves without a summary, and gui
   await expect(endpoint.getByRole('button', { name: 'Copy curl example' })).not.toBeVisible();
   await endpoint.getByText('Request examples', { exact: true }).click();
   await endpoint.getByRole('button', { name: 'Copy curl example' }).click();
-  expect(await clipboard(page)).toContain(`${productionBase}/api/message/inbound/2`);
   expect(await clipboard(page)).toContain('X-API-Key: <SOURCE_API_KEY>');
   await endpoint.getByRole('button', { name: 'Copy Postman request' }).click();
-  const postman = JSON.parse(await clipboard(page));
-  expect(postman.item[0].request.url).toBe(`${productionBase}/api/message/inbound/2`);
-  expect(postman.item[0].request.header).toContainEqual({
-    key: 'X-API-Key',
-    value: '{{source_api_key}}',
-  });
+  expect(JSON.parse(await clipboard(page)).item[0].request.url).toBe(
+    `${productionBase}/api/message/inbound/2`,
+  );
   await onboarding.getByRole('button', { name: 'Create API key', exact: true }).click();
-  await expect(
-    page.getByText('A new key immediately invalidates the previous key.', { exact: false }),
-  ).toBeVisible();
   expect(state.rotations).toBe(0);
   await page.getByRole('button', { name: 'Create key', exact: true }).click();
   await expect(onboarding.locator('code').filter({ hasText: fixtureKey(1) })).toBeVisible();
@@ -512,9 +507,6 @@ test('simple JSON to XML setup previews output, saves without a summary, and gui
   ).toBeDisabled();
   expect(captured(state, '/api/channel/2/status')[0].body).toEqual({ status: 'RUNNING' });
   await onboarding.getByRole('button', { name: 'Send synthetic message', exact: true }).click();
-  await expect(
-    page.getByText('It performs real network delivery.', { exact: false }),
-  ).toBeVisible();
   expect(captured(state, '/api/message/inbound/2')).toHaveLength(0);
   await page.getByRole('button', { name: 'Send test request', exact: true }).click();
   await expect(onboarding.getByText('Test message received · #1.', { exact: false })).toBeVisible();
@@ -524,25 +516,27 @@ test('simple JSON to XML setup previews output, saves without a summary, and gui
   expect(delivery.headers['idempotency-key']).toMatch(/^[\da-f-]{36}$/i);
   await onboarding.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(page.getByText(fixtureKey(2), { exact: true })).toHaveCount(0);
-  await page.getByLabel('More actions for SYNTHETIC_JSON_TO_XML').click();
-  await page.getByRole('button', { name: 'Edit channel', exact: true }).click();
+  await openExisting(page, 'SYNTHETIC_JSON_TO_XML');
   await expect(page.getByText(fixtureKey(2), { exact: true })).toHaveCount(0);
   expect(await clipboard(page)).not.toContain(fixtureKey(2));
 });
 
-test('advanced filtering and retry stay optional and disabled filter scripts are not submitted', async ({
+test('advanced filtering validation retry and timeout remain optional and preserve edits', async ({
   page,
 }) => {
   const state = await workspace(page);
   await page.getByRole('button', { name: 'New Channel', exact: true }).click();
   await page.getByLabel('Channel name', { exact: false }).fill('Synthetic advanced choices');
   await page.getByText('Advanced source settings', { exact: true }).click();
+  await page
+    .locator('summary')
+    .filter({ hasText: /^Advanced validation/ })
+    .click();
   await page.getByRole('radio', { name: 'Basic JSON validation' }).check();
   await expect(page.getByLabel('Custom validation profile (JSON)', { exact: false })).toHaveCount(
     0,
   );
-  await page.getByText('Message processing', { exact: true }).click();
-  await expect(page.getByText('All messages are accepted.', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Duplicate message protection', { exact: false })).toHaveCount(0);
   await page.getByRole('checkbox', { name: 'Enable source filter' }).check();
   await page.getByLabel('Source filter script', { exact: false }).fill('return false;');
   await page.getByRole('checkbox', { name: 'Enable source filter' }).uncheck();
@@ -552,19 +546,17 @@ test('advanced filtering and retry stay optional and disabled filter scripts are
     'return false;',
   );
   await page.getByRole('checkbox', { name: 'Enable source filter' }).uncheck();
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await step(page, 2);
   await page.getByLabel('Destination name').fill('PATIENT_XML_RECEIVER');
   await page.getByLabel('Outbound format', { exact: false }).selectOption('XML');
   await page.getByLabel('Endpoint', { exact: false }).fill(receiver);
   await expect(page.getByRole('checkbox', { name: 'Automatic retry' })).not.toBeVisible();
   await page.getByText('Advanced destination settings', { exact: true }).click();
-  await expect(page.getByRole('checkbox', { name: 'Automatic retry' })).not.toBeVisible();
   await page
     .locator('summary')
     .filter({ hasText: /^Delivery settings/ })
     .click();
   await expect(page.getByRole('checkbox', { name: 'Automatic retry' })).not.toBeChecked();
-  await expect(page.getByLabel('Retry attempts', { exact: true })).toHaveCount(0);
   await page.getByRole('checkbox', { name: 'Automatic retry' }).check();
   await page.getByLabel('Retry attempts', { exact: true }).fill('4');
   await page.getByLabel('Retry interval (seconds)', { exact: true }).fill('15');
@@ -573,14 +565,8 @@ test('advanced filtering and retry stay optional and disabled filter scripts are
   await expect(page.getByLabel('Retry attempts', { exact: true })).toHaveCount(0);
   await page.getByRole('checkbox', { name: 'Automatic retry' }).check();
   await expect(page.getByLabel('Retry attempts', { exact: true })).toHaveValue('4');
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.getByText('Test sample message (optional)', { exact: true }).click();
-  await page
-    .getByRole('textbox', { name: 'Input message (synthetic only)', exact: true })
-    .fill(JSON.stringify(rawInbound));
-  await page.getByRole('button', { name: 'Preview output', exact: true }).click();
-  await expect(page.getByText('Network delivery: NOT_SENT', { exact: true })).toBeVisible();
-  expect(captured(state, '/api/channel/dry-run')[0].body).toMatchObject({
+  await preview(page);
+  expect(captured(state, '/api/channel/preview-transformation')[0].body).toMatchObject({
     configuration: {
       validationProfile: { jsonSchema: { type: 'object' } },
       filterScript: '',
@@ -593,62 +579,8 @@ test('advanced filtering and retry stay optional and disabled filter scripts are
   expect(state.externalRequests).toEqual([]);
 });
 
-test('editing preserves advanced legacy configuration and requires a change summary', async ({
-  page,
-}) => {
-  const legacy = {
-    ...existingChannel,
-    validationProfile: { jsonSchema: { type: 'object', required: ['patient'] } },
-    processingScript: 'return msg;',
-    filterScript: 'return Boolean(msg);',
-    responseScript: 'return response;',
-    destinations: [
-      {
-        ...existingChannel.destinations[0],
-        retryEnabled: true,
-        maxRetries: 4,
-        retryIntervalSeconds: 20,
-        timeoutMs: 2500,
-        processingScript: 'return msg;',
-        filterScript: 'return true;',
-        templateScript: 'return msg;',
-        responseScript: 'return response;',
-      },
-    ],
-  };
-  const state = await workspace(page, { channels: [legacy] });
-  await page.getByLabel(`More actions for ${legacy.name}`).click();
-  await page.getByRole('button', { name: 'Edit channel', exact: true }).click();
-  await page.getByText('Advanced source settings', { exact: true }).click();
-  await expect(page.getByRole('radio', { name: 'Custom validation schema' })).toBeChecked();
-  await expect(page.getByLabel('Custom validation profile (JSON)', { exact: false })).toContainText(
-    'patient',
-  );
-  await page.getByText('Message processing', { exact: true }).click();
-  await expect(page.getByText('Custom transformation enabled', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  const summary = page.getByLabel('Change summary', { exact: false });
-  await expect(summary).toHaveAttribute('required', '');
-  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
-  expect(captured(state, '/api/channel/1')).toHaveLength(0);
-  await summary.fill('Synthetic review; retain existing processing');
-  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-  expect(captured(state, '/api/channel/1')[0].body).toMatchObject({
-    validationProfile: legacy.validationProfile,
-    processingScript: legacy.processingScript,
-    filterScript: legacy.filterScript,
-    responseScript: legacy.responseScript,
-    destinations: legacy.destinations,
-    changeSummary: 'Synthetic review; retain existing processing',
-  });
-});
-
-test('a name-only edit preserves custom settings while every advanced section remains closed', async ({
-  page,
-}) => {
-  const legacy = {
+function legacyChannel() {
+  return {
     ...existingChannel,
     idempotencyMode: 'REQUIRED',
     validationProfile: { jsonSchema: { type: 'object', required: ['patient'] } },
@@ -670,23 +602,57 @@ test('a name-only edit preserves custom settings while every advanced section re
       },
     ],
   };
+}
+
+test('editing preserves advanced legacy settings while removing the mandatory change summary', async ({
+  page,
+}) => {
+  const legacy = legacyChannel();
   const state = await workspace(page, { channels: [legacy] });
-  await page.getByLabel(`More actions for ${legacy.name}`).click();
-  await page.getByRole('button', { name: 'Edit channel', exact: true }).click();
-  await expect(page.getByText('Custom settings active', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Edit source transformation' })).not.toBeVisible();
+  await openExisting(page);
+  await page.getByText('Advanced source settings', { exact: true }).click();
+  await page
+    .locator('summary')
+    .filter({ hasText: /^Advanced validation/ })
+    .click();
+  await expect(page.getByRole('radio', { name: 'Custom validation schema' })).toBeChecked();
+  await expect(page.getByLabel('Custom validation profile (JSON)', { exact: false })).toContainText(
+    'patient',
+  );
+  await expect(
+    page.getByText('Existing source response script is retained.', { exact: true }),
+  ).toBeVisible();
+  await step(page, 1);
+  await expect(
+    page.getByText('An advanced transformation is configured.', { exact: false }),
+  ).toBeVisible();
+  await step(page, 3);
+  await expect(page.getByLabel('Change summary', { exact: false })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(captured(state, '/api/channel/1')[0].body).toMatchObject({
+    validationProfile: legacy.validationProfile,
+    processingScript: legacy.processingScript,
+    filterScript: legacy.filterScript,
+    responseScript: legacy.responseScript,
+    destinations: legacy.destinations,
+    changeSummary: 'Channel configuration updated',
+    idempotencyMode: 'REQUIRED',
+  });
+});
+
+test('name-only editing keeps every hidden advanced setting unchanged', async ({ page }) => {
+  const legacy = legacyChannel();
+  const state = await workspace(page, { channels: [legacy] });
+  await openExisting(page);
+  await expect(
+    page.getByRole('button', { name: 'Advanced source transformer', exact: true }),
+  ).not.toBeVisible();
   await expect(
     page.getByLabel('Custom validation profile (JSON)', { exact: false }),
   ).not.toBeVisible();
   await page.getByLabel('Channel name', { exact: false }).fill('SYNTHETIC_RENAMED_CHANNEL');
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await expect(page.getByRole('checkbox', { name: 'Automatic retry' })).not.toBeVisible();
-  await expect(page.getByLabel('Destination filter', { exact: true })).not.toBeVisible();
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await expect(page.getByText('Custom source settings are active', { exact: false })).toBeVisible();
-  await page
-    .getByLabel('Change summary', { exact: false })
-    .fill('Rename only; retain custom configuration');
+  await step(page, 3);
   await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(captured(state, '/api/channel/1')[0].body).toMatchObject({
@@ -698,7 +664,7 @@ test('a name-only edit preserves custom settings while every advanced section re
     responseScript: legacy.responseScript,
     destinations: legacy.destinations,
   });
-  expect(captured(state, '/api/channel/dry-run')).toEqual([]);
+  expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
   expect(state.rotations).toBe(0);
 });
 
@@ -706,7 +672,7 @@ for (const [label, base] of [
   ['local', 'http://localhost:9000'],
   ['production', productionBase],
 ] as const)
-  test(`${label} source endpoint uses the server URL and placeholder request examples`, async ({
+  test(`${label} source endpoint stays visible and request examples remain optional`, async ({
     page,
   }) => {
     await workspace(page, {
@@ -718,11 +684,9 @@ for (const [label, base] of [
         },
       ],
     });
-    await page.getByLabel(`More actions for ${existingChannel.name}`).click();
-    await page.getByRole('button', { name: 'Edit channel', exact: true }).click();
+    await openExisting(page);
     const endpoint = page.getByRole('region', { name: 'Current source endpoint' });
-    await expect(endpoint).not.toBeVisible();
-    await page.getByText('Connection & API key', { exact: true }).click();
+    await expect(endpoint).toBeVisible();
     await expect(endpoint).toContainText(`${base}/api/message/inbound/1`);
     await expect(endpoint.getByRole('button', { name: 'Copy curl example' })).not.toBeVisible();
     await endpoint.getByText('Request examples', { exact: true }).click();
@@ -741,12 +705,16 @@ test('Messages separates inbound, source and final output while auditing raw pag
   const state = await workspace(page);
   await page.getByRole('button', { name: 'Messages', exact: true }).click();
   await page.getByRole('button', { name: 'Open message 1', exact: true }).click();
+  const result = page.getByRole('region', { name: 'Delivery Result', exact: true });
+  await expect(result).toContainText('PATIENT_XML_RECEIVER');
+  await expect(result).toContainText('XML');
+  await expect(result).toContainText('HTTP 201');
+  await expect(result.getByText('HTTP 200', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Technical details', { exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Payload', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Inbound Message', exact: true })).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: 'Original inbound payload', exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole('heading', { name: 'Source processed payload', exact: true }),
+    page.getByRole('heading', { name: 'Source Processed Message', exact: true }),
   ).toBeVisible();
   await expect(page.getByText('No source transformation', { exact: true })).toBeVisible();
   const delivery = page.getByRole('region', { name: 'Outbound delivery to PATIENT_XML_RECEIVER' });
@@ -755,7 +723,7 @@ test('Messages separates inbound, source and final output while auditing raw pag
   await expect(delivery).toContainText('OUT-SENT');
   await expect(delivery).toContainText('Synthetic destination accepted');
   await expect(page.getByText('SYNTHETIC EXAMPLE', { exact: false })).toHaveCount(0);
-  await delivery.getByRole('button', { name: 'Copy Outbound payload', exact: true }).click();
+  await delivery.getByRole('button', { name: 'Copy Outbound Message', exact: true }).click();
   expect(await clipboard(page)).toBe(xml);
   await expect(
     page.getByText('Viewing raw payload will be recorded in the audit log.', { exact: true }),
@@ -764,6 +732,7 @@ test('Messages separates inbound, source and final output while auditing raw pag
   await page.getByRole('button', { name: 'Next results', exact: true }).click();
   await expect(page.getByText('Results page 2', { exact: true })).toBeVisible();
   await expect(delivery).toContainText('REMOTE_HTTP_ERROR');
+  await expect(delivery).toContainText('HTTP 503');
   await page.getByRole('button', { name: 'View raw (audited)', exact: true }).click();
   await expect(delivery).toContainText(rawXml);
   expect(state.details.at(-1)).toEqual({ id: 1, page: 2, raw: true });
@@ -779,30 +748,116 @@ test('Messages separates inbound, source and final output while auditing raw pag
   await page.getByRole('button', { name: 'Open message 2', exact: true }).click();
   await page.getByRole('tab', { name: 'Payload', exact: true }).click();
   await expect(
-    page.getByRole('heading', { name: 'Stored outbound payload', exact: true }),
+    page.getByRole('heading', { name: 'Outbound Message (stored)', exact: true }),
   ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Inbound Message', exact: true })).toHaveCount(0);
   await expect(
-    page.getByRole('heading', { name: 'Original inbound payload', exact: true }),
+    page.getByRole('heading', { name: 'Source Processed Message', exact: true }),
   ).toHaveCount(0);
+});
+
+test('Messages shows transport results to viewers without exposing payloads', async ({ page }) => {
+  await workspace(page, { role: 'VIEWER' });
+  await page.getByRole('button', { name: 'Messages', exact: true }).click();
+  await page.getByRole('button', { name: 'Open message 1', exact: true }).click();
+  const result = page.getByRole('region', { name: 'Delivery Result', exact: true });
+  await expect(result).toContainText('PATIENT_XML_RECEIVER');
+  await expect(result).toContainText('HTTP 201');
+  await expect(page.getByRole('tab', { name: 'Payload', exact: true })).toHaveCount(0);
+  await expect(page.getByText('Synthetic destination accepted', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'View raw (audited)', exact: true })).toHaveCount(
+    0,
+  );
+});
+
+test('Messages hides cached raw payload immediately when an active admin becomes a developer', async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  await page.getByRole('button', { name: 'Messages', exact: true }).click();
+  await page.getByRole('button', { name: 'Open message 1', exact: true }).click();
+  await page.getByRole('tab', { name: 'Payload', exact: true }).click();
+  await page.getByRole('button', { name: 'View raw (audited)', exact: true }).click();
+  await expect(page.getByText('SYNTHETIC EXAMPLE', { exact: false }).first()).toBeVisible();
+  let releaseRedacted: () => void = () => {};
+  const waitForRelease = new Promise<void>((resolve) => {
+    releaseRedacted = resolve;
+  });
+  await page.route('**/api/message/1?*', async (route) => {
+    if (new URL(route.request().url()).searchParams.get('raw') === 'false') await waitForRelease;
+    return route.fallback();
+  });
+  await page.route('**/api/auth/me', (route) =>
+    route.fulfill({
+      json: { success: true, data: { id: 1, name: 'Synthetic developer', role: 'DEVELOPER' } },
+    }),
+  );
+  const maskedRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === '/api/message/1' && url.searchParams.get('raw') === 'false';
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await maskedRequest;
+  await expect(page.getByRole('button', { name: 'View raw (audited)', exact: true })).toHaveCount(
+    0,
+  );
+  await expect(page.getByText('SYNTHETIC EXAMPLE', { exact: false })).toHaveCount(0);
   await expect(
-    page.getByRole('heading', { name: 'Source processed payload', exact: true }),
-  ).toHaveCount(0);
+    page.getByText('Refreshing the redacted message after your permissions changed.', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  releaseRedacted();
+  await expect(page.getByRole('heading', { name: 'Inbound Message', exact: true })).toBeVisible();
+  await expect(page.getByText('SYNTHETIC EXAMPLE', { exact: false })).toHaveCount(0);
+  expect(state.details.at(-1)).toEqual({ id: 1, page: 1, raw: false });
+});
+
+test('Messages leaves missing legacy HTTP results unknown', async ({ page }) => {
+  await workspace(page);
+  await page.route('**/api/message/1?*', (route) =>
+    route.fulfill({
+      json: {
+        success: true,
+        data: {
+          id: 1,
+          direction: 'IN',
+          status: 'SUCCESS',
+          channelId: 1,
+          channelName: existingChannel.name,
+          timestamp,
+          inboundFormat: 'JSON',
+          payloadAllowed: false,
+          destinationLogs: [
+            {
+              messageId: 2,
+              destinationName: 'Legacy receiver',
+              outboundFormat: 'XML',
+              connectorType: 'REST',
+              status: 'OUT-SENT',
+              sentAt: timestamp,
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.getByRole('button', { name: 'Messages', exact: true }).click();
+  await page.getByRole('button', { name: 'Open message 1', exact: true }).click();
+  const result = page.getByRole('region', { name: 'Delivery Result', exact: true });
+  await expect(result).toContainText('Legacy receiver');
+  await expect(result).toContainText('Not recorded');
+  await expect(result.getByText(/HTTP \d+/)).toHaveCount(0);
 });
 
 test('raw preview and raw Messages controls follow the current role', async ({ page }) => {
   const state = await workspace(page, { role: 'DEVELOPER' });
   await newJsonXmlChannel(page);
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.getByText('Test sample message (optional)', { exact: true }).click();
-  await page
-    .getByRole('textbox', { name: 'Input message (synthetic only)', exact: true })
-    .fill(JSON.stringify(rawInbound));
+  await preview(page);
   await expect(
-    page.getByRole('checkbox', { name: 'View raw synthetic preview (audited)' }),
+    page.getByRole('checkbox', { name: 'Show unmasked preview (access is audited)' }),
   ).toHaveCount(0);
-  await page.getByRole('button', { name: 'Preview output', exact: true }).click();
-  await expect(page.getByText('Network delivery: NOT_SENT', { exact: true })).toBeVisible();
-  expect(captured(state, '/api/channel/dry-run')[0].body.raw).toBe(false);
+  expect(captured(state, '/api/channel/preview-transformation')[0].body.raw).toBe(false);
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
   await page.getByRole('button', { name: 'Messages', exact: true }).click();
@@ -814,41 +869,268 @@ test('raw preview and raw Messages controls follow the current role', async ({ p
   expect(state.details.every((request) => !request.raw)).toBe(true);
 });
 
-test('administrator raw synthetic preview is explicit and never sends a delivery', async ({
+test('administrator unmasked synthetic preview is explicit and never sends a delivery', async ({
   page,
 }) => {
   const state = await workspace(page);
   await newJsonXmlChannel(page);
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.getByText('Test sample message (optional)', { exact: true }).click();
-  await page
-    .getByRole('textbox', { name: 'Input message (synthetic only)', exact: true })
-    .fill(JSON.stringify(rawInbound));
-  await page.getByRole('checkbox', { name: 'View raw synthetic preview (audited)' }).check();
-  await page.getByRole('button', { name: 'Preview output', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Preview destination processing' })).toContainText(
+  await preview(page, true);
+  await expect(page.getByRole('region', { name: 'Preview output', exact: true })).toContainText(
     rawXml,
   );
-  expect(captured(state, '/api/channel/dry-run')[0].body.raw).toBe(true);
+  expect(captured(state, '/api/channel/preview-transformation')[0].body.raw).toBe(true);
   expect(
     state.requests.filter((request) => request.path.startsWith('/api/message/inbound/')),
   ).toHaveLength(0);
   expect(state.externalRequests).toEqual([]);
 });
 
-test('simplified channel setup supports mobile keyboard navigation and WCAG checks', async ({
+test('patient field mappings compile required defaults and XML root without needing a destination first', async ({
+  page,
+}) => {
+  if (process.env.UI_REVIEW_TRANSFORMATION_SCREENSHOT)
+    await page.setViewportSize({ width: 1440, height: 1600 });
+  const state = await workspace(page, { channels: [] });
+  await page.getByRole('button', { name: 'New Channel', exact: true }).click();
+  await page.getByLabel('Channel name', { exact: false }).fill('SYNTHETIC_PATIENT_MAPPING');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('combobox', { name: /^Output format/ }).selectOption('XML');
+  await page.getByRole('button', { name: 'Use patient example', exact: true }).click();
+  for (const [index, source] of ['patient_id', 'name', 'gender', 'date_of_birth'].entries())
+    await expect(page.getByLabel(`Input field ${index + 1}`, { exact: true })).toHaveValue(source);
+  await expect(page.getByLabel('Output field 1', { exact: true })).toHaveValue('PatientID');
+  await expect(page.getByRole('checkbox', { name: 'Required field 1', exact: true })).toBeChecked();
+  await page.getByLabel('Default value 3', { exact: true }).fill('U');
+  await page.getByRole('checkbox', { name: 'Required field 3', exact: true }).check();
+  await expect(page.getByLabel('XML root element', { exact: true })).toHaveValue('Patient');
+  await page.getByRole('button', { name: 'Test transformation', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Preview output', exact: true })).toContainText(
+    'Preview completed',
+  );
+  const request = captured(state, '/api/channel/preview-transformation')[0];
+  const configuration = request.body.configuration as {
+    processingScript: string;
+    destinations: { endpoint: string; name: string }[];
+  };
+  const mapping = readFieldMapping(configuration.processingScript);
+  expect(mapping).toMatchObject({
+    version: 1,
+    rootElement: 'Patient',
+    rows: [
+      { source: 'patient_id', target: 'PatientID', required: true },
+      { source: 'name', target: 'PatientName', required: true },
+      { source: 'gender', target: 'Gender', required: true, defaultValue: 'U' },
+      { source: 'date_of_birth', target: 'BirthDate', required: false },
+    ],
+  });
+  expect(configuration.destinations[0]).toMatchObject({ name: '', endpoint: '' });
+  expect(state.externalRequests).toEqual([]);
+  expect(captured(state, '/api/channel/test-connection')).toEqual([]);
+  if (process.env.UI_REVIEW_TRANSFORMATION_SCREENSHOT) {
+    await page.getByRole('checkbox', { name: 'Show unmasked preview (access is audited)' }).check();
+    await page.getByRole('button', { name: 'Test transformation', exact: true }).click();
+    await expect(page.getByRole('region', { name: 'Preview output', exact: true })).toContainText(
+      mappedPatientXml,
+    );
+    await page.screenshot({ path: process.env.UI_REVIEW_TRANSFORMATION_SCREENSHOT });
+  }
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByLabel('Destination name').fill('PATIENT_XML_RECEIVER');
+  await page.getByLabel('Endpoint', { exact: false }).fill(receiver);
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByLabel('Integration flow')).toContainText('JSON → XML');
+  await expect(page.getByLabel('Integration flow')).toContainText('4 mapped fields');
+  if (process.env.UI_REVIEW_REVIEW_SCREENSHOT)
+    await page.screenshot({ path: process.env.UI_REVIEW_REVIEW_SCREENSHOT });
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  const saved = captured(state, '/api/channel').find((item) => item.method === 'POST')?.body;
+  expect(readFieldMapping(String(saved?.processingScript))).toEqual(mapping);
+  expect((saved?.destinations as { outboundDataType: string }[])[0].outboundDataType).toBe('XML');
+});
+
+test('unfinished field mappings block navigation and keep local input when going back', async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  await openExisting(page);
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Add mapping', exact: true }).click();
+  await page.getByLabel('Input field 1', { exact: true }).fill('patient_id');
+  await expect(
+    page.getByRole('button', { name: 'Test transformation', exact: true }),
+  ).toBeDisabled();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(
+    page.getByText('Complete or remove the unfinished field mapping.', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel('Input field 1', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByLabel('Input field 1', { exact: true })).toHaveValue('patient_id');
+  await expect(page.getByLabel('Output field 1', { exact: true })).toHaveValue('');
+  await step(page, 3);
+  await expect(page.getByLabel('Input field 1', { exact: true })).toBeVisible();
+  expect(captured(state, '/api/channel/1')).toEqual([]);
+  await page.getByLabel('Output field 1', { exact: true }).fill('PatientID');
+  await expect(
+    page.getByRole('button', { name: 'Test transformation', exact: true }),
+  ).toBeEnabled();
+  await page.getByRole('button', { name: 'Add mapping', exact: true }).click();
+  await page.getByLabel('Input field 2', { exact: true }).fill('name');
+  await page.getByLabel('Output field 2', { exact: true }).fill('PatientID');
+  await expect(
+    page.getByText('Mapping 2: output fields must not overlap.', { exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Remove mapping 2', exact: true }).click();
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  expect(
+    readFieldMapping(String(captured(state, '/api/channel/1')[0].body.processingScript))?.rows,
+  ).toEqual([{ source: 'patient_id', target: 'PatientID', required: false }]);
+});
+
+test('mixed destination formats routing scripts and retry survive transformation review unchanged', async ({
+  page,
+}) => {
+  const multiple = {
+    ...existingChannel,
+    destinations: [
+      { ...existingChannel.destinations[0], filterScript: 'return Boolean(msg.patient);' },
+      {
+        ...existingChannel.destinations[0],
+        id: 2,
+        name: 'SECONDARY_JSON_RECEIVER',
+        outboundDataType: 'JSON',
+        endpoint: `${receiver}?site=2`,
+        filterScript: 'return true;',
+        processingScript: 'return msg;',
+        retryEnabled: true,
+        maxRetries: 5,
+        retryIntervalSeconds: 12,
+        timeoutMs: 7000,
+      },
+    ],
+  };
+  const state = await workspace(page, { channels: [multiple] });
+  await openExisting(page);
+  await step(page, 1);
+  await expect(page.getByRole('combobox', { name: /^Output format/ })).toHaveValue('');
+  await expect(page.getByRole('combobox', { name: /^Output format/ })).toContainText(
+    'Multiple formats',
+  );
+  await step(page, 2);
+  await expect(page.getByLabel('Destination name')).toHaveCount(2);
+  await expect(page.getByRole('button', { name: 'Add Destination', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Destination filter', { exact: true }).first()).not.toBeVisible();
+  await step(page, 3);
+  await expect(page.getByLabel('Integration flow')).toContainText('XML / JSON');
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  expect(captured(state, '/api/channel/1')[0].body).toMatchObject({
+    destinations: multiple.destinations,
+  });
+});
+
+test('legacy transformation script is replaced only after an explicit confirmation', async ({
+  page,
+}) => {
+  const legacy = legacyChannel();
+  const state = await workspace(page, { channels: [legacy] });
+  await openExisting(page);
+  await step(page, 1);
+  await expect(
+    page.getByText('An advanced transformation is configured.', { exact: false }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Switch to field mapping', exact: true }).click();
+  let confirmation = page.getByRole('dialog', { name: 'Switch to field mapping?', exact: true });
+  await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(
+    page.getByText('An advanced transformation is configured.', { exact: false }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Test transformation', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Preview output', exact: true })).toContainText(
+    'Preview completed',
+  );
+  expect(
+    (
+      captured(state, '/api/channel/preview-transformation')[0].body.configuration as {
+        processingScript: string;
+      }
+    ).processingScript,
+  ).toBe(legacy.processingScript);
+  await page.getByRole('button', { name: 'Switch to field mapping', exact: true }).click();
+  confirmation = page.getByRole('dialog', { name: 'Switch to field mapping?', exact: true });
+  await confirmation.getByRole('button', { name: 'Use field mapping', exact: true }).click();
+  await page.getByRole('button', { name: 'Add mapping', exact: true }).click();
+  await page.getByLabel('Input field 1', { exact: true }).fill('patient.identifier');
+  await page.getByLabel('Output field 1', { exact: true }).fill('PatientID');
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  const saved = captured(state, '/api/channel/1')[0].body;
+  expect(saved.processingScript).not.toBe(legacy.processingScript);
+  expect(readFieldMapping(String(saved.processingScript))?.rows).toEqual([
+    { source: 'patient.identifier', target: 'PatientID', required: false },
+  ]);
+  expect(saved.filterScript).toBe(legacy.filterScript);
+  expect(saved.responseScript).toBe(legacy.responseScript);
+  expect(saved.destinations).toMatchObject(legacy.destinations);
+});
+
+test('existing generated mappings are recognized and preserved without touching scripts', async ({
+  page,
+}) => {
+  const script = compileFieldMapping({
+    version: 1,
+    rows: [
+      {
+        source: 'patient.identifier',
+        target: 'PatientID',
+        required: true,
+        defaultValue: 'SYNTHETIC-UNKNOWN',
+      },
+    ],
+    rootElement: 'Patient',
+  });
+  const channel = { ...existingChannel, processingScript: script };
+  const state = await workspace(page, { channels: [channel] });
+  await openExisting(page);
+  await step(page, 1);
+  await expect(page.getByLabel('Input field 1', { exact: true })).toHaveValue('patient.identifier');
+  await expect(page.getByLabel('Default value 1', { exact: true })).toHaveValue(
+    'SYNTHETIC-UNKNOWN',
+  );
+  await expect(page.getByLabel('XML root element', { exact: true })).toHaveValue('Patient');
+  await expect(
+    page.getByRole('button', { name: 'Switch to field mapping', exact: true }),
+  ).toHaveCount(0);
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  expect(captured(state, '/api/channel/1')[0].body.processingScript).toBe(script);
+});
+
+test('four-step setup supports keyboard navigation mobile layout and accessible mapping fields', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await workspace(page);
   await page.getByRole('button', { name: 'New Channel', exact: true }).click();
+  await page.getByLabel('Channel name', { exact: false }).fill('SYNTHETIC_ACCESSIBILITY');
   const advanced = page.locator('summary').filter({ hasText: 'Advanced source settings' });
   await advanced.focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByLabel('Duplicate message protection', { exact: false })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'Enable source filter' })).toBeVisible();
+  await page
+    .locator('summary')
+    .filter({ hasText: /^Advanced validation/ })
+    .click();
   await page.getByRole('radio', { name: 'Custom validation schema' }).check();
   await expect(page.getByLabel('Custom validation profile (JSON)', { exact: false })).toBeVisible();
-  const scan = await new AxeBuilder({ page })
+  let scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(scan.violations).toEqual([]);
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Use patient example', exact: true }).click();
+  scan = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze();
   expect(scan.violations).toEqual([]);

@@ -13,6 +13,7 @@ async function deliver(
   payload: unknown,
   channelId: number,
   correlationId: string,
+  onHttpResponse: (status: number) => void,
 ): Promise<string> {
   const body = typeof payload === 'string' ? payload : serialize(payload);
   const response =
@@ -33,6 +34,7 @@ async function deliver(
             'Idempotency-Key': correlationId + ':' + dest.id,
           },
           dest.timeout_ms,
+          onHttpResponse,
         )
       : await sendTcp(dest.endpoint, body, ['HL7', 'MLLP'].includes(dest.type), dest.timeout_ms);
   return response;
@@ -50,6 +52,7 @@ export async function attempt(message: StoredMessage, dest: Destination, retryCo
     };
   }
   let response = '',
+    httpStatus: number | null = null,
     status: OutboundStatus = 'OUT-SENT',
     error: string | null = null,
     delay: number | null = null;
@@ -59,6 +62,9 @@ export async function attempt(message: StoredMessage, dest: Destination, retryCo
       JSON.parse(message.transformed_payload),
       message.channel_id,
       message.correlation_id,
+      (responseStatus) => {
+        httpStatus = responseStatus;
+      },
     );
     if (dest.response_script?.trim()) {
       try {
@@ -93,7 +99,7 @@ export async function attempt(message: StoredMessage, dest: Destination, retryCo
   }
   // Persisting the delivery result is mandatory: DB failure propagates instead of emitting a false ACK.
   try {
-    await recordAttempt(message, dest, status, response, error, delay, retryCount);
+    await recordAttempt(message, dest, status, response, error, delay, retryCount, httpStatus);
   } finally {
     await releaseDelivery(
       message.id,

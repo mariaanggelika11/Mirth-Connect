@@ -57,6 +57,104 @@
   display: block;
   margin: 8px 0;
 }
+.source-authentication {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 0;
+  font-size: 12px;
+}
+.source-authentication > .alert {
+  flex-basis: 100%;
+}
+.source-authentication code {
+  display: block;
+  margin: 8px 0;
+}
+.mapping-section,
+.mapping-rows {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.mapping-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr) auto minmax(0, 0.8fr) 28px;
+  align-items: end;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border-main);
+  border-radius: 8px;
+}
+.mapping-row .field > span,
+.mapping-row .check-field {
+  font-size: 11px;
+}
+.mapping-row .mapping-arrow {
+  align-self: center;
+  margin-top: 18px;
+}
+.mapping-required {
+  align-self: center;
+  margin-top: 18px;
+}
+.mapping-root {
+  max-width: 300px;
+}
+.transformation-previews {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+}
+.transformation-previews .code-box {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 280px;
+  overflow: auto;
+}
+.transformation-output {
+  margin-top: 14px;
+  min-width: 0;
+}
+.integration-flow {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid var(--border-main);
+  border-radius: 10px;
+  background: var(--bg-soft);
+  font-size: 13px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.integration-flow small {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-soft);
+}
+.integration-flow-destination {
+  display: grid;
+  gap: 8px;
+}
+@media (max-width: 760px) {
+  .mapping-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+  .mapping-row .mapping-arrow {
+    display: none;
+  }
+  .mapping-required {
+    margin-top: 0;
+    grid-column: 1 / 3;
+  }
+  .transformation-previews {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .configured-hint {
   margin-left: 8px;
   font-size: 11px;
@@ -1449,7 +1547,7 @@ summary::-webkit-details-marker {
   gap: 10px;
 }
 .unsaved-indicator {
-  color: #b28437;
+  color: #876022;
   font-size: 10px;
 }
 .editor-footer > .muted {

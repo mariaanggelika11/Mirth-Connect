@@ -131,7 +131,7 @@ describe('Destination transports (real loopback)', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(received).toBe('raw-data');
   });
-  for (const status of [200, 400, 500])
+  for (const status of [200, 201, 204, 400, 500])
     it('REST HTTP ' + status, async () => {
       const host = await listen(
         http.createServer((_req, res) => {
@@ -139,13 +139,25 @@ describe('Destination transports (real loopback)', () => {
           res.end('{"status":"ok"}');
         }),
       );
-      const result = sendRest('http://' + host, '{}', { 'Content-Type': 'application/json' }, 1000);
-      if (status === 200) expect(await result).toContain('ok');
+      const received: number[] = [];
+      const result = sendRest(
+        'http://' + host,
+        '{}',
+        { 'Content-Type': 'application/json' },
+        1000,
+        (code) => received.push(code),
+      );
+      if (status < 300) expect(await result).toBe(status === 204 ? '' : '{"status":"ok"}');
       else await expect(result).rejects.toMatchObject({ code: 'HTTP_' + status });
+      expect(received).toEqual([status]);
     });
   it('REST timeout', async () => {
     const host = await listen(http.createServer(() => {}));
-    await expect(sendRest('http://' + host, '{}', {}, 30)).rejects.toThrow();
+    const received: number[] = [];
+    await expect(
+      sendRest('http://' + host, '{}', {}, 30, (code) => received.push(code)),
+    ).rejects.toThrow();
+    expect(received).toEqual([]);
   });
   it('rejects unsupported URLs and nonallowlisted hosts', () => {
     expect(() => validateEndpoint('file:///etc/passwd', 'REST')).toThrow();

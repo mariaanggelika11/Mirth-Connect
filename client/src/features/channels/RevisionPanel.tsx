@@ -116,7 +116,7 @@ export function RevisionPanel({
       const { revision, checksum, ...patch } = editing;
       await api.patch(`/channel/${channel.id}/revisions/${revision}`, {
         expectedChecksum: checksum,
-        changeSummary: summary,
+        changeSummary: summary.trim() || 'Update channel draft',
         patch,
       });
       setEditing(null);
@@ -190,7 +190,11 @@ export function RevisionPanel({
     setError('');
     try {
       await api.post(`/channel/${channel.id}/revisions/${revision}/${action}`, {
-        changeSummary: summary,
+        changeSummary:
+          summary.trim() ||
+          (action === 'rollback'
+            ? 'Rollback channel configuration'
+            : 'Publish channel configuration'),
         expectedActiveRevision: channel.activeRevision || 0,
       });
       onChanged();
@@ -227,7 +231,7 @@ export function RevisionPanel({
           </p>
         )}
         <label className="field">
-          <span>Publish / rollback summary *</span>
+          <span>Publish / rollback summary (optional)</span>
           <input maxLength={500} value={summary} onChange={(e) => setSummary(e.target.value)} />
         </label>
         {editing && (
@@ -315,10 +319,7 @@ export function RevisionPanel({
                 </label>
               </div>
             ))}
-            <Button
-              disabled={busy || !summary.trim() || !editing.name.trim()}
-              onClick={() => void saveDraft()}
-            >
+            <Button disabled={busy || !editing.name.trim()} onClick={() => void saveDraft()}>
               Save successor draft
             </Button>
             <Button
@@ -399,7 +400,7 @@ export function RevisionPanel({
                 </Button>
               )}
               <Button
-                disabled={busy || !!editing || !summary.trim() || row.state === 'ARCHIVED'}
+                disabled={busy || !!editing || row.state === 'ARCHIVED'}
                 onClick={() =>
                   void publish(row.revision, row.state === 'DRAFT' ? 'publish' : 'rollback')
                 }
