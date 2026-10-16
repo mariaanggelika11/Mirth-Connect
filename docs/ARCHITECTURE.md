@@ -5,7 +5,7 @@ Existing React UI and Express/PostgreSQL architecture are preserved. Root enviro
 ```mermaid
 flowchart TD
   UI[React UI] --> LOGIN[Login / JWT / current DB role]
-  UI --> WIZARD[Source / Transformation / Destinations / Review]
+  UI --> WIZARD[Source / Transformation / Destinations / Review and Test]
   WIZARD --> MAP[Visual mapping / optional advanced scripts]
   MAP -. Compile mapping into existing source transformer .-> CONFIG
   LOGIN --> API[Management API / RBAC]
@@ -41,6 +41,8 @@ Monitor HTTP handlers stay in `services/message.services.ts`; `monitor/query.ts`
 Frontend domain types have one definition in `client/src/types/`, exported through the existing `types.ts` entry point. API calls belong in `services/`; page components own UI state. The channel wizard delegates destination fields to `DestinationEditor` and draft defaults to `channelDraft`; message details delegate payload rendering to `PayloadViewer`. Add new connector or conversion behavior to the corresponding engine module instead of enlarging page components or orchestration code.
 
 `TransformationEditor` uses the pure `utils/fieldMapping.ts` compiler shared with the server. Versioned mapping metadata lives in the existing source-transformer script, so export/import and revision snapshots retain it. Custom scripts require explicit replacement. `preview-transformation` runs the same processing pipeline with connection validation disabled and no network operations; full dry-run and explicit destination probes retain their own validation. See [Lite UI behavior and limits](MIRTH_LITE_UI.md).
+
+Step 2 edits mapping and optional scripts only. Source owns the input format; each destination owns its output format independently. Review and Test owns synthetic input, all previews and optional connection probes. Test errors and cached previews clear when the operator leaves Review or changes configuration/input/permission. Missing required fields in an intact generated mapping produce safe target-field guidance through a bounded diagnostic replay; custom exception text is never returned. No runtime pipeline or database migration is added by this UI follow-up.
 
 `utils/simpleCondition.ts` compiles the Field/Operator/Value builder into the existing source or destination filter script, with canonical versioned metadata. It uses bounded own-property paths and data literals, without evaluation of field/value expressions. Only intact generated mapping/filter scripts receive bounded XML normalization; legacy scripts retain their original input. `validationProfile.basicSyntax` selects format-appropriate basic validation; legacy JSON-object presets and custom profiles remain readable. These UI features reuse the existing pipeline stages.
 
@@ -80,9 +82,9 @@ Retention uses bounded batches of resolved messages and independent audit retent
 
 ## Verification boundaries
 
-Automated unit/API verification passed 332 tests in 28 suites; 53 browser scenarios passed with synthetic fixtures. Coverage was 81.90% statements, 78.61% branches, 83.63% functions and 82.96% lines. API tests mock database sessions; REST/MLLP tests use real loopback sockets.
+The mapping-only follow-up passed 345 unit/API tests in 28 suites and 57 browser scenarios with synthetic fixtures. Coverage was 82.09% statements, 78.80% branches, 83.84% functions and 83.12% lines. Typecheck, lint, formatting and client/server build passed. API tests mock database sessions; REST/MLLP tests use real loopback sockets.
 
-`npm run test:sql` passed 19 native PostgreSQL 18.4 scenarios on a newly created `mirth_test_*` schema, including repeat migrations through schema 7, the requested Siti Aminah JSON→XML fixture delivered to a real local HTTP receiver, persisted inbound/source/outbound payloads, actual HTTP/timing metadata and valid ORM filtering without delivery. Compiled runtime startup, health/readiness, protected metrics and SIGTERM during active work also passed on disposable PostgreSQL. A fresh schema-7 native backup/restore drill was not run because `pg_dump`/`pg_restore` were unavailable. Docker image, hospital-specific HL7 profiles, load and disaster recovery still require deployment validation.
+Before this follow-up, `npm run test:sql` passed 19 native PostgreSQL 18.4 scenarios for `1734591` on a newly created `mirth_test_*` schema, including repeat migrations through schema 7, the requested Siti Aminah JSON→XML fixture delivered to a real local HTTP receiver, persisted inbound/source/outbound payloads, actual HTTP/timing metadata and valid ORM filtering without delivery. Compiled runtime startup, health/readiness, protected metrics and SIGTERM during active work also passed then on disposable PostgreSQL. SQL/runtime checks were not repeated for this UI/preview-only change. A fresh schema-7 native backup/restore drill was not run because `pg_dump`/`pg_restore` were unavailable. Docker image, hospital-specific HL7 profiles, load and disaster recovery still require deployment validation.
 
 
 ## V2 runtime boundaries

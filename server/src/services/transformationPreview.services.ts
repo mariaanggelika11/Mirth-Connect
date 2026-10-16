@@ -3,10 +3,15 @@ import { z } from 'zod';
 import { channelSchema, destinationSchema } from '../utils/validator.js';
 import { AppError } from '../utils/errors.js';
 import { audit } from './audit.services.js';
-import { presentDryRun, rawDryRunRequested, runConfiguration } from './dryRun.services.js';
+import {
+  invalidPreviewConfiguration,
+  presentDryRun,
+  rawDryRunRequested,
+  runConfiguration,
+} from './dryRun.services.js';
 
-// Mapping is configured before destination connectivity. Keep every runtime field/schema
-// while allowing connection details to remain empty during this transformation-only test.
+// Keep partial destination settings compatible for API callers. The wizard only
+// invokes this network-free preview after completing all configuration in Review.
 const previewConfiguration = channelSchema.extend({
   destinations: z
     .array(
@@ -52,11 +57,13 @@ export async function previewTransformation(req: Request, res: Response, next: N
     next(
       error instanceof AppError
         ? error
-        : new AppError(
-            400,
-            'TRANSFORMATION_PREVIEW_INVALID',
-            'Invalid transformation configuration or synthetic payload',
-          ),
+        : error instanceof z.ZodError
+          ? invalidPreviewConfiguration(error, 'TRANSFORMATION_PREVIEW_INVALID')
+          : new AppError(
+              400,
+              'TRANSFORMATION_PREVIEW_INVALID',
+              'Unable to test this configuration. Review the sample and channel settings.',
+            ),
     );
   }
 }

@@ -10,6 +10,7 @@ export interface DryRunResult {
     filter: string;
     transformation: string;
     code?: string;
+    message?: string;
   };
   networkDelivery?: string;
   warnings?: string[];
@@ -22,6 +23,7 @@ export interface DryRunResult {
     connectorType?: string;
     status: string;
     code?: string;
+    message?: string;
     elapsedMs?: number;
     stages?: Record<string, string>;
   }[];
@@ -78,8 +80,8 @@ export function DryRunPreview({ result }: { result: DryRunResult }) {
           </dl>
           {result.source.code && (
             <p className="alert error">
-              Source processing failed: {result.source.code}. Check the input format, validation
-              rules and source scripts.
+              {result.source.message ||
+                `Source processing failed: ${result.source.code}. Check the input format, validation rules and source scripts.`}
             </p>
           )}
           <pre className="code-box">{payloadText(result.source.payload)}</pre>
@@ -107,7 +109,8 @@ export function DryRunPreview({ result }: { result: DryRunResult }) {
               </p>
               {destination.status === 'ERROR' ? (
                 <p className="alert error">
-                  Preview failed: {destination.code || 'DESTINATION_INVALID'}
+                  {destination.message ||
+                    `Preview failed: ${destination.code || 'DESTINATION_INVALID'}`}
                 </p>
               ) : destination.routed === false ? (
                 <p>Not routed: the message was filtered or this destination is disabled.</p>

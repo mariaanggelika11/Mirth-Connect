@@ -11,6 +11,140 @@ import { safeError, AppError } from '../utils/errors.js';
 import { hasPermission } from '../middleware/auth.js';
 import { maskPayload } from '../utils/masking.js';
 import { audit } from './audit.services.js';
+import { z } from 'zod';
+import { compileFieldMapping, readFieldMapping } from '../utils/fieldMapping.js';
+
+/** Describe only allowlisted configuration fields, never Zod input values or exception text. */
+export function invalidPreviewConfiguration(error: z.ZodError, code: string): AppError {
+  const suppliedPath = error.issues[0]?.path || [];
+  const path =
+    suppliedPath[0] === 'payload' || suppliedPath[0] === 'configuration'
+      ? suppliedPath
+      : ['configuration', ...suppliedPath];
+  let message = 'Check Source, Transformation and Destination settings before testing.';
+  if (path[0] === 'payload') message = 'Enter a synthetic sample message in Review before testing.';
+  else if (path[0] === 'configuration') {
+    if (path[1] === 'name') message = 'Enter a channel name in Source before testing.';
+    else if (path[1] === 'source')
+      message =
+        path[2] === 'inboundDataType'
+          ? 'Select a supported input format in Source.'
+          : 'Select a supported source connector in Source.';
+    else if (path[1] === 'validationProfile')
+      message =
+        'The custom validation schema must be a JSON object. Check its settings in Advanced source settings.';
+    else if (path[1] === 'destinations') {
+      const index = path[2];
+      const destination =
+        typeof index === 'number' && Number.isInteger(index) && index >= 0 && index < 50
+          ? `Destination ${index + 1}`
+          : 'Destination';
+      const fields: Record<string, string> = {
+        name: 'enter a valid destination name.',
+        type: 'choose a supported connector.',
+        endpoint: 'enter a valid endpoint within the 2048-character limit.',
+        outboundDataType: 'choose a valid outbound format.',
+        timeoutMs: 'set the timeout between 0.1 and 120 seconds.',
+        maxRetries: 'set maximum retries between 0 and 10.',
+        retryIntervalSeconds: 'set the retry interval between 1 and 86400 seconds.',
+        deliveryPolicy: 'check the delivery limits in Advanced destination settings.',
+        processingScript: 'keep the advanced transformation script within 65536 characters.',
+        filterScript: 'keep the advanced filter script within 65536 characters.',
+        templateScript: 'keep the advanced template script within 65536 characters.',
+      };
+      const field = String(path[3]);
+      message =
+        typeof index !== 'number'
+          ? 'Use at most 50 destinations and check their configuration.'
+          : `${destination}: ${Object.prototype.hasOwnProperty.call(fields, field) ? fields[field] : 'check its configuration before testing.'}`;
+    }
+  }
+  return new AppError(400, code, message);
+}
+
+function previewFailureMessage(stage: string, code: string): string {
+  const known: Record<string, string> = {
+    JSON_INVALID: 'The sample is not valid JSON. Check its syntax and data types.',
+    XML_INVALID: 'The sample is not valid XML. Check its tags, structure and size.',
+    XML_ENTITIES_DENIED: 'Remove DTD and entity declarations from the XML sample.',
+    XML_PROFILE_REJECTED:
+      'The sample does not match the XML validation rules. Check its root and required fields.',
+    PAYLOAD_SCHEMA_REJECTED:
+      'The sample does not match the validation schema. Check required fields and field types.',
+    HL7_PROFILE_REJECTED:
+      'The sample does not match the HL7 validation rules. Check message type, version and required fields.',
+    PAYLOAD_VALIDATION_REJECTED:
+      'The custom validation rule rejected this sample. Review the rule and sample fields.',
+    INVALID_JSON_SCHEMA:
+      'The custom JSON Schema is invalid. Review its structure and required fields.',
+    UNSUPPORTED_JSON_SCHEMA:
+      'The custom JSON Schema contains unsupported rules or exceeds its size limit.',
+    FIELD_MAPPING_INPUT_INVALID:
+      'Field mapping could not read the sample. Check its input format, structure and size.',
+    FILTER_INPUT_INVALID:
+      'The filter could not read the sample. Check its input format and field paths.',
+    FILTER_RESULT_INVALID:
+      'The filter must return true or false. Review its condition or advanced script.',
+    INVALID_ENDPOINT: 'Check the destination endpoint and connector settings.',
+    DESTINATION_HOST_DENIED:
+      'The destination host is not allowed. Review its endpoint and outbound allowlist.',
+    DESTINATION_ADDRESS_DENIED:
+      'The destination address is not allowed. Review its endpoint and outbound allowlist.',
+    SCRIPT_TIMEOUT:
+      'The test exceeded the script time limit. Simplify the transformation or filter.',
+    SCRIPT_MEMORY_LIMIT:
+      'The test exceeded the script memory limit. Use a smaller sample or simplify the script.',
+    SCRIPT_INPUT_LIMIT:
+      'The sample or script exceeds its size limit. Use a smaller synthetic sample.',
+    SCRIPT_CAPACITY: 'Too many script tests are running. Wait for them to finish and try again.',
+  };
+  if (known[code]) return known[code];
+  if (code.startsWith('INVALID_HL7'))
+    return stage === 'conversion'
+      ? 'Cannot generate HL7 output. Map the required MSH header fields and check the output structure.'
+      : 'The sample is not valid HL7. Check MSH, separators and required header fields.';
+  if (stage === 'validation')
+    return 'Message validation failed. Check the sample and validation settings.';
+  if (stage === 'filter') return 'The filter failed. Review its condition or advanced script.';
+  if (stage === 'template')
+    return 'The output template failed. Review the template and sample fields.';
+  if (stage === 'conversion')
+    return 'Cannot generate the selected output format. Check the mapping and output structure.';
+  return 'Transformation failed. Check the field mapping or advanced transformation script.';
+}
+
+async function requiredMappingMessage(
+  script: string,
+  payload: unknown,
+): Promise<string | undefined> {
+  const mapping = readFieldMapping(script);
+  if (!mapping || !mapping.rows.some((row) => row.required)) return undefined;
+  try {
+    // Replay only a canonical visual mapping with its required checks disabled.
+    // This reuses the same bounded XML parser and QuickJS limits without rerunning
+    // custom scripts/filters or adding another parser with different semantics.
+    const optional = compileFieldMapping({
+      ...mapping,
+      rows: mapping.rows.map((row) => ({ ...row, required: false })),
+    });
+    const mapped = await executeScript(optional, { msg: payload });
+    const own = (value: unknown, key: string): unknown =>
+      value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, key)
+        ? (value as Record<string, unknown>)[key]
+        : undefined;
+    const root = mapping.rootElement ? own(mapped, mapping.rootElement) : mapped;
+    for (const row of mapping.rows) {
+      if (!row.required) continue;
+      let value = root;
+      for (const key of row.target.split('.')) value = own(value, key);
+      if (value === undefined || value === null || value === '')
+        return `Target field ${row.target} is required.`;
+    }
+  } catch {
+    // Diagnostic replay has the same resource limits; no exception text is exposed.
+  }
+  return undefined;
+}
 
 function outputFormat(payload: unknown) {
   if (typeof payload !== 'string') return 'JSON';
@@ -40,6 +174,7 @@ export async function runConfiguration(
     filter: 'SKIPPED',
     transformation: 'SKIPPED',
     code: undefined as string | undefined,
+    message: undefined as string | undefined,
   };
   let sourceStage: 'validation' | 'filter' | 'transformation' = 'validation';
   let accepted = false;
@@ -69,6 +204,10 @@ export async function runConfiguration(
   } catch (error) {
     source[sourceStage] = 'ERROR';
     source.code = safeError(error);
+    source.message =
+      (sourceStage === 'transformation' && source.code === 'SCRIPT_EXECUTION_FAILED'
+        ? await requiredMappingMessage(data.processingScript, payload)
+        : undefined) || previewFailureMessage(sourceStage, source.code);
     return {
       success: false,
       accepted: false,
@@ -138,6 +277,10 @@ export async function runConfiguration(
         connectorType: destination.type,
         status: 'ERROR',
         code: safeError(error),
+        message:
+          (stage === 'transformation' && safeError(error) === 'SCRIPT_EXECUTION_FAILED'
+            ? await requiredMappingMessage(destination.processingScript, payload)
+            : undefined) || previewFailureMessage(stage, safeError(error)),
         stages,
         elapsedMs: Math.round(performance.now() - destinationStarted),
       });
@@ -185,7 +328,9 @@ export async function dryRun(req: Request, res: Response, next: NextFunction) {
     next(
       error instanceof AppError
         ? error
-        : new AppError(400, 'DRY_RUN_INVALID', 'Invalid configuration or synthetic payload'),
+        : error instanceof z.ZodError
+          ? invalidPreviewConfiguration(error, 'DRY_RUN_INVALID')
+          : new AppError(400, 'DRY_RUN_INVALID', 'Invalid configuration or synthetic payload'),
     );
   }
 }

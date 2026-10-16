@@ -1310,7 +1310,7 @@
         "operationId": "post__api_channel_dry_run",
         "responses": {
           "200": {
-            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes only. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing.",
+            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes and actionable configuration guidance without payload values or exception text. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1379,6 +1379,10 @@
                         "code": {
                           "type": "string",
                           "description": "Safe diagnostic code for a failed source stage; no exception text."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Safe actionable guidance for a failed source stage. Canonical field mappings can identify a required target field; payload values and exception text are never included."
                         }
                       }
                     },
@@ -1408,6 +1412,10 @@
                           },
                           "code": {
                             "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "description": "Safe actionable guidance for a failed destination stage; no payload values or custom exception text."
                           }
                         }
                       }
@@ -2690,7 +2698,7 @@
         },
         "responses": {
           "200": {
-            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes only. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing.",
+            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes and actionable configuration guidance without payload values or exception text. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2759,6 +2767,10 @@
                         "code": {
                           "type": "string",
                           "description": "Safe diagnostic code for a failed source stage; no exception text."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Safe actionable guidance for a failed source stage. Canonical field mappings can identify a required target field; payload values and exception text are never included."
                         }
                       }
                     },
@@ -2788,6 +2800,10 @@
                           },
                           "code": {
                             "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "description": "Safe actionable guidance for a failed destination stage; no payload values or custom exception text."
                           }
                         }
                       }
@@ -3623,11 +3639,11 @@
     },
     "/api/channel/preview-transformation": {
       "post": {
-        "summary": "Preview transformation before configuring a destination; no network or connection validation",
+        "summary": "Preview source mapping and each destination output without network delivery",
         "operationId": "post__api_channel_preview_transformation",
         "responses": {
           "200": {
-            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes only. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing. Connection settings are deliberately not validated; warnings explicitly state this. No application request, DNS lookup or connection probe is made.",
+            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes and actionable configuration guidance without payload values or exception text. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing. Connection settings are deliberately not validated; warnings explicitly state this. No application request, DNS lookup or connection probe is made.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3696,6 +3712,10 @@
                         "code": {
                           "type": "string",
                           "description": "Safe diagnostic code for a failed source stage; no exception text."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Safe actionable guidance for a failed source stage. Canonical field mappings can identify a required target field; payload values and exception text are never included."
                         }
                       }
                     },
@@ -3725,6 +3745,10 @@
                           },
                           "code": {
                             "type": "string"
+                          },
+                          "message": {
+                            "type": "string",
+                            "description": "Safe actionable guidance for a failed destination stage; no payload values or custom exception text."
                           }
                         }
                       }
@@ -3797,7 +3821,7 @@
             }
           }
         },
-        "description": "Runs the same isolated source and destination filter/transform/template/conversion pipeline as dry-run. Empty destination names and endpoints are permitted only for this preview. DNS, sockets, host allowlist and delivery are not tested. The normal channel save/dry-run endpoint still requires valid connection settings. Synthetic payloads only; normal redaction and audited administrator raw access apply."
+        "description": "The channel wizard calls this from Review & Test after Source, Transformation and Destinations are complete. Runs the same isolated source and destination filter/transform/template/conversion pipeline as dry-run. For API compatibility, empty destination names and endpoints remain permitted. DNS, sockets, host allowlist and delivery are not tested. Channel save/full dry-run still requires valid connection settings. Synthetic payloads only; normal redaction and audited administrator raw access apply. Invalid configuration identifies the affected setting; failed stages include safe code/message metadata."
       }
     }
   },

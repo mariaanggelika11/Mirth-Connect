@@ -55,6 +55,7 @@ import app from '../src/app.js';
 import { signToken } from '../src/services/auth.services.js';
 import { compileFieldMapping } from '../src/utils/fieldMapping.js';
 import { validateEndpoint } from '../src/utils/transport.js';
+import { sample } from './fixtures.js';
 
 const token = signToken({ id: 1, name: 'Synthetic operator', role: 'ADMIN' });
 const basePath = '/api/channel/preview-transformation';
@@ -236,7 +237,12 @@ describe('Transformation-only preview before destination connection setup', () =
     expect(source.status).toBe(200);
     expect(source.body).toMatchObject({
       success: false,
-      source: { transformation: 'ERROR', code: 'SCRIPT_EXECUTION_FAILED' },
+      source: {
+        transformation: 'ERROR',
+        code: 'SCRIPT_EXECUTION_FAILED',
+        message:
+          'Transformation failed. Check the field mapping or advanced transformation script.',
+      },
       results: [],
     });
     expect(JSON.stringify(source.body)).not.toContain('SYNTHETIC_PRIVATE"');
@@ -250,7 +256,14 @@ describe('Transformation-only preview before destination connection setup', () =
     expect(conversion.status).toBe(200);
     expect(conversion.body).toMatchObject({
       success: false,
-      results: [{ status: 'ERROR', stages: { conversion: 'ERROR' } }],
+      results: [
+        {
+          status: 'ERROR',
+          stages: { conversion: 'ERROR' },
+          message:
+            'Cannot generate HL7 output. Map the required MSH header fields and check the output structure.',
+        },
+      ],
     });
   });
 
@@ -287,5 +300,191 @@ describe('Transformation-only preview before destination connection setup', () =
     expect(filtered.body.results.every((result: { routed: boolean }) => !result.routed)).toBe(true);
     expect(state.send).not.toHaveBeenCalled();
     expect(state.lookup).not.toHaveBeenCalled();
+  });
+});
+
+describe('Actionable preview errors with sanitized configuration metadata', () => {
+  for (const [patch, message] of [
+    [{ name: '' }, 'Enter a channel name in Source before testing.'],
+    [
+      { source: { type: 'HTTP', inboundDataType: 'SYNTHETIC_PRIVATE_FORMAT' } },
+      'Select a supported input format in Source.',
+    ],
+    [
+      {
+        destinations: [
+          { ...configuration().destinations[0], outboundDataType: 'SYNTHETIC_PRIVATE_FORMAT' },
+        ],
+      },
+      'Destination 1: choose a valid outbound format.',
+    ],
+    [
+      { validationProfile: 'SYNTHETIC_PRIVATE_SCHEMA' },
+      'The custom validation schema must be a JSON object. Check its settings in Advanced source settings.',
+    ],
+    [
+      { destinations: [{ ...configuration().destinations[0], timeoutMs: 1 }] },
+      'Destination 1: set the timeout between 0.1 and 120 seconds.',
+    ],
+  ] as const)
+    it(`explains invalid configuration: ${message}`, async () => {
+      const response = await preview({
+        configuration: { ...configuration(), ...patch },
+        payload: payload(),
+      });
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({
+        success: false,
+        code: 'TRANSFORMATION_PREVIEW_INVALID',
+        message,
+        details: [],
+      });
+      expect(JSON.stringify(response.body)).not.toContain('SYNTHETIC_PRIVATE');
+      expect(state.send).not.toHaveBeenCalled();
+      expect(state.lookup).not.toHaveBeenCalled();
+      expect(state.audit).toHaveLength(0);
+    });
+
+  it('asks for a synthetic sample instead of a generic configuration error', async () => {
+    const response = await preview({ configuration: configuration() });
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe(
+      'Enter a synthetic sample message in Review before testing.',
+    );
+  });
+
+  it('identifies the first missing required mapping target without returning a payload value', async () => {
+    const response = await preview({
+      configuration: configuration(),
+      payload: { patientName: 'SYNTHETIC_PRIVATE_NAME' },
+    });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      success: false,
+      source: {
+        validation: 'PASSED',
+        filter: 'ACCEPTED',
+        transformation: 'ERROR',
+        code: 'SCRIPT_EXECUTION_FAILED',
+        message: 'Target field PatientID is required.',
+      },
+      networkDelivery: 'NOT_SENT',
+      results: [],
+    });
+    expect(JSON.stringify(response.body)).not.toContain('SYNTHETIC_PRIVATE_NAME');
+    expect(state.send).not.toHaveBeenCalled();
+    expect(state.lookup).not.toHaveBeenCalled();
+  });
+
+  it('applies mapping defaults before identifying a missing target and keeps zero/false values valid', async () => {
+    const config = {
+      ...configuration(),
+      processingScript: compileFieldMapping({
+        version: 1,
+        rootElement: 'Patient',
+        rows: [
+          {
+            source: 'patient_id',
+            target: 'PatientID',
+            required: true,
+            defaultValue: 'SYNTHETIC-DEFAULT',
+          },
+          { source: 'active', target: 'Active', required: true },
+        ],
+      }),
+    };
+    const missing = await preview({ configuration: config, payload: {} });
+    expect(missing.body.source.message).toBe('Target field Active is required.');
+    const valid = await preview({
+      configuration: config,
+      payload: { patient_id: 0, active: false },
+      raw: true,
+    });
+    expect(valid.body.success).toBe(true);
+    expect(valid.body.source.payload).toEqual({ Patient: { PatientID: 0, Active: false } });
+    expect(valid.body.source.message).toBeUndefined();
+  });
+
+  for (const [inboundDataType, input, sourceField] of [
+    ['XML', '<Patient><Name>SYNTHETIC_PRIVATE_NAME</Name></Patient>', 'Patient.ID'],
+    ['HL7V2', sample, 'OBX.99'],
+  ])
+    it(`identifies required fields using the existing bounded ${inboundDataType} mapping pipeline`, async () => {
+      const response = await preview({
+        configuration: {
+          ...configuration(),
+          source: { type: 'HTTP', inboundDataType },
+          processingScript: compileFieldMapping({
+            version: 1,
+            rootElement: 'Patient',
+            rows: [{ source: sourceField, target: 'PatientID', required: true }],
+          }),
+        },
+        payload: input,
+      });
+      expect(response.status).toBe(200);
+      expect(response.body.source.message).toBe('Target field PatientID is required.');
+      expect(response.body.source.transformation).toBe('ERROR');
+      expect(JSON.stringify(response.body)).not.toContain('SYNTHETIC_PRIVATE_NAME');
+    });
+
+  it('does not report mapping requirements for valid messages excluded by the source filter', async () => {
+    const response = await preview({
+      configuration: { ...configuration(), filterScript: 'return false;' },
+      payload: {},
+    });
+    expect(response.body).toMatchObject({
+      success: true,
+      accepted: false,
+      source: { filter: 'FILTERED', transformation: 'SKIPPED' },
+    });
+    expect(response.body.source.message).toBeUndefined();
+  });
+
+  it('reports a destination-specific missing target without running arbitrary scripts for diagnostics', async () => {
+    const response = await preview({
+      configuration: {
+        ...configuration(),
+        processingScript: '',
+        destinations: [
+          {
+            ...configuration().destinations[0],
+            processingScript: configuration().processingScript,
+          },
+        ],
+      },
+      payload: { patientName: 'SYNTHETIC_PRIVATE_NAME' },
+    });
+    expect(response.body).toMatchObject({
+      success: false,
+      source: { transformation: 'PASS_THROUGH' },
+      results: [{ status: 'ERROR', message: 'Target field PatientID is required.' }],
+    });
+    expect(JSON.stringify(response.body)).not.toContain('SYNTHETIC_PRIVATE_NAME');
+  });
+
+  it('gives actionable validation and filter errors without exposing custom exceptions or schemas', async () => {
+    const filtered = await preview({
+      configuration: {
+        ...configuration(),
+        filterScript: 'throw new Error("SYNTHETIC_PRIVATE_ERROR");',
+      },
+      payload: payload(),
+    });
+    expect(filtered.body.source.message).toBe(
+      'The filter failed. Review its condition or advanced script.',
+    );
+    expect(JSON.stringify(filtered.body)).not.toContain('SYNTHETIC_PRIVATE_ERROR');
+    const invalidSchema = await preview({
+      configuration: {
+        ...configuration(),
+        validationProfile: { jsonSchema: { type: 'SYNTHETIC_PRIVATE_SCHEMA' } },
+      },
+      payload: payload(),
+    });
+    expect(invalidSchema.body.source.message).toBe(
+      'The custom JSON Schema is invalid. Review its structure and required fields.',
+    );
+    expect(JSON.stringify(invalidSchema.body)).not.toContain('SYNTHETIC_PRIVATE_SCHEMA');
   });
 });

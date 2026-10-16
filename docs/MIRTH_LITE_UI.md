@@ -2,7 +2,7 @@
 
 ## Konsep dan navigasi
 
-Wizard mengikuti **Source → Transformation → Destinations → Review**. User membuat integrasi Sistem A → Mirth-Connect → Sistem B melalui format, mapping dan endpoint. Filter, scripting dan pengaturan delivery tersedia melalui Advanced. Kemampuan inti engine tetap dipertahankan.
+Wizard mengikuti **Source → Transformation → Destinations → Review & Test**. User membuat integrasi Sistem A → Mirth-Connect → Sistem B melalui format, mapping dan endpoint. Filter, scripting dan pengaturan delivery tersedia melalui Advanced. Kemampuan inti engine tetap dipertahankan.
 
 ```mermaid
 flowchart LR
@@ -25,8 +25,10 @@ Navigasi utama terdiri dari Overview, Channels, Messages dan Settings. Start/Sto
 | --- | --- |
 | Source connector, inbound format, API key, endpoint | Source |
 | Validation, source filter, source transformer | Advanced source settings |
-| Mapping, required/default, format output, preview | Transformation |
-| Script transformasi kompleks | Advanced transformation script |
+| Mapping dua kolom Source Field / Target Field, Add Mapping | Transformation |
+| Required/default | Mapping options per baris, awalnya tertutup |
+| Script transformasi kompleks | Advanced Custom Transformation Script |
+| Sample, preview, test transformation, connection probe | Review & Test |
 | Nama, connector, outbound format, endpoint destination | Destinations |
 | Destination filter / transformer / template | Advanced destination settings |
 | Retry, timeout, capacity dan circuit protection | Advanced destination settings → Delivery settings |
@@ -74,7 +76,9 @@ Kondisi yang belum lengkap tetap tersimpan sebagai input lokal, ditandai sebagai
 
 ## 2. Transformation
 
-Pilih output format, tambahkan mapping atau gunakan **Use patient example**:
+Transformation hanya menampilkan mapping **Source Field / Target Field**, tombol **Add Mapping** dan bagian opsional **Advanced Custom Transformation Script**. Helper: “Map incoming fields to the fields required by the destination.” Source menentukan inbound format; outbound format dipilih pada masing-masing destination. Tidak ada format selector, sample, example, preview, Test, privacy checkbox atau banner hasil pengujian pada langkah ini.
+
+Contoh mapping yang dapat ditambahkan sendiri:
 
 | Source field | Target field |
 | --- | --- |
@@ -83,7 +87,9 @@ Pilih output format, tambahkan mapping atau gunakan **Use patient example**:
 | gender | Gender |
 | date_of_birth | BirthDate |
 
-`Required` menolak nilai wajib yang hilang. Default digunakan ketika nilai tidak ada, null atau kosong; `0` dan `false` dipertahankan. Default UI berupa string. Field yang tidak dipetakan tidak ikut output. Tanpa mapping/script, field asli diteruskan ke converter. Untuk XML, isi root `Patient` bila diperlukan.
+**Mapping options** per baris awalnya tertutup dan mempertahankan Required serta default value. `Required` menolak nilai wajib yang hilang. Default digunakan ketika nilai tidak ada, null atau kosong; `0` dan `false` dipertahankan. Default UI berupa string. Field yang tidak dipetakan tidak ikut output. Tanpa mapping/script, field asli diteruskan ke converter.
+
+Tidak ada input XML root pada UI. Metadata `rootElement` dari mapping existing tetap utuh saat baris diedit. Mapping baru tidak menambahkan wrapper `Patient` otomatis; wrapper khusus per destination dapat dibuat melalui Advanced destination transformer. Pipeline dan converter tidak diubah.
 
 Dot paths membaca object bertingkat dan indeks array pada input; target bertingkat dibuat sebagai object. Maksimum 100 baris dan 12 tingkat; target duplikat/tumpang tindih serta prototype keys ditolak. Mapping tidak melakukan array expansion atau konversi tipe otomatis. HL7 menggunakan struktur parser existing, misalnya `PID.3` untuk identifier scalar dan `PID.5.2` untuk component yang tersedia. Profile/repetition berbeda tetap memerlukan path yang sesuai.
 
@@ -91,28 +97,32 @@ Mapping visual disimpan pada **source transformer yang sama**, yaitu `processing
 
 XML untuk mapping dan simple filter dinormalisasi sebelum masuk worker; script custom lama tetap menerima input aslinya. DTD/entity ditolak, parser dibatasi 20.000 nodes/kedalaman 65, serta tunduk pada batas payload dan sandbox. Error tidak mengembalikan plaintext pasien atau stack internal. Mapping yang belum lengkap menghalangi Continue/Save dan tetap tersedia ketika kembali ke langkah tersebut.
 
-### Test transformation dan pengiriman
+## 3. Destinations
 
-**Test transformation** menjalankan `POST /api/channel/preview-transformation` menggunakan payload sintetis. Nama/endpoint destination boleh belum diisi. Preview menjalankan validation, source filter/transformer, destination filter/transformer/template dan converter yang sama seperti runtime, sambil melewati pemeriksaan koneksi. Tidak ada DNS lookup, network delivery atau probe.
+Default satu destination; **Add Destination** tetap tersedia untuk routing ke banyak sistem. Field utama: nama, connector, outbound format dan endpoint. Setiap destination memiliki outbound format sendiri; perubahan format satu destination tidak diterapkan otomatis pada destination lain. Tidak ada selector output format global pada Transformation.
 
-Di samping Preview output, ringkasan langsung menunjukkan **Validation**, **Source filter**, **Source transformation** dan **Network delivery: NOT SENT**. Processing details menyediakan payload tiap tahap dan warning. Preview default redacted; ADMIN dapat memilih **Show unmasked preview (access is audited)**. XML/text dapat tersembunyi penuh sesuai privacy settings. Perubahan konfigurasi atau kondisi yang belum valid membatalkan hasil preview lama.
+Advanced berisi tepat tiga kelompok: **Destination filter**, **Destination transformer**, **Delivery settings**. Template berada di disclosure lanjutan pada transformer. Automatic retry menampilkan jumlah retry dan interval ketika aktif; request timeout menggunakan detik. Capacity dan circuit protection tetap berada pada disclosure tambahan. Destination response editor dihapus; responseScript existing tetap aktif dengan notice legacy kecil. Connection test tersedia sesudah konfigurasi lengkap melalui Review & Test.
 
-| Tindakan | Efek |
+## 4. Review & Test
+
+Review & Test menggabungkan ringkasan **Source**, **Source processing**, **Transformation**, **Destination**, **Delivery** dan flow **HTTP / JSON → 4 field mappings → REST / XML** untuk contoh empat mapping. Setiap destination memiliki cabang connector/format/nama sendiri; flow tidak memakai output format global. Status validation/filter/transformer berasal dari konfigurasi. Mapping dilabeli sebagai konfigurasi pada Transformation untuk menjelaskan stage engine yang sama. Setiap destination menampilkan format, endpoint, retry efektif dan timeout.
+
+Seluruh pengujian berada di sini: **Test input**, **Test Transformation** dan generated output. Error pengujian muncul pada tahap ini dengan pesan aman dan tindakan yang relevan; tidak menampilkan SQL, stack trace atau payload sensitif dalam error. Perubahan konfigurasi atau kondisi yang belum valid membatalkan hasil lama. Mapping yang belum lengkap tetap menggunakan validasi inline pada langkah Transformation.
+
+**Test Transformation** menggunakan payload sintetis dan `POST /api/channel/preview-transformation`. UI mengarahkan pengguna melengkapi konfigurasi sebelum pengujian. API preview tetap menerima konfigurasi destination yang belum lengkap demi compatibility, dan menjalankan validation, source filter/transformer, destination filter/transformer/template serta converter existing tanpa memeriksa koneksi. Tidak ada DNS lookup, network delivery atau probe.
+
+Hasil menampilkan Validation, Source filter, Source transformation, format/output destination dan **Network delivery: NOT SENT**. Processing details menyediakan payload tiap tahap dan warning. Preview default redacted. **Advanced test options** menyimpan pilihan **Show unmasked preview (access is audited)** untuk ADMIN; raw tetap opsional, memerlukan permission dan audit. XML/text dapat tersembunyi penuh sesuai privacy settings.
+
+**Test connection** pada Review & Test merupakan aksi terpisah setelah konfigurasi destination lengkap. Tindakan ini melakukan DNS dan handshake TCP/TLS tanpa payload aplikasi. Hasil koneksi tidak membuktikan destination menerima pesan.
+
+| Tindakan | Lokasi / efek |
 | --- | --- |
-| Test transformation | Menjalankan pipeline tanpa pengiriman |
+| Test transformation | Review & Test; pipeline tanpa DNS/pengiriman |
 | API `/api/channel/dry-run` | Pipeline tanpa pengiriman, dengan pemeriksaan konfigurasi koneksi lengkap |
-| Test connection | DNS dan handshake TCP/TLS; tanpa payload aplikasi |
-| Send synthetic message | Pengiriman aktual setelah channel Running dan konfirmasi |
+| Test connection | Review & Test; DNS dan handshake TCP/TLS, tanpa payload aplikasi |
+| Send synthetic message | Setelah Save, channel Running dan konfirmasi; pengiriman aktual |
 
-Preview atau handshake tidak membuktikan destination sudah menerima data.
-
-## 3. Destinations dan 4. Review
-
-Default satu destination; **Add Destination** tetap tersedia untuk routing ke banyak sistem. Field utama: nama, connector, outbound format dan endpoint. Pilihan output format di Transformation diterapkan ke seluruh destination hanya saat dipilih pengguna; override per destination tetap tersedia.
-
-Advanced berisi tepat tiga kelompok: **Destination filter**, **Destination transformer**, **Delivery settings**. Template berada di disclosure lanjutan pada transformer. Automatic retry menampilkan jumlah retry dan interval ketika aktif; request timeout menggunakan detik. Capacity dan circuit protection tetap berada pada disclosure tambahan. Destination response editor dihapus; responseScript existing tetap aktif dengan notice legacy kecil.
-
-Review menampilkan flow sumber → channel → konversi format → destination, kemudian **Source processing** dengan status validation/filter/transformer yang berasal dari konfigurasi. Mapping dilabeli sebagai konfigurasi pada Transformation untuk menjelaskan stage yang sama. Setiap destination menampilkan endpoint, retry efektif dan timeout. Tombol akhir **Back / Test / Save Channel** tetap tersedia.
+Save Channel menyimpan konfigurasi. Navigasi Back tetap tersedia; Test tidak menjalankan pengiriman sungguhan. Pengiriman sintetis setelah Save tetap memerlukan konfirmasi karena benar-benar dapat mencapai destination.
 
 Create/edit tidak meminta change summary. Backend menghasilkan summary dan audit area `SOURCE_UPDATED`, `TRANSFORMATION_UPDATED`, `DESTINATION_UPDATED` atau `CHANNEL_UPDATED` sesuai perubahan. Audit ini menyatakan perubahan draft, bukan bahwa konfigurasi sudah aktif. Save existing channel membuat draft; publish/rollback melalui Revisions menentukan perubahan running dan memiliki audit tersendiri. Pesan existing tetap menggunakan configuration snapshot yang diterima sebelumnya.
 
@@ -141,7 +151,7 @@ Settings memiliki **System information, Roles, Users, Audit log**; Users/Audit m
 
 ## Database upgrade dan compatibility
 
-Build terbaru memerlukan migration **1–7**. Migration `006_delivery_http_status.sql` menambahkan nullable integer `MessageDestinationLog.http_status` (100–599). Migration `007_delivery_timing.sql` menambahkan nullable integer `request_duration_ms` (minimal 0). Record lama tetap NULL. Keduanya additive, transactional/repeatable dan tidak menghapus business data. Migrator, startup guard, disposable reset helpers, restore verification dan runtime smoke menggunakan versi 7.
+Follow-up berbasis `1734591` yang memindahkan test ke Review tidak menambah migration atau mengubah data. Build terbaru tetap memerlukan migration **1–7**. Migration `006_delivery_http_status.sql` menambahkan nullable integer `MessageDestinationLog.http_status` (100–599). Migration `007_delivery_timing.sql` menambahkan nullable integer `request_duration_ms` (minimal 0). Record lama tetap NULL. Keduanya additive, transactional/repeatable dan tidak menghapus business data. Migrator, startup guard, disposable reset helpers, restore verification dan runtime smoke menggunakan versi 7.
 
 Untuk upgrade environment existing, verifikasi target dan backup/keyring sesuai runbook sebelum menjalankan command:
 
@@ -154,7 +164,7 @@ npm run start
 
 Production memerlukan konfirmasi backup `MIGRATION_BACKUP_CONFIRMED=true` sesuai runbook migrasi. Verifikasi `/health`, `/ready` dan synthetic channel yang berizin setelah restart. Startup tidak melakukan automatic migration; schema yang belum cukup menghasilkan `MIGRATION_REQUIRED` beserta instruksi migrasi.
 
-Pada development `MiniMirthDev`, migration additive 007 benar-benar diterapkan setelah preflight. Schema terverifikasi 1–7; counts tetap 1 user, 1 channel, 1 destination, 2 messages dan 1 delivery log. Tidak ada reset atau perubahan production. Compiled development backend diuji pada loopback port sementara dengan `/health` dan `/ready` HTTP 200, tanpa mengirim payload; proses diakhiri melalui SIGTERM dengan exit 0. `.env` dan key existing tidak diubah.
+Pada implementasi sebelumnya yang tercakup dalam `1734591`, migration additive 007 benar-benar diterapkan pada development `MiniMirthDev` setelah preflight. Schema terverifikasi 1–7; counts tetap 1 user, 1 channel, 1 destination, 2 messages dan 1 delivery log. Tidak ada reset atau perubahan production. Compiled development backend diuji pada loopback port sementara dengan `/health` dan `/ready` HTTP 200, tanpa mengirim payload; proses diakhiri melalui SIGTERM dengan exit 0. `.env` dan key existing tidak diubah.
 
 Semua source/destination filter, transformer, response script, validation profile, idempotency mode, multiple destinations dan credential existing tetap dipertahankan pada data/API/runtime/import-export. Response editor yang disembunyikan tidak menghapus script legacy. Source HTTP response mempertahankan result envelope lama sambil menambahkan alias messageId/status.
 
@@ -162,38 +172,45 @@ Rollback source dapat mempertahankan kolom nullable baru. Jangan drop kolom, dat
 
 ## Validasi dan batas verifikasi
 
-Baseline perubahan final: branch `development`, commit `a43c693`. Test menggunakan fixture sintetis dan PostgreSQL 18.4 disposable pada loopback dengan environment terisolasi. Browser memakai API fixture untuk UX/permission; pengiriman aktual dibuktikan terpisah melalui native SQL/runtime test.
+Follow-up mapping-only / Review & Test berbasis branch `development`, commit `1734591`. Verifikasi baru memakai fixture sintetis. Browser menggunakan API fixture untuk UX/permission dan tidak mengklaim pengiriman ke rumah sakit atau webhook eksternal.
 
-Native SQL mencakup input sintetis RM-000123 / Siti Aminah / F / 1993-08-17 dan perbandingan output Patient XML dengan body HTTP yang benar-benar diterima destination loopback. Test juga mencakup routing/multiple destinations, required rejection, HTTP status, duration/attempt metadata dan repeat migrations. Tidak ada pengiriman ke sistem rumah sakit/webhook eksternal dalam verifikasi ini.
-
-| Command / pemeriksaan | Hasil akhir |
+| Command / pemeriksaan | Hasil follow-up terbaru |
 | --- | --- |
 | `npm run typecheck` | PASS |
 | `npm run lint` | PASS |
 | `npm run format:check` | PASS |
-| `npm run test:coverage` | PASS — 28 suites, 332 tests |
+| `npm run test:coverage` | PASS — 28 suites, 345 tests |
 | `npm run build` | PASS — client dan server |
-| `npm run test:e2e` | PASS — 53 tests, termasuk keyboard/mobile, permission, compatibility dan Axe accessibility |
-| `npm run test:sql` dengan PostgreSQL disposable | PASS — 19 tests |
-| `npm run test:runtime` dengan PostgreSQL disposable | PASS — compiled startup, health/readiness, metrics authorization, SIGTERM saat delivery aktif |
-| `npm run docs:check` | PASS |
-| `npm run secrets:scan` | PASS — targeted-pattern scanner; bukan sertifikasi history/rotasi secret |
-| Development additive migration 007 dan compiled health/readiness | PASS — counts business data tetap, tanpa payload baru |
-| Native backup/restore drill schema 7 | NOT TESTED — pg_dump/pg_restore tidak tersedia |
-| Docker, hospital UAT, load test dan disaster recovery qualification | NOT TESTED untuk perubahan ini |
+| `npm run test:e2e` | PASS — 57 tests, termasuk mapping-only, Review & Test, compatibility, permissions, keyboard/mobile dan Axe accessibility |
+| Capture ulang screenshot Review | PASS — 1 kasus khusus screenshot; bukan tambahan pada angka 57 suite penuh |
+| `npm run docs:check` | PASS — 46 paths, 50 operations |
+| `npm run secrets:scan` | PASS — findings kosong pada targeted-pattern scanner; bukan sertifikasi history/rotasi secret |
+| Pemeriksaan tautan Markdown lokal | PASS — 56 tautan |
+| `git diff --check` | PASS |
 
-Coverage meningkat dari baseline final: statements **81.11 → 81.90%**, branches **76.82 → 78.61%**, functions **82.75 → 83.63%**, lines **82.25 → 82.96%**.
+Coverage meningkat dari baseline `1734591`: statements **81.90 → 82.09%**, branches **78.61 → 78.80%**, functions **83.63 → 83.84%**, lines **82.96 → 83.12%**.
 
-Kegagalan sementara dicatat dan diperbaiki sebelum hasil final: selector baru tidak sesuai accessible name pada browser, dan smoke guard awal mengasumsikan PG_SCHEMA eksplisit walaupun konfigurasi memakai default public. Selector/label serta guard diperbaiki dan run akhir lulus. Tidak ada klaim production-ready atau hospital acceptance berdasarkan hasil UI ini; readiness matrix tetap berlaku untuk verifikasi eksternal.
+Regresi mencakup pemisahan format Source/destination, dua kolom mapping dengan opsi tertutup, field/metadata legacy yang dipertahankan, preview tanpa network, pengujian pada Review, error aman, raw permission yang diaudit, serta connection probe yang dipilih secara eksplisit. Run browser awal memerlukan penyesuaian selector accessible name dan asumsi flow lama; selector diperbaiki dan suite penuh terakhir lulus. Capture Review diulang dengan viewport lebih tinggi agar flow, input dan XML terlihat bersama.
+
+Bukti runtime berikut tetap **historis dari `1734591`**, bukan run ulang untuk follow-up ini:
+
+| Pemeriksaan sebelumnya | Bukti / batas |
+| --- | --- |
+| Native PostgreSQL integration | 19 tests PASS pada PostgreSQL 18.4 disposable; mencakup schema 1–7 berulang, routing/multi-destination, required rejection, HTTP status serta duration/attempt metadata |
+| Fixture JSON → Patient XML | Input sintetis RM-000123 / Siti Aminah / F / 1993-08-17 dibandingkan dengan body HTTP aktual pada receiver loopback |
+| Compiled runtime smoke | Startup, health/readiness, metrics authorization dan SIGTERM ketika delivery aktif PASS pada database terisolasi |
+| Development migration 007 / rebuilt health | Preflight, additive migration, counts business data tetap dan health/readiness 200 diverifikasi sebelumnya; follow-up ini tidak mengubah database |
+
+Runtime engine, converter dan schema tetap; perubahan backend follow-up terbatas pada panduan error preview yang aman. Tidak ada klaim fresh native SQL/runtime, `npm ci` atau dependency audit. Native backup/restore schema 7 belum diuji karena pg_dump/pg_restore tidak tersedia pada verifikasi sebelumnya. Docker, hospital UAT, load test dan disaster recovery qualification tidak dijalankan pada follow-up ini. Tidak ada klaim production-ready atau hospital acceptance; readiness matrix tetap berlaku untuk verifikasi eksternal.
 
 ## Screenshot UI final
 
-Seluruh screenshot memakai data sintetis dari browser test:
+Enam screenshot berikut diambil ulang dari browser test dengan data sintetis. Transformation menampilkan mapping-only; Review & Test memperlihatkan flow, test input dan generated output:
 
 - [Source dan Advanced settings](screenshots/usability/lite-source.png)
-- [Transformation dan preview](screenshots/usability/lite-transformation.png)
+- [Transformation](screenshots/usability/lite-transformation.png)
 - [Destinations dan Advanced settings](screenshots/usability/lite-destinations.png)
-- [Review](screenshots/usability/lite-review.png)
+- [Review & Test](screenshots/usability/lite-review.png)
 - [Overview](screenshots/usability/lite-overview.png)
 - [Settings](screenshots/usability/lite-settings.png)
 

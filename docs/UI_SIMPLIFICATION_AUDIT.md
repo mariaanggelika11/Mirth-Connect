@@ -1,5 +1,48 @@
 # Final UI simplification audit — 16 Oktober 2026
 
+## Follow-up: mapping saja pada Step 2
+
+Baseline follow-up: `development`, commit `1734591`, working tree bersih. Instruksi terbaru memisahkan konfigurasi mapping dari testing; hasil bagian ini adalah verifikasi terbaru. Catatan audit dan daftar 60 file pada bagian implementasi sebelumnya di bawah tetap disimpan sebagai riwayat pekerjaan sampai `1734591`. Screenshot ditimpa dengan tampilan follow-up terbaru.
+
+Alur sekarang: **Source (inbound format) → Transformation (mapping) → Destinations (outbound format per destination) → Review & Test**.
+
+| Area | Perubahan follow-up |
+| --- | --- |
+| Step 2 | Hanya Field Mapping dua kolom Source Field / Target Field, Add Mapping dan Advanced Custom Transformation Script |
+| Mapping options | Required/default tersedia dalam disclosure per baris; property rootElement existing tetap dipertahankan tanpa field format/root baru |
+| Dihapus dari Step 2 | Input/output format, patient example, sample editor, preview, testing, raw/privacy controls dan error testing |
+| Destination | Masing-masing memilih format sendiri; tidak ada apply-to-all dari mapping atau penyalinan format destination pertama ke destination berikutnya |
+| Review & Test | Source/transformation/destination summaries, flow, input sintetis, Test Transformation dan generated output per destination |
+| Advanced test options | Audited raw preview dan optional TCP/TLS connection checks; seluruhnya hanya pada Review |
+| Error | JSON tidak valid ditolak sebelum API call; konfigurasi yang belum lengkap menyebut setting yang perlu dilengkapi; target wajib yang hilang mendapat pesan spesifik |
+| Compatibility | Pipeline runtime, pass-through, canonical mappings/required/default/root, custom scripts, multi-destination, routing dan delivery tidak dihapus atau diubah |
+
+Error test mempunyai state terpisah dan hanya dirender pada Review. Berpindah langkah atau mengubah konfigurasi/input/permission membatalkan cached/in-flight preview; mengedit mapping tidak otomatis mengirim request preview. Required field tetap diperiksa setelah source filter, agar pesan valid yang sengaja difilter tidak menjadi error mapping. Diagnostic required-target hanya menjalankan ulang mapping canonical dengan check required dimatikan di sandbox/parser berbatas yang sama; tidak menjalankan ulang script custom atau network. Tidak ada exception/patient value pada pesan bantuan.
+
+| Command / pemeriksaan follow-up | Hasil sebenarnya |
+| --- | --- |
+| `npm run test:coverage` | PASS — 345 tests / 28 suites |
+| `npm run test:e2e` | PASS — 57 tests, synthetic API fixtures |
+| Targeted browser screenshot capture | PASS — 1 test; Review dicapture dengan viewport lebih tinggi agar flow/input/output terlihat lengkap |
+| `npm run typecheck` / `npm run lint` / `npm run format:check` | PASS |
+| `npm run build` | PASS — client dan server |
+| `npm run docs:check` | PASS — 46 paths / 50 operations; safe message metadata terdokumentasi |
+| `npm run secrets:scan` | PASS — targeted scanner, findings kosong |
+| Pemeriksaan local Markdown links | PASS — 56 links, termasuk anchor dan screenshot |
+| `git diff --check` | PASS |
+| Native SQL / compiled runtime / development migration | NOT RERUN — tidak ada perubahan database atau runtime delivery; hasil 19 SQL dan runtime pada bagian sebelumnya adalah bukti sebelum follow-up |
+| Fresh install, dependency audit, Docker, hospital UAT, production load/DR | NOT RERUN / NOT TESTED pada follow-up ini |
+
+Coverage meningkat dari `1734591`: statements **81.90 → 82.09%**, branches **78.61 → 78.80%**, functions **83.63 → 83.84%**, lines **82.96 → 83.12%**.
+
+Kegagalan investigasi tidak disembunyikan: combined typecheck pertama milik backend berjalan saat props frontend masih dipindahkan dan gagal pada props lama TransformationEditor; setelah handoff, typecheck workspace PASS. Browser run awal gagal karena accessible label input turut memuat helper text, lalu assertion lama masih mengharapkan format gabungan pada flow. Locator/expectation diperbarui terhadap UI aktual; final full suite 57/57 PASS. Pembacaan awal usability.services.ts dan glob usability* gagal karena nama file tidak ada; rg menemukan handler aktual di transformationPreview.services.ts. Tidak ada kegagalan aplikasi tersisa pada skenario tersebut.
+
+Screenshot: [Step 2 mapping](screenshots/usability/lite-transformation.png), [Review & Test](screenshots/usability/lite-review.png), [Destination](screenshots/usability/lite-destinations.png). Manual: [MIRTH_LITE_UI.md](MIRTH_LITE_UI.md). Tidak ada migration, reset database, perubahan environment/key atau data production dalam follow-up ini. Binary build terbaru cukup direstart dengan `npm run start` pada development yang sudah memiliki schema 7. Rollback kode dapat memakai artifact `1734591`, dengan konfigurasi/data/keyring tetap dipertahankan.
+
+Daftar file follow-up dicatat di bagian akhir dokumen.
+
+## Catatan implementasi sebelumnya — sampai 1734591
+
 ## Audit sebelum coding
 
 Baseline: development, commit `a43c693`, working tree bersih; Node 24.18.1, npm 11.16.0, macOS arm64. Dokumen ini dibuat setelah pemeriksaan source dan sebelum perubahan implementasi untuk prompt final. Baseline coverage lulus 301 test / 26 suites; typecheck, lint, format dan build juga lulus. Coverage awal: statements 81.11%, branches 76.82%, functions 82.75%, lines 82.25%.
@@ -219,4 +262,34 @@ server/test/simple-condition.test.ts
 server/test/sql.integration.ts
 server/test/startup.test.ts
 server/test/usability-api.test.ts
+```
+
+## Daftar file follow-up mapping / Review & Test
+
+```text
+CHANGELOG.md
+README.md
+client/e2e/ui.spec.ts
+client/e2e/usability.spec.ts
+client/src/features/channels/ChannelForm.tsx
+client/src/features/channels/DestinationConnectionTest.tsx
+client/src/features/channels/DestinationEditor.tsx
+client/src/features/channels/DryRunPreview.tsx
+client/src/features/channels/ReviewTest.tsx
+client/src/features/channels/TransformationEditor.tsx
+client/src/index.css
+docs/ARCHITECTURE.md
+docs/ERROR_CODE_CATALOG.md
+docs/MIRTH_LITE_UI.md
+docs/PRODUCTION_READINESS_MATRIX.md
+docs/UI_SIMPLIFICATION_AUDIT.md
+docs/openapi.yaml
+docs/screenshots/usability/lite-destinations.png
+docs/screenshots/usability/lite-overview.png
+docs/screenshots/usability/lite-review.png
+docs/screenshots/usability/lite-source.png
+docs/screenshots/usability/lite-transformation.png
+server/src/services/dryRun.services.ts
+server/src/services/transformationPreview.services.ts
+server/test/transformation-preview.test.ts
 ```

@@ -1,5 +1,15 @@
 # Changelog
 
+## Focus mapping and move testing to Review — 2026-10-16
+
+- Base this follow-up on development commit `1734591`. Keep Source → Transformation → Destinations → Review & Test and all existing engine capabilities.
+- Make Transformation mapping-only: Source Field / Target Field, Add Mapping, and optional Advanced Custom Transformation Script. Keep Required/default inside collapsed Mapping options. Preserve existing wrapper metadata and legacy scripts without a root field or automatic Patient wrapper.
+- Let Source own inbound format and each destination own its outbound format independently. Remove Step 2 format selectors, examples, sample input, preview/test actions, privacy controls and test-result banners.
+- Move transformation tests, generated output, safe actionable errors and audited Advanced test options to Review & Test. Move explicit destination connection probes there after complete configuration; preview remains DNS/network-free, probes send no application data, and confirmed post-save synthetic delivery remains available.
+- Add safe actionable preview-error guidance without changing the runtime pipeline, converter or database. Keep schema 1–7 and existing source/destination filters, transformers, routing, retries, monitoring, responses and revision behavior. No database data changed.
+- Verify this follow-up with 345 unit/API tests across 28 suites and 57 browser tests. Typecheck, lint, formatting, client/server build, OpenAPI structural checks (46 paths / 50 operations), targeted source secret scan, local Markdown links and diff checks pass. Coverage increases from 81.90% / 78.61% / 83.63% / 82.96% to 82.09% statements / 78.80% branches / 83.84% functions / 83.12% lines. Capture six fresh synthetic screenshots; an additional screenshot-only browser case passes.
+- Native PostgreSQL 19-test and compiled-runtime results below are historical evidence from `1734591`, not reruns for this follow-up. No fresh npm ci, dependency audit, database migration, Docker, hospital UAT, load or disaster recovery drill is claimed.
+
 ## Final simplification and Mirth-style flow — 2026-10-16
 
 - Retain Source → Transformation → Destinations → Review, visual mapping and the complete source/destination pipeline. Add format-aware Basic validation, a Field/Operator/Value filter builder and explicit transformer configuration through Advanced.

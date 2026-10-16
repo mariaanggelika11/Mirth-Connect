@@ -51,7 +51,9 @@ Konfigurasi penting:
 
 Atur `PUBLIC_BASE_URL=https://connect.bulmar.tech` pada server di balik reverse proxy; untuk development gunakan `PUBLIC_BASE_URL=http://localhost:9000`. UI menerima endpoint dari backend, tanpa menebak dari hostname browser. `PUBLIC_BASE_URL` mengungguli `INBOUND_BASE_URL`; hapus override `INBOUND_PATH` lama bila ingin memakai path default baru. Path source yang dikonfigurasi, `/api/inbound/:channelId`, dan `/api/message/inbound/:channelId` tetap dapat menerima source API key. Alur Bearer pada endpoint management tetap memerlukan permission `inbound:send`. `VITE_API_BASE_URL` kosong memakai same origin; `VITE_API_PROXY_URL` menentukan backend development. Jangan masukkan secret dalam variable `VITE_`.
 
-Wizard channel memakai **Source → Transformation → Destinations → Review**. Mapping field visual mendukung Required, default value dan preview; filter, script, routing, multi destination, retry dan timeout tetap tersedia melalui Advanced. Panduan terbaru dan bukti pengujian tersedia di [Mirth Connect Lite UI](docs/MIRTH_LITE_UI.md).
+Wizard channel memakai **Source → Transformation → Destinations → Review & Test**. Source menentukan inbound format; setiap destination menentukan outbound format secara mandiri. Transformation hanya menampilkan mapping **Source Field / Target Field**, **Add Mapping**, dan **Advanced Custom Transformation Script** opsional. Required/default berada dalam **Mapping options** per baris; metadata wrapper XML existing tetap dipertahankan tanpa field root pada UI. Semua sample, preview dan pengujian berada pada Review & Test. Panduan terbaru dan batas verifikasi tersedia di [Mirth Connect Lite UI](docs/MIRTH_LITE_UI.md).
+
+Review & Test menampilkan ringkasan/flow, Test input, Test transformation, generated output dan error yang aman. **Advanced test options** menyediakan raw preview yang diaudit sesuai permission. Test connection juga berada di Review setelah konfigurasi destination lengkap; probe hanya DNS/TCP/TLS tanpa patient data, sedangkan transformation preview tidak melakukan DNS atau network request. Pengiriman sintetis setelah Save tetap memerlukan channel Running dan konfirmasi.
 
 Source dan destination filter menyediakan builder **Field / Operator / Value**; aturan dikompilasi ke filter sandbox existing. Basic validation mengikuti format JSON/XML/HL7 dan disimpan sebagai `validationProfile.basicSyntax`; custom profile/script lama tetap tersedia. Overview menampilkan status operasional, sementara Settings mengelompokkan Users, Roles, Audit log dan System information.
 
@@ -74,7 +76,7 @@ Migration `001_engine.sql` membuat tabel yang belum ada, menambah field engine, 
 
 `bootstrap:admin` meminta username, nama, dan password tersembunyi (minimal 12 karakter). Tidak memakai admin/password default. Gunakan account migration dengan izin DDL, lalu account runtime dengan hak minimum yang diperlukan. Aplikasi tidak menjalankan migration secara otomatis.
 
-Build terbaru memerlukan migration **001–007**. Migration 006 menambah nullable HTTP status; 007 menambah nullable integer `MessageDestinationLog.request_duration_ms` untuk durasi transport aktual. Baris historis tetap dipertahankan tanpa nilai pengganti. Jalankan preflight, backup dan migration sebelum restart; lihat [compatibility dan rollback](docs/MIRTH_LITE_UI.md#database-upgrade-dan-compatibility).
+Penyederhanaan mapping/Review ini tidak menambah migration atau mengubah pipeline engine. Build terbaru tetap memerlukan migration **001–007**. Migration 006 menambah nullable HTTP status; 007 menambah nullable integer `MessageDestinationLog.request_duration_ms` untuk durasi transport aktual. Baris historis tetap dipertahankan tanpa nilai pengganti. Jalankan preflight, backup dan migration sebelum restart; lihat [compatibility dan rollback](docs/MIRTH_LITE_UI.md#database-upgrade-dan-compatibility).
 
 ## Run development / production
 
@@ -117,7 +119,7 @@ Admin API: `GET/POST /api/users`, `PUT /api/users/:id/role`; tidak mengembalikan
 
 ## Channel flow dan HTTP integration
 
-Create channel → status STOPPED → configure source/destination/filter/transformer → start RUNNING. Status PAUSED/STOPPED/ERROR menolak receive baru; work yang sudah diterima diselesaikan. Destination berurutan mengikuti ID existing. Destination yang dihapus dari form di-retire, sehingga log historis tetap ada. Channel dengan retained messages tidak dapat dihapus; gunakan stop dan retention.
+Isi Source → petakan field pada Transformation → tentukan format/endpoint masing-masing destination → Review & Test → Save Channel → status STOPPED → Start RUNNING. Status PAUSED/STOPPED/ERROR menolak receive baru; work yang sudah diterima diselesaikan. Destination berurutan mengikuti ID existing. Destination yang dihapus dari form di-retire, sehingga log historis tetap ada. Channel dengan retained messages tidak dapat dihapus; gunakan stop dan retention.
 
 Untuk source HTTP, buka Edit Channel → **Create / rotate source API key**. Key ditampilkan sekali pada aksi ini, disimpan AES-256-GCM dan tidak dikembalikan oleh list channel. Rotasi langsung membatalkan key sebelumnya.
 
@@ -175,6 +177,8 @@ Messages memisahkan Inbound message, Source processed message, Outbound message 
 Maintenance menghapus batch pesan SUCCESS/FILTERED/RECEIVED yang melewati retention dan tidak mempunyai outstanding/failed child. Unresolved errors/dead letters tidak dipurge otomatis; harus direkonsiliasi. Audit memakai retention terpisah. Atur retention sesuai kebijakan organisasi dan regulasi yang berlaku, serta sediakan backup/restore teruji.
 
 ## Testing dan build
+
+Verifikasi follow-up berbasis `1734591`: **345 unit/API tests**, **57 browser tests**, typecheck, lint, format dan build lulus. Coverage: statements 82.09%, branches 78.80%, functions 83.84%, lines 83.12%. OpenAPI structural check dan targeted secret scan juga lulus. Hasil native PostgreSQL 19 test dan compiled-runtime smoke merupakan bukti sebelumnya pada `1734591`; tidak dijalankan ulang untuk perubahan ini. Lihat [hasil dan batas verifikasi](docs/MIRTH_LITE_UI.md#validasi-dan-batas-verifikasi).
 
 ```sh
 npm run typecheck
@@ -249,7 +253,7 @@ Status pengujian dan pekerjaan tersisa dirangkum dalam [readiness matrix](docs/P
 
 Sebelum upgrade: backup terenkripsi teruji, review konfigurasi keyring/TLS/allowlist, dan jalankan di database disposable/staging terlebih dahulu. Node 24 dipakai CI/container (minimum package tetap 22.18+). Jalankan `npm ci`, `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run test:coverage`, `npm run build`. Dengan database disposable dipilih secara eksplisit, jalankan `npm run db:migrate -- --dry-run`, `npm run db:migrate` dua kali, lalu SQL/browser tests. Production migration memerlukan `MIGRATION_BACKUP_CONFIRMED=true`; migrator tidak dipanggil otomatis saat startup.
 
-Migration 002 menambah session/revision/reconciliation/profile; 003 menambah delivery slot/circuit state dan lease owner; 004 menambah inbox alert, pending notification, cooldown dan acknowledgement. Existing channel menjadi revision awal. PUT `/api/channel/:id` **menyimpan draft**; publish melalui `POST /api/channel/:id/revisions/:revision/publish` dengan expectedActiveRevision dan changeSummary. Rollback membuat publish baru. UI Revisions menyediakan review/compare/publish/rollback; summary opsional di UI diisi otomatis untuk audit. Validation dan scripting berada di Advanced, sementara Transformation menyediakan mapping dan preview tanpa network. Channel dengan revision history ditolak oleh DELETE; stop untuk retire. Perubahan ini memerlukan penyesuaian automation lama yang mengandalkan update langsung.
+Migration 002 menambah session/revision/reconciliation/profile; 003 menambah delivery slot/circuit state dan lease owner; 004 menambah inbox alert, pending notification, cooldown dan acknowledgement. Existing channel menjadi revision awal. PUT `/api/channel/:id` **menyimpan draft**; publish melalui `POST /api/channel/:id/revisions/:revision/publish` dengan expectedActiveRevision dan changeSummary. Rollback membuat publish baru. UI Revisions menyediakan review/compare/publish/rollback; summary opsional di UI diisi otomatis untuk audit. Validation dan scripting berada di Advanced; Transformation hanya berisi mapping, sedangkan Review & Test menyediakan seluruh pengujian dan preview tanpa network. Channel dengan revision history ditolak oleh DELETE; stop untuk retire. Perubahan ini memerlukan penyesuaian automation lama yang mengandalkan update langsung.
 
 Penyimpanan draft biasa menghasilkan audit area yang berubah: `SOURCE_UPDATED`, `TRANSFORMATION_UPDATED`, `DESTINATION_UPDATED`, atau `CHANNEL_UPDATED` untuk nama. Event hanya berisi metadata aksi dan tetap diikuti `CREATE_CHANNEL_DRAFT`; konfigurasi aktif berubah setelah publish. Custom summary API tetap didukung.
 

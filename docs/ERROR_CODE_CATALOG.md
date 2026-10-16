@@ -26,6 +26,7 @@ Errors return success=false, code, safe message and requestId; central handler a
 | INVALID_ASSIGNEE | 400; assignment requires existing operator/admin |
 | DESTINATION_HOST_DENIED / DESTINATION_ADDRESS_DENIED | 403; outbound policy |
 | SCRIPT_TIMEOUT / SCRIPT_EXECUTION_FAILED / SCRIPT_CAPACITY | sandbox/time/capacity diagnostic |
+| TRANSFORMATION_PREVIEW_INVALID / DRY_RUN_INVALID | 400; invalid test configuration identifies the affected source/destination setting without echoing input |
 | PAYLOAD_TOO_LARGE / UPLOAD_LIMIT | body/upload exceeded bound |
 | INTERNAL_ERROR | 500; internal details withheld |
 
@@ -53,3 +54,5 @@ Follow-up operational control errors:
 | SCRIPT_MEMORY_LIMIT | 422 | QuickJS memory exhaustion; exception content is not returned |
 
 Canonical-key conflicts continue to use IDEMPOTENCY_CONFLICT. XML rules use literal dotted element names; XPath expressions/attributes/XSD are not implemented.
+
+Review previews return failed-stage `code` plus safe actionable `message` metadata. An intact visual mapping with a missing required field can report `Target field PatientID is required.` using its configured target path. Validation/filter ordering and defaults are preserved; raw exception messages and patient values are never used as guidance. Malformed JSON test input is rejected locally in Review before an API request.

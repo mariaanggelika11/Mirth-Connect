@@ -327,13 +327,13 @@ test('channel wizard prevents accidental loss and requires review before saving'
   await page.getByRole('button', { name: 'New Channel' }).click();
   await page.getByLabel('Channel name', { exact: false }).fill('New integration');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'How should the message change?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Transformation', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByText('Where should messages go?')).toBeVisible();
   await page.getByLabel('Destination name').fill('REST receiver');
   await page.getByLabel('Endpoint', { exact: false }).fill('https://api.example.com/messages');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await expect(page.getByText('Review your connection')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Review & Test', exact: true })).toBeVisible();
   expect(saves).toBe(0);
   await page.screenshot({ path: '/private/tmp/mirth-ui-editor.png', fullPage: true });
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -342,7 +342,7 @@ test('channel wizard prevents accidental loss and requires review before saving'
     .getByRole('dialog', { name: 'Discard unsaved changes?' })
     .getByRole('button', { name: 'Cancel' })
     .click();
-  await expect(page.getByText('Review your connection')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Review & Test', exact: true })).toBeVisible();
   await expect(page.getByLabel('Change summary')).toHaveCount(0);
   await page.getByRole('button', { name: 'Save Channel' }).click();
   await expect(page.getByRole('dialog', { name: 'Channel saved', exact: true })).toBeVisible();

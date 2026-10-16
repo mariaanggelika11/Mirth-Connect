@@ -3,8 +3,6 @@ import { Button } from '../../components/ui/Button';
 import { DataType, DestinationType } from '../../types';
 import type { Destination } from '../../types';
 import type { ChannelScriptEditor } from './channelDraft';
-import { useEffect, useRef, useState } from 'react';
-import { api } from '../../services/api';
 import { FilterEditor } from './FilterEditor';
 interface Props {
   dest: Destination;
@@ -16,14 +14,6 @@ interface Props {
   inboundFormat?: string;
 }
 const dataOptions = Object.values(DataType);
-interface ConnectionResult {
-  reachable: boolean;
-  secure: boolean;
-  elapsedMs: number;
-  probe: 'TCP_HANDSHAKE' | 'TLS_HANDSHAKE';
-  applicationDeliveryTested: false;
-  warnings?: string[];
-}
 export function DestinationEditor({
   dest,
   index,
@@ -33,9 +23,6 @@ export function DestinationEditor({
   onFilterValidityChange,
   inboundFormat,
 }: Props) {
-  const [probing, setProbing] = useState(false);
-  const [probeResult, setProbeResult] = useState<ConnectionResult | null>(null);
-  const [probeError, setProbeError] = useState('');
   const processingConfigured = Boolean(
     dest.filterScript?.trim() || dest.processingScript?.trim() || dest.templateScript?.trim(),
   );
@@ -48,32 +35,6 @@ export function DestinationEditor({
     Object.values(dest.deliveryPolicy ?? {}).some((value) => value !== undefined);
   const responseConfigured = Boolean(dest.responseScript?.trim());
   const advancedConfigured = processingConfigured || deliveryConfigured || responseConfigured;
-  const probeTarget = JSON.stringify([dest.endpoint, dest.type, dest.timeoutMs]);
-  const currentTarget = useRef(probeTarget);
-  currentTarget.current = probeTarget;
-  useEffect(() => {
-    setProbeResult(null);
-    setProbeError('');
-  }, [dest.endpoint, dest.type, dest.timeoutMs]);
-  async function testConnection() {
-    const target = probeTarget;
-    setProbing(true);
-    setProbeResult(null);
-    setProbeError('');
-    try {
-      const { data } = await api.post<ConnectionResult>('/channel/test-connection', {
-        endpoint: dest.endpoint,
-        type: dest.type,
-        timeoutMs: Math.min(dest.timeoutMs ?? 10000, 10000),
-      });
-      if (currentTarget.current === target) setProbeResult(data);
-    } catch (error) {
-      if (currentTarget.current === target)
-        setProbeError(error instanceof Error ? error.message : 'Connection failed.');
-    } finally {
-      setProbing(false);
-    }
-  }
   return (
     <section className="destination-editor">
       <div className="section-header">
@@ -133,49 +94,16 @@ export function DestinationEditor({
       </div>
       <div className="field">
         <label htmlFor={`destination-endpoint-${index}`}>Endpoint *</label>
-        <div className="destination-endpoint-row">
-          <input
-            id={`destination-endpoint-${index}`}
-            value={dest.endpoint}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder={
-              dest.type === 'REST' ? 'https://api.example.com/messages' : 'tcp://host:2575'
-            }
-            disabled={probing}
-            onChange={(e) => onChange({ endpoint: e.target.value })}
-          />
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            title="Checks TCP/TLS without sending a message or patient data (up to 10 seconds)."
-            disabled={probing || !dest.endpoint.trim()}
-            onClick={() => void testConnection()}
-          >
-            {probing ? 'Testing connection…' : 'Test connection'}
-          </Button>
-        </div>
-      </div>
-      <div className="connection-test">
-        {probeError && (
-          <p className="alert error" role="alert">
-            Connection failed: {probeError}
-          </p>
-        )}
-        {probeResult && (
-          <div className={`alert ${probeResult.reachable ? 'success' : 'error'}`} role="status">
-            <strong>{probeResult.reachable ? 'Endpoint reachable' : 'Connection failed'}</strong>
-            <p>
-              {probeResult.probe === 'TLS_HANDSHAKE' ? 'TLS' : 'TCP'} handshake · Response time:{' '}
-              {probeResult.elapsedMs} ms.
-            </p>
-            <p>Connectivity only; no message was sent. Use synthetic data to verify delivery.</p>
-            {probeResult.warnings?.map((warning) => (
-              <p key={warning}>{warning}</p>
-            ))}
-          </div>
-        )}
+        <input
+          id={`destination-endpoint-${index}`}
+          value={dest.endpoint}
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={
+            dest.type === 'REST' ? 'https://api.example.com/messages' : 'tcp://host:2575'
+          }
+          onChange={(e) => onChange({ endpoint: e.target.value })}
+        />
       </div>
       {dest.credentialConfigured && (
         <p className="muted">

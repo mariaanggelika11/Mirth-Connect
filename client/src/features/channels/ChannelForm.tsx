@@ -17,6 +17,7 @@ import { ScriptEditorModal } from '../../components/status/ScriptEditorModal';
 import type { Channel, ChannelFormData, Destination } from '../../types';
 import { DataType } from '../../types';
 import { TransformationEditor } from './TransformationEditor';
+import { ReviewTest } from './ReviewTest';
 import { FilterEditor } from './FilterEditor';
 import { readFieldMapping } from '../../../../server/src/utils/fieldMapping';
 import { readSimpleCondition } from '../../../../server/src/utils/simpleCondition';
@@ -77,6 +78,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
   const [baseline, setBaseline] = useState(''),
     [step, setStep] = useState(0),
     [error, setError] = useState(''),
+    [testError, setTestError] = useState(''),
     [saving, setSaving] = useState(false),
     [discard, setDiscard] = useState(false),
     [key, setKey] = useState(''),
@@ -94,6 +96,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
   const [editor, setEditor] = useState<ChannelScriptEditor | null>(null);
   const previewContext = JSON.stringify({
     isOpen,
+    step,
     draft,
     profileText,
     sample,
@@ -105,6 +108,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     transformationValid,
   });
   const currentPreviewContext = useRef(previewContext);
+  const previewRequest = useRef(0);
   currentPreviewContext.current = previewContext;
   useEffect(() => {
     if (isOpen) {
@@ -118,6 +122,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       setBaseline(JSON.stringify(value));
       setStep(0);
       setError('');
+      setTestError('');
       setKey('');
       setDiscard(false);
       setEditor(null);
@@ -150,7 +155,12 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       active = false;
     };
   }, [isOpen, initialData]);
-  useEffect(() => setTestResult(null), [draft, profileText, sample, rawPreview]);
+  useEffect(() => {
+    previewRequest.current++;
+    setTestResult(null);
+    setTestError('');
+    setTesting(false);
+  }, [previewContext]);
   useEffect(() => {
     if (!canViewRaw) {
       setRawPreview(false);
@@ -293,26 +303,74 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       // Keep invalid custom text visible until the user corrects it.
     }
   }
+  function reviewConfigurationError() {
+    if (!draft.name.trim()) return 'Enter a channel name in Source before testing.';
+    if (!draft.source.inboundDataType || !dataOptions.includes(draft.source.inboundDataType))
+      return 'Select the inbound format in Source before testing.';
+    if (!transformationValid) return 'Complete each Source Field and Target Field before testing.';
+    if (filterEnabled && !sourceFilterValid)
+      return 'Complete the source filter condition before testing.';
+    const invalidFilter = destinationFilterValidity.findIndex((valid) => !valid);
+    if (invalidFilter >= 0)
+      return `Complete the filter condition for destination ${invalidFilter + 1} before testing.`;
+    for (const [index, destination] of draft.destinations.entries()) {
+      if (!destination.outboundDataType || !dataOptions.includes(destination.outboundDataType))
+        return 'Destination output format has not been selected.';
+      if (!destination.name.trim())
+        return `Enter a name for destination ${index + 1} before testing.`;
+      if (!destination.endpoint.trim())
+        return `Enter an endpoint for destination ${index + 1} before testing.`;
+    }
+    try {
+      selectedValidationProfile(validation, profileText);
+    } catch {
+      return 'Fix the custom validation schema in Source before testing.';
+    }
+    return '';
+  }
   async function previewOutput() {
-    if (unfinishedFilter()) return;
-    const context = previewContext;
-    setTesting(true);
+    if (step !== 3 || testing) return;
     setTestResult(null);
+    setTestError('');
+    const configurationError = reviewConfigurationError();
+    if (configurationError) {
+      setTestError(configurationError);
+      return;
+    }
+    let payload: unknown = sample;
+    if (draft.source.inboundDataType === DataType.JSON) {
+      try {
+        payload = JSON.parse(sample);
+      } catch {
+        setTestError('The test payload is not valid JSON.');
+        return;
+      }
+    } else if (!sample.trim()) {
+      setTestError('Enter a synthetic test message before testing.');
+      return;
+    }
+    const context = previewContext;
+    const request = ++previewRequest.current;
+    setTesting(true);
     setError('');
     try {
-      const payload = draft.source.inboundDataType === 'JSON' ? JSON.parse(sample) : sample;
       const validationProfile = selectedValidationProfile(validation, profileText);
       const { data } = await api.post<DryRunResult>('/channel/preview-transformation', {
         configuration: { ...draft, validationProfile },
         payload,
         raw: rawPreview && canViewRaw,
       });
-      if (currentPreviewContext.current === context) setTestResult(data);
+      if (currentPreviewContext.current === context && previewRequest.current === request)
+        setTestResult(data);
     } catch (error) {
-      if (currentPreviewContext.current === context)
-        setError(error instanceof Error ? error.message : 'Unable to preview this message.');
+      if (currentPreviewContext.current === context && previewRequest.current === request)
+        setTestError(
+          error instanceof Error
+            ? error.message
+            : 'Check the source and destination settings, then try the test again.',
+        );
     } finally {
-      setTesting(false);
+      if (previewRequest.current === request) setTesting(false);
     }
   }
   async function rotate() {
@@ -329,7 +387,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       setRotating(false);
     }
   }
-  const steps = ['Source', 'Transformation', 'Destinations', 'Review'];
+  const steps = ['Source', 'Transformation', 'Destinations', 'Review & Test'];
   const fieldMapping = readFieldMapping(draft.processingScript || '');
   const customSource = Boolean(
     (!fieldMapping && draft.processingScript?.trim()) ||
@@ -623,26 +681,8 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
             <div style={{ display: step === 1 ? 'block' : 'none' }} aria-hidden={step !== 1}>
               <TransformationEditor
                 inboundFormat={draft.source.inboundDataType || DataType.JSON}
-                destinations={draft.destinations}
                 processingScript={draft.processingScript || ''}
                 onScriptChange={(script) => setDraft((d) => ({ ...d, processingScript: script }))}
-                onOutputFormatChange={(format) =>
-                  setDraft((d) => ({
-                    ...d,
-                    destinations: d.destinations.map((destination) => ({
-                      ...destination,
-                      outboundDataType: format,
-                    })),
-                  }))
-                }
-                onPreview={() => void previewOutput()}
-                sample={sample}
-                onSampleChange={setSample}
-                result={testResult}
-                testing={testing}
-                rawPreview={rawPreview}
-                onRawPreviewChange={setRawPreview}
-                canViewRaw={canViewRaw}
                 onValidityChange={(valid) => {
                   setTransformationValid(valid);
                   if (!valid) setTestResult(null);
@@ -700,10 +740,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                       ...d.destinations,
                       {
                         ...newDestination(),
-                        outboundDataType:
-                          d.destinations[0]?.outboundDataType ||
-                          d.source.inboundDataType ||
-                          DataType.JSON,
+                        outboundDataType: d.source.inboundDataType || DataType.JSON,
                       },
                     ],
                   }));
@@ -716,7 +753,8 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
             {step === 3 && (
               <div className="form-section">
                 <div className="section-intro">
-                  <h3>Review your connection</h3>
+                  <h3>Review &amp; Test</h3>
+                  <p>{draft.name || 'Unnamed channel'}</p>
                 </div>
                 <div className="integration-flow" aria-label="Integration flow">
                   <div>
@@ -726,35 +764,25 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                   </div>
                   <span aria-hidden="true">↓</span>
                   <div>
-                    <strong>{draft.name || 'Unnamed channel'}</strong>
-                  </div>
-                  <span aria-hidden="true">↓</span>
-                  <div>
                     <strong>
-                      {draft.source.inboundDataType} →{' '}
-                      {draft.destinations
-                        .map((d) => d.outboundDataType)
-                        .filter((format, index, values) => values.indexOf(format) === index)
-                        .join(' / ') || 'No outbound delivery'}
-                    </strong>
-                    <small>
                       {fieldMapping
-                        ? `${fieldMapping.rows.length} mapped fields`
+                        ? `${fieldMapping.rows.length} field mappings`
                         : draft.processingScript?.trim()
-                          ? 'Advanced transformation'
-                          : 'Format conversion'}
-                    </small>
+                          ? 'Custom transformation script'
+                          : 'Original fields (pass-through)'}
+                    </strong>
                   </div>
-                  {draft.destinations.map((destination, index) => (
-                    <div className="integration-flow-destination" key={destination.id ?? index}>
-                      <span aria-hidden="true">↓</span>
-                      <strong>
-                        {destination.type} / {destination.outboundDataType}
-                      </strong>
-                      <span aria-hidden="true">↓</span>
-                      <strong>{destination.name || 'Unnamed destination'}</strong>
-                    </div>
-                  ))}
+                  <div className="integration-flow-branches">
+                    {draft.destinations.map((destination, index) => (
+                      <div className="integration-flow-destination" key={destination.id ?? index}>
+                        <span aria-hidden="true">↓</span>
+                        <strong>
+                          {destination.type} / {destination.outboundDataType || 'Select format'}
+                        </strong>
+                        <small>{destination.name || 'Unnamed destination'}</small>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <dl className="definition-list">
                   <div>
@@ -824,6 +852,12 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                       <small className="break-anywhere">{destination.endpoint}</small>
                       <dl className="definition-list">
                         <div>
+                          <dt>Connector / Output format</dt>
+                          <dd>
+                            {destination.type} / {destination.outboundDataType || 'Not selected'}
+                          </dd>
+                        </div>
+                        <div>
                           <dt>Retry</dt>
                           <dd>
                             {destination.retryEnabled
@@ -840,6 +874,20 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                     </div>
                   </section>
                 ))}
+                <ReviewTest
+                  inboundFormat={draft.source.inboundDataType || DataType.JSON}
+                  destinations={draft.destinations}
+                  sample={sample}
+                  onSampleChange={setSample}
+                  onTest={() => void previewOutput()}
+                  result={testResult}
+                  testing={testing}
+                  error={testError}
+                  configurationError={reviewConfigurationError()}
+                  rawPreview={rawPreview}
+                  onRawPreviewChange={setRawPreview}
+                  canViewRaw={canViewRaw}
+                />
                 <p className="muted">
                   {initialData
                     ? 'Changes are saved as a draft. Review and publish the draft to activate it.'
@@ -881,17 +929,6 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                 </Button>
               ) : (
                 <>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={saving || testing || !transformationValid}
-                    onClick={() => {
-                      setStep(1);
-                      void previewOutput();
-                    }}
-                  >
-                    Test
-                  </Button>
                   <Button type="submit" disabled={saving}>
                     {saving ? 'Saving…' : 'Save Channel'}
                   </Button>
