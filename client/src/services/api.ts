@@ -48,7 +48,7 @@ export const api = axios.create({
 
 /**
  * REQUEST INTERCEPTOR
- * - Tambahkan Bearer Token otomatis
+ * - Attach the in-memory access token.
  */
 api.interceptors.request.use(
   (config) => {

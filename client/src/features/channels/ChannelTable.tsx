@@ -137,12 +137,14 @@ function ChannelRow({
           </small>
         </td>
         <td className="numeric">
-          <strong>{(channel.received ?? 0).toLocaleString()}</strong>
-          <small className="table-subtext">{(channel.sent ?? 0).toLocaleString()} sent</small>
+          <strong>{(channel.received ?? 0).toLocaleString('en-US')}</strong>
+          <small className="table-subtext">
+            {(channel.sent ?? 0).toLocaleString('en-US')} sent
+          </small>
         </td>
         <td className="numeric">
           <span className={(channel.errors ?? 0) > 0 ? 'error-count' : 'muted'}>
-            {(channel.errors ?? 0).toLocaleString()}
+            {(channel.errors ?? 0).toLocaleString('en-US')}
           </span>
         </td>
         <td>

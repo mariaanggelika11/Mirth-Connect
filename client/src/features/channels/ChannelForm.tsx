@@ -498,7 +498,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                     <div>
                       <strong>Source API key</strong>
                       <p className="muted">
-                        API key digunakan oleh sistem sumber untuk mengirim data ke channel.
+                        The source system uses this API key to send data to the channel.
                       </p>
                       <p className="muted">
                         {!initialData

@@ -36,7 +36,7 @@ export function AlertPanel() {
         rows.map((row) => (
           <div className="review-destination" key={row.code}>
             <span>
-              {row.code} · {row.state} · {new Date(row.first_seen_at).toLocaleString()}
+              {row.code} · {row.state} · {new Date(row.first_seen_at).toLocaleString('en-US')}
             </span>
             <Button
               variant="secondary"

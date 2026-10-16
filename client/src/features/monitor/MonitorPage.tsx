@@ -384,7 +384,7 @@ export default function MonitorView({ initialFilters = {} }: Props) {
         )}
         <div className="pagination">
           <span>
-            {total.toLocaleString()} messages{' '}
+            {total.toLocaleString('en-US')} messages{' '}
             <span className="muted">
               · Page {page} of {Math.max(1, Math.ceil(total / 50))}
             </span>

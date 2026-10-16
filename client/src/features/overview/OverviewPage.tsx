@@ -114,7 +114,7 @@ export default function OverviewPage({ onNavigate }: Props) {
               <span>{label}</span>
               <Icon size={18} />
             </div>
-            <strong>{value === undefined ? '—' : value.toLocaleString()}</strong>
+            <strong>{value === undefined ? '—' : value.toLocaleString('en-US')}</strong>
             <small>{caption}</small>
           </button>
         ))}

@@ -42,8 +42,8 @@ export function SessionPanel() {
         sessions.map((s) => (
           <div key={s.family_id} className="review-destination">
             <span>
-              Created {new Date(s.created_at).toLocaleString()} · Expires{' '}
-              {new Date(s.expires_at).toLocaleString()} ·{' '}
+              Created {new Date(s.created_at).toLocaleString('en-US')} · Expires{' '}
+              {new Date(s.expires_at).toLocaleString('en-US')} ·{' '}
               {s.revoked
                 ? 'Revoked'
                 : new Date(s.expires_at).getTime() <= Date.now()

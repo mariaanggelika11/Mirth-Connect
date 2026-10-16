@@ -1,5 +1,11 @@
 # Changelog
 
+## English application interface — 2026-10-16
+
+- Translate the remaining Indonesian source API-key helper into English and review application-authored UI/backend messages for mixed-language text.
+- Use explicit en-US formatting for displayed dates, session/alert timestamps and message counters. Keep the browser's local timezone and existing stored values.
+- Verify client build, workspace typecheck, lint, format and 57 browser scenarios. A synthetic browser check using id-ID also confirms English helper text, month names and number separators. Refresh the two source-editor screenshots. Initial formatting and screenshot-filter issues were corrected and their commands rerun successfully.
+
 ## Consistent dropdowns — 2026-10-16
 
 - Standardize dropdown sizing, padding, chevrons, focus/disabled states and selected options across filters, channel forms, Messages and Settings. Supported browsers use an anchored, scrollable native picker; other browsers retain the system picker.

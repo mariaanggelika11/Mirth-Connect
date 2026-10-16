@@ -124,7 +124,7 @@ export function formatTime(value?: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? '—'
-    : date.toLocaleString(undefined, {
+    : date.toLocaleString('en-US', {
         month: 'short',
         day: 'numeric',
         hour: '2-digit',
