@@ -1,6 +1,17 @@
 /** Simple filters compile into the existing sandboxed filter stage. */
 export type SimpleConditionOperator =
-  'eq' | 'neq' | 'contains' | 'startsWith' | 'exists' | 'notExists' | 'gt' | 'gte' | 'lt' | 'lte';
+  | 'isEmpty'
+  | 'isNotEmpty'
+  | 'eq'
+  | 'neq'
+  | 'contains'
+  | 'startsWith'
+  | 'exists'
+  | 'notExists'
+  | 'gt'
+  | 'gte'
+  | 'lt'
+  | 'lte';
 
 export interface SimpleConditionConfig {
   version: 1;
@@ -11,6 +22,8 @@ export interface SimpleConditionConfig {
 
 const marker = '/* MIRTH_SIMPLE_CONDITION_V1:';
 const operators = new Set<string>([
+  'isEmpty',
+  'isNotEmpty',
   'eq',
   'neq',
   'contains',
@@ -53,7 +66,8 @@ export function validateSimpleCondition(input: unknown): SimpleConditionConfig {
     field,
     operator: value.operator as SimpleConditionOperator,
   };
-  if (condition.operator === 'exists' || condition.operator === 'notExists') return condition;
+  if (['exists', 'notExists', 'isEmpty', 'isNotEmpty'].includes(condition.operator))
+    return condition;
   if (typeof value.value !== 'string' || value.value.length > 1024)
     throw new Error('Enter a filter value of at most 1024 characters.');
   if (
@@ -110,7 +124,15 @@ return false;`;
 
 export function compileSimpleCondition(input: SimpleConditionConfig): string {
   const condition = validateSimpleCondition(input);
-  return `${marker}${encodeURIComponent(JSON.stringify(condition))} */\nvar conditionConfig = ${JSON.stringify(condition)};${conditionBody}`;
+  const empty = ['isEmpty', 'isNotEmpty'].includes(condition.operator);
+  // Preserve V1 bytes so existing saved JSON/XML/HL7 filters still reopen and normalize correctly.
+  const body = empty
+    ? conditionBody.replace(
+        "if (conditionConfig.operator === 'exists')",
+        "if (conditionConfig.operator === 'isEmpty') return !conditionExists || conditionValue === null || conditionValue === '';\nif (conditionConfig.operator === 'isNotEmpty') return conditionExists && conditionValue !== null && conditionValue !== '' && ['string', 'number', 'boolean'].includes(typeof conditionValue);\nif (conditionConfig.operator === 'exists')",
+      )
+    : conditionBody;
+  return `${marker}${encodeURIComponent(JSON.stringify(condition))} */\nvar conditionConfig = ${JSON.stringify(condition)};${body}`;
 }
 
 /** Only intact generated filters reopen as a builder; legacy scripts remain custom. */

@@ -1,5 +1,14 @@
 # Changelog
 
+## Simplify Source Filter with persistent disabled rules — 2026-10-18
+
+- Source Filter now exposes Enable source filter and one Field/Operator/Value condition builder. Remove its accept/reject/custom dropdown and script editor. Preserve legacy filters with a notice and explicit replacement; new channels default OFF. Destination routing/script controls remain available.
+- Retain disabled rules in a validated no-op wrapper in the existing filter_script column, including encrypted revision snapshots and XML import/export. Reopening restores OFF state and the exact rule. No schema migration, bulk configuration rewrite or remote database mutation.
+- Add Is empty/Is not empty with defined missing/null/scalar semantics. Preserve canonical bytes for all ten previous operators, prototype/path restrictions and isolated QuickJS execution. Reject malformed reserved metadata on save/runtime; record IN-ERROR with safe codes and never deliver. Nonmatching messages retain FILTERED status and skip transformation/outbound reservation.
+- Verification includes the actual inbound processor and QuickJS with isolated database/transport, HTTP API validation/storage/snapshot checks with a database fixture, structured JSON/XML/HL7 conditions and browser save/reopen/legacy/accessibility regressions. Full unit/API coverage: 413 tests, statements 84.44%, branches 80.88%, functions 86.45%, lines 85.37%; previous documented baseline 84.08/80.48/86.36/84.98. Typecheck, lint, format, client/server builds, targeted source secret scan and OpenAPI structural check pass.
+- Initial checks exposed a narrowed TypeScript branch after hiding the source script editor (fixed), local Supertest socket EPERM (rerun with socket permission), and an incomplete database fixture that returned an empty filter after writes (fixture corrected and coverage rerun). These were not treated as passing results. Live PostgreSQL/deployed-server verification is NOT TESTED; database and transport are isolated in automated tests. See the UI guide for storage limits, single-condition scope and downgrade compatibility.
+- Final browser regression: `npm run test:e2e` passes all 67 tests, including create → save OFF → reopen → enable with the saved condition restored, legacy preservation/replacement, unfinished-condition blocking, permission checks and accessibility. All ten previous operators were compared against HEAD and retain identical canonical output.
+
 ## Simplify the Revisions panel — 2026-10-17
 
 - Replace repeated revision cards and actions with one Version selector and a stable summary pane. Select the latest draft or active revision automatically, show its status, and expose only the relevant Edit draft, Publish or Rollback action.

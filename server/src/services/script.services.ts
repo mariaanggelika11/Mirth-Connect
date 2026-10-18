@@ -3,6 +3,7 @@ import { Worker } from 'node:worker_threads';
 import { config } from '../config/env.js';
 import { AppError } from '../utils/errors.js';
 import { readFieldMapping } from '../utils/fieldMapping.js';
+import { readSourceFilter } from '../utils/sourceFilter.js';
 import { readSimpleCondition } from '../utils/simpleCondition.js';
 import { Parser } from 'xml2js';
 let active = 0;
@@ -11,13 +12,24 @@ export async function executeScript(
   context: { msg: unknown; response?: unknown },
   resultVariable: 'msg' | 'response' | 'true' = 'msg',
 ): Promise<unknown> {
-  if (active >= config.scripts.concurrency)
-    throw new AppError(503, 'SCRIPT_CAPACITY', 'Script execution capacity exceeded');
   if (
     script.length > 65536 ||
     Buffer.byteLength(JSON.stringify(context)) > config.server.payloadLimit
   )
     throw new AppError(413, 'SCRIPT_INPUT_LIMIT', 'Script input limit exceeded');
+  if (resultVariable === 'true') {
+    try {
+      const filter = readSourceFilter(script);
+      if (filter.rule.startsWith('/* MIRTH_SIMPLE_CONDITION_') && !readSimpleCondition(filter.rule))
+        throw new Error('Invalid generated condition');
+      if (!filter.enabled) return true;
+    } catch {
+      throw new AppError(422, 'FILTER_CONFIG_INVALID', 'Invalid source filter configuration');
+    }
+  }
+  if (active >= config.scripts.concurrency)
+    throw new AppError(503, 'SCRIPT_CAPACITY', 'Script execution capacity exceeded');
+
   active++;
   gauge('script_workers_active', active);
   try {
@@ -117,7 +129,9 @@ export async function executeScript(
                 422,
                 ['SCRIPT_TIMEOUT', 'SCRIPT_MEMORY_LIMIT'].includes(result.code)
                   ? result.code
-                  : 'SCRIPT_EXECUTION_FAILED',
+                  : resultVariable === 'true' && readSimpleCondition(script)
+                    ? 'FILTER_INPUT_INVALID'
+                    : 'SCRIPT_EXECUTION_FAILED',
                 'Script execution failed',
               ),
           result.value,

@@ -1,3 +1,4 @@
+import { readSourceFilter, writeSourceFilter } from '../../server/src/utils/sourceFilter';
 import type { Page } from '@playwright/test';
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
@@ -630,17 +631,16 @@ test('advanced filtering validation retry and timeout remain optional and preser
   await expect(page.getByLabel('Custom validation schema editor', { exact: false })).toHaveCount(0);
   await expect(page.getByLabel('Duplicate message protection', { exact: false })).toHaveCount(0);
   await page.getByRole('checkbox', { name: 'Enable source filter' }).check();
-  await expect(page.getByRole('combobox', { name: 'Source filter', exact: true })).toHaveValue(
-    'accept',
-  );
-  await expect(page.getByLabel('Source filter script', { exact: false })).toHaveCount(0);
-  await page.getByRole('combobox', { name: 'Source filter', exact: true }).selectOption('reject');
+  const condition = page.getByRole('group', {
+    name: 'Source filter simple condition',
+    exact: true,
+  });
+  await condition.getByLabel('Field', { exact: true }).fill('patient.id');
+  await condition.getByLabel('Operator', { exact: true }).selectOption('isNotEmpty');
   await page.getByRole('checkbox', { name: 'Enable source filter' }).uncheck();
-  await expect(page.getByLabel('Source filter script', { exact: false })).toHaveCount(0);
+  await expect(condition).not.toBeVisible();
   await page.getByRole('checkbox', { name: 'Enable source filter' }).check();
-  await expect(page.getByRole('combobox', { name: 'Source filter', exact: true })).toHaveValue(
-    'reject',
-  );
+  await expect(condition.getByLabel('Field', { exact: true })).toHaveValue('patient.id');
   await page.getByRole('checkbox', { name: 'Enable source filter' }).uncheck();
   await step(page, 2);
   await page.getByLabel('Destination name').fill('PATIENT_XML_RECEIVER');
@@ -665,7 +665,10 @@ test('advanced filtering validation retry and timeout remain optional and preser
   expect(captured(state, '/api/channel/preview-transformation')[0].body).toMatchObject({
     configuration: {
       validationProfile: { basicSyntax: true },
-      filterScript: '',
+      filterScript: writeSourceFilter(
+        compileSimpleCondition({ version: 1, field: 'patient.id', operator: 'isNotEmpty' }),
+        false,
+      ),
       processingScript: '',
       destinations: [
         { retryEnabled: true, maxRetries: 4, retryIntervalSeconds: 15, timeoutMs: 2500 },
@@ -700,184 +703,93 @@ function legacyChannel() {
   };
 }
 
-for (const choice of [
-  {
-    initialSource: 'return true;',
-    initialDestination: 'return false;',
-    sourceMode: 'accept',
-    destinationMode: 'reject',
-    nextSourceMode: 'reject',
-    nextDestinationMode: 'accept',
-    sourceScript: 'return false;',
-    destinationScript: 'return true;',
-  },
-  {
-    initialSource: 'return false',
-    initialDestination: 'return true',
-    sourceMode: 'reject',
-    destinationMode: 'accept',
-    nextSourceMode: 'accept',
-    nextDestinationMode: 'reject',
-    sourceScript: 'return true;',
-    destinationScript: 'return false;',
-  },
-])
-  test(`simple filter choices save ${choice.nextSourceMode} source and ${choice.nextDestinationMode} destination without typing code`, async ({
-    page,
-  }) => {
-    const channel = {
-      ...existingChannel,
-      filterScript: choice.initialSource,
-      destinations: [
-        { ...existingChannel.destinations[0], filterScript: choice.initialDestination },
-      ],
-    };
-    const state = await workspace(page, { channels: [channel] });
+for (const legacy of [
+  'return true;',
+  'return false;',
+  'true',
+  'false',
+  'return Boolean(msg.patient);',
+]) {
+  test(`legacy source filter stays intact without an editor: ${legacy}`, async ({ page }) => {
+    const state = await workspace(page, {
+      channels: [{ ...existingChannel, filterScript: legacy }],
+    });
     await openExisting(page);
     await openSourceAdvanced(page);
-    const source = page.getByRole('combobox', { name: 'Source filter', exact: true });
-    await expect(source).toHaveValue(choice.sourceMode);
-    await expect(
-      source.getByRole('option', { name: 'Accept all messages', exact: true }),
-    ).toHaveCount(1);
-    await expect(
-      source.getByRole('option', { name: 'Filter all messages', exact: true }),
-    ).toHaveCount(1);
+    await expect(page.getByText('Legacy source filter retained.', { exact: false })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Source filter', exact: true })).toHaveCount(0);
     await expect(page.getByLabel('Source filter script', { exact: false })).toHaveCount(0);
-    await source.selectOption(choice.nextSourceMode);
-    await expect(page.getByLabel('Source filter script', { exact: false })).toHaveCount(0);
-    await step(page, 2);
-    await page.getByText('Advanced destination settings', { exact: true }).click();
-    await page
-      .locator('summary')
-      .filter({ hasText: /^Destination filter/ })
-      .click();
-    const destination = page.getByRole('combobox', { name: 'Destination filter', exact: true });
-    await expect(destination).toHaveValue(choice.destinationMode);
-    await expect(
-      destination.getByRole('option', { name: 'Deliver to this destination', exact: true }),
-    ).toHaveCount(1);
-    await expect(
-      destination.getByRole('option', { name: 'Skip this destination', exact: true }),
-    ).toHaveCount(1);
-    await expect(page.getByLabel('Destination filter script', { exact: false })).toHaveCount(0);
-    await destination.selectOption(choice.nextDestinationMode);
-    await expect(page.getByLabel('Destination filter script', { exact: false })).toHaveCount(0);
+    await page.getByRole('checkbox', { name: 'Enable source filter' }).uncheck();
     await step(page, 3);
     await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-    expect(captured(state, '/api/channel/1')[0].body).toMatchObject({
-      filterScript: choice.sourceScript,
-      destinations: [{ filterScript: choice.destinationScript }],
-    });
-    expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
+    const saved = captured(state, '/api/channel/1')[0].body;
+    expect(readSourceFilter(String(saved.filterScript))).toEqual({ enabled: false, rule: legacy });
     expect(state.externalRequests).toEqual([]);
   });
+}
 
-test('advanced filter conditions survive simple choices and disabling the source filter', async ({
-  page,
-}) => {
-  const sourceScript = 'return Boolean(msg.patient);';
-  const destinationScript = 'return msg.patient.active === true;';
-  const editedSource = 'return Boolean(msg.patient && msg.patient.active);';
-  const editedDestination = 'return msg.patient.identifier !== undefined;';
-  const channel = {
-    ...existingChannel,
-    filterScript: sourceScript,
-    destinations: [{ ...existingChannel.destinations[0], filterScript: destinationScript }],
-  };
-  const state = await workspace(page, { channels: [channel] });
-  await openExisting(page);
+test('disabled source condition survives create save reopen and re-enable', async ({ page }) => {
+  const state = await workspace(page, { channels: [] });
+  await newJsonXmlChannel(page);
+  await step(page, 0);
   await openSourceAdvanced(page);
-  const source = page.getByRole('combobox', { name: 'Source filter', exact: true });
-  await expect(source).toHaveValue('custom');
-  await expect(page.getByLabel('Source filter script', { exact: false })).not.toBeVisible();
-  await page.getByText('Advanced source filter script', { exact: true }).click();
-  await expect(page.getByLabel('Source filter script', { exact: false })).toHaveValue(sourceScript);
-  await page.getByLabel('Source filter script', { exact: false }).fill(editedSource);
-  await source.selectOption('accept');
-  await expect(page.getByLabel('Source filter script', { exact: false })).toHaveCount(0);
-  await source.selectOption('reject');
-  await source.selectOption('custom');
-  await expect(page.getByLabel('Source filter script', { exact: false })).toBeVisible();
-  await expect(page.getByLabel('Source filter script', { exact: false })).toHaveValue(editedSource);
-  await page.getByRole('checkbox', { name: 'Enable source filter' }).uncheck();
-  await expect(source).not.toBeVisible();
-  await page.getByRole('checkbox', { name: 'Enable source filter' }).check();
-  await expect(source).toHaveValue('custom');
-  await expect(page.getByLabel('Source filter script', { exact: false })).toHaveValue(editedSource);
-  await step(page, 2);
-  await page.getByText('Advanced destination settings', { exact: true }).click();
-  await page
-    .locator('summary')
-    .filter({ hasText: /^Destination filter/ })
-    .click();
-  const destination = page.getByRole('combobox', { name: 'Destination filter', exact: true });
-  await expect(destination).toHaveValue('custom');
-  await expect(page.getByLabel('Destination filter script', { exact: false })).not.toBeVisible();
-  await page.getByText('Advanced destination filter script', { exact: true }).click();
-  await expect(page.getByLabel('Destination filter script', { exact: false })).toHaveValue(
-    destinationScript,
-  );
-  await page.getByLabel('Destination filter script', { exact: false }).fill(editedDestination);
-  await destination.selectOption('reject');
-  await expect(page.getByLabel('Destination filter script', { exact: false })).toHaveCount(0);
-  await destination.selectOption('accept');
-  await destination.selectOption('custom');
-  await expect(page.getByLabel('Destination filter script', { exact: false })).toBeVisible();
-  await expect(page.getByLabel('Destination filter script', { exact: false })).toHaveValue(
-    editedDestination,
-  );
+  const enabled = page.getByRole('checkbox', { name: 'Enable source filter' });
+  await expect(enabled).not.toBeChecked();
+  await enabled.check();
+  const condition = page.getByRole('group', {
+    name: 'Source filter simple condition',
+    exact: true,
+  });
+  await condition.getByLabel('Field', { exact: true }).fill('patient.id');
+  await condition.getByLabel('Operator', { exact: true }).selectOption('isNotEmpty');
+  await enabled.uncheck();
+  await expect(condition).not.toBeVisible();
   await step(page, 3);
   await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-  expect(captured(state, '/api/channel/1')[0].body).toMatchObject({
-    filterScript: editedSource,
-    destinations: [{ filterScript: editedDestination }],
-  });
+  const saved = String(captured(state, '/api/channel')[0].body.filterScript);
+  const rule = compileSimpleCondition({ version: 1, field: 'patient.id', operator: 'isNotEmpty' });
+  expect(readSourceFilter(saved)).toEqual({ enabled: false, rule });
+  await page
+    .getByRole('dialog', { name: 'Channel saved', exact: true })
+    .getByLabel('Close dialog')
+    .click();
+  await openExisting(page, 'SYNTHETIC_JSON_TO_XML');
+  await openSourceAdvanced(page);
+  await expect(enabled).not.toBeChecked();
+  await expect(condition).not.toBeVisible();
+  await enabled.check();
+  await expect(condition.getByLabel('Field', { exact: true })).toHaveValue('patient.id');
+  await expect(condition.getByLabel('Operator', { exact: true })).toHaveValue('isNotEmpty');
+  await expect(condition.getByLabel('Value', { exact: true })).toHaveCount(0);
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  expect(captured(state, '/api/channel/2')[0].body.filterScript).toBe(rule);
 });
 
-test('legacy bare boolean filters stay unchanged until an explicit simple behavior is selected', async ({
+test('legacy source filter replacement is explicit and requires a valid condition', async ({
   page,
 }) => {
-  const channel = {
-    ...existingChannel,
-    filterScript: 'false',
-    destinations: [{ ...existingChannel.destinations[0], filterScript: 'false' }],
-  };
-  const state = await workspace(page, { channels: [channel] });
-  for (const replace of [false, true]) {
-    await openExisting(page);
-    await openSourceAdvanced(page);
-    const source = page.getByRole('combobox', { name: 'Source filter', exact: true });
-    await expect(source).toHaveValue('custom');
-    await expect(page.getByLabel('Source filter script', { exact: false })).not.toBeVisible();
-    await expect(page.getByLabel('Source filter script', { exact: false })).toHaveValue('false');
-    if (replace) await source.selectOption('reject');
-    await step(page, 2);
-    await page.getByText('Advanced destination settings', { exact: true }).click();
-    await page
-      .locator('summary')
-      .filter({ hasText: /^Destination filter/ })
-      .click();
-    const destination = page.getByRole('combobox', { name: 'Destination filter', exact: true });
-    await expect(destination).toHaveValue('custom');
-    await expect(page.getByLabel('Destination filter script', { exact: false })).not.toBeVisible();
-    await expect(page.getByLabel('Destination filter script', { exact: false })).toHaveValue(
-      'false',
-    );
-    if (replace) await destination.selectOption('reject');
-    await step(page, 3);
-    await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-    expect(captured(state, '/api/channel/1').at(-1)?.body).toMatchObject({
-      filterScript: replace ? 'return false;' : 'false',
-      destinations: [{ filterScript: replace ? 'return false;' : 'false' }],
-    });
-  }
-  expect(captured(state, '/api/channel/1')).toHaveLength(2);
-  expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
-  expect(state.externalRequests).toEqual([]);
+  const state = await workspace(page, {
+    channels: [{ ...existingChannel, filterScript: 'return false;' }],
+  });
+  await openExisting(page);
+  await openSourceAdvanced(page);
+  await page.getByRole('button', { name: 'Replace with simple condition', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(
+    page.getByRole('alert').filter({ hasText: 'Complete the source filter condition' }),
+  ).toBeVisible();
+  const condition = page.getByRole('group', {
+    name: 'Source filter simple condition',
+    exact: true,
+  });
+  await condition.getByLabel('Field', { exact: true }).fill('patient.department');
+  await condition.getByLabel('Value', { exact: true }).fill('LAB');
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  expect(
+    readSimpleCondition(String(captured(state, '/api/channel/1')[0].body.filterScript)),
+  ).toMatchObject({ field: 'patient.department', operator: 'eq', value: 'LAB' });
 });
 
 test('editing preserves advanced legacy settings while removing the mandatory change summary', async ({
@@ -985,7 +897,6 @@ test('simple source and destination conditions save safely without opening a scr
   await page.locator('details[aria-label="Source validation settings"] > summary').click();
   await page.getByRole('radio', { name: 'Basic validation', exact: true }).check();
   await page.getByRole('checkbox', { name: 'Enable source filter' }).check();
-  await page.getByRole('combobox', { name: 'Source filter', exact: true }).selectOption('simple');
   const sourceCondition = page.getByRole('group', {
     name: 'Source filter simple condition',
     exact: true,

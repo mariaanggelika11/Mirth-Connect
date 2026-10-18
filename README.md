@@ -162,6 +162,8 @@ Script berjalan di QuickJS WebAssembly dalam worker terpisah, dengan input/outpu
 
 Transformer/template harus mengembalikan JSON/string yang valid; filter mengembalikan boolean; response script mengembalikan response. Script async/network tidak didukung. Tinjau script existing terhadap perubahan parser MSH dan repeated fields.
 
+Source Filter memakai checkbox ON/OFF dan Simple condition tanpa dropdown accept/reject/custom atau editor source script. OFF menyimpan aturan valid terakhir sehingga tetap tersedia setelah Save/reopen; filter lama dipertahankan dengan notice dan penggantian eksplisit. Tidak ada migrasi database. Lihat [panduan Source Filter](docs/MIRTH_LITE_UI.md#filter-tanpa-script) untuk semantik field/operator dan compatibility.
+
 Simple condition dan mapping menyimpan metadata versi dalam script canonical yang sama dengan pipeline existing. Path menggunakan own properties dan menolak prototype access; nilai diperlakukan sebagai data. Operator numerik memerlukan angka berhingga; field yang hilang tidak memenuhi comparison, termasuk not-equal. XML dinormalisasi dengan parser terbatas hanya untuk script visual canonical; custom script lama tetap menerima bentuk input sebelumnya. Required/default mapping diperiksa setelah source filter, sehingga pesan valid yang difilter tidak dipaksa menjalani transformation.
 
 ## Retry, monitoring dan retention

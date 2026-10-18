@@ -1,3 +1,5 @@
+import { compileSimpleCondition } from '../src/utils/simpleCondition.js';
+import { readSourceFilter, writeSourceFilter } from '../src/utils/sourceFilter.js';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 const state = vi.hoisted(() => ({
@@ -378,4 +380,53 @@ describe('Channel transaction usage (database session mocked)', () => {
       expect(res.status).toBe(200);
       expect(state.inputs.action).toBe(status === 'RUNNING' ? 'START_CHANNEL' : 'STOP_CHANNEL');
     });
+});
+
+describe('Source filter API persistence and negative validation', () => {
+  it('persists disabled rules exactly in channel storage and encrypted initial revision', async () => {
+    const rule = compileSimpleCondition({
+      version: 1,
+      field: 'patient.id',
+      operator: 'isNotEmpty',
+    });
+    const filterScript = writeSourceFilter(rule, false);
+    const originalQuery = state.query.getMockImplementation()!;
+    let persistedFilter = '';
+    state.query.mockImplementation(async (sql: string, inputs: Record<string, unknown>) => {
+      if (sql.includes('INSERT INTO "Channels"') || sql.includes('UPDATE "Channels" SET name='))
+        persistedFilter = String(inputs.filter);
+      const result = await originalQuery(sql, inputs);
+      if (sql.includes('SELECT * FROM "Channels"'))
+        result.recordset = result.recordset.map((row: Record<string, unknown>) => ({
+          ...row,
+          filter_script: persistedFilter,
+        }));
+      return result;
+    });
+    const response = await request(app)
+      .post('/api/channel')
+      .set('Authorization', 'Bearer ' + token)
+      .send({ ...payload, filterScript });
+    expect(response.status).toBe(201);
+    const stored = state.query.mock.calls.find(([sql]) =>
+      sql.includes('INSERT INTO "Channels"'),
+    )?.[1] as Record<string, unknown>;
+    expect(stored.filter).toBe(filterScript);
+    const revision = state.query.mock.calls.find(([sql]) =>
+      sql.includes('INSERT INTO "ChannelRevisions"'),
+    )?.[1] as Record<string, unknown>;
+    const snapshot = JSON.parse(decrypt(String(revision.config)));
+    expect(readSourceFilter(snapshot.filterScript)).toEqual({ enabled: false, rule });
+    expect(state.commit).toHaveBeenCalledOnce();
+  });
+  it('rejects malformed conditions before writes without leaking their values', async () => {
+    const filterScript = '/* MIRTH_SIMPLE_CONDITION_V1:%SYNTHETIC-PHI */\nreturn true;';
+    const response = await request(app)
+      .post('/api/channel')
+      .set('Authorization', 'Bearer ' + token)
+      .send({ ...payload, filterScript });
+    expect(response.status).toBe(400);
+    expect(JSON.stringify(response.body)).not.toContain('SYNTHETIC-PHI');
+    expect(state.begin).not.toHaveBeenCalled();
+  });
 });

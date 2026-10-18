@@ -28,6 +28,7 @@ Errors return success=false, code, safe message and requestId; central handler a
 | DEAD_LETTER_UNAVAILABLE / RESEND_UNAVAILABLE | 409; operation not valid for message state |
 | INVALID_ASSIGNEE | 400; assignment requires existing operator/admin |
 | DESTINATION_HOST_DENIED / DESTINATION_ADDRESS_DENIED | 403; outbound policy |
+| FILTER_CONFIG_INVALID | 422; corrupted reserved source filter metadata; IN-ERROR, no delivery |
 | SCRIPT_TIMEOUT / SCRIPT_EXECUTION_FAILED / SCRIPT_CAPACITY | sandbox/time/capacity diagnostic |
 | TRANSFORMATION_PREVIEW_INVALID / DRY_RUN_INVALID | 400; invalid test configuration identifies the affected source/destination setting without echoing input |
 | PAYLOAD_TOO_LARGE / UPLOAD_LIMIT | body/upload exceeded bound |

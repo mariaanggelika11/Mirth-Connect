@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { config } from '../config/env.js';
 import type { RequestHandler } from 'express';
 import { AppError } from './errors.js';
+import { readSourceFilter } from './sourceFilter.js';
+import { readSimpleCondition } from './simpleCondition.js';
 const script = z.string().max(65536).default('');
 const dataType = z.enum(['HL7V2', 'JSON', 'XML', 'TEXT']);
 const xmlPath = z
@@ -103,7 +105,14 @@ export const channelSchema = z.object({
   destinations: z.array(destinationSchema).max(50),
   processingScript: script,
   responseScript: script,
-  filterScript: script,
+  filterScript: script.refine((value) => {
+    try {
+      const { rule } = readSourceFilter(value);
+      return !rule.startsWith('/* MIRTH_SIMPLE_CONDITION_') || !!readSimpleCondition(rule);
+    } catch {
+      return false;
+    }
+  }, 'Invalid source filter condition.'),
 });
 // A revision editor never needs to receive/repost credentials or hidden script bodies.
 // Only this explicit public subset can be patched; all other fields are retained server-side.

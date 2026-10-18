@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { Button } from '../../components/ui/Button';
 import {
   compileSimpleCondition,
   readSimpleCondition,
@@ -28,7 +29,9 @@ export function FilterEditor({ kind, value, onChange, onValidityChange }: Props)
   const label = kind === 'source' ? 'Source filter' : 'Destination filter';
   const labelId = useId();
   const errorId = `${labelId}-condition-error`;
-  const [mode, setMode] = useState<FilterMode>(() => modeFor(value));
+  const [mode, setMode] = useState<FilterMode>(() =>
+    kind === 'source' && !value.trim() ? 'simple' : modeFor(value),
+  );
   const [condition, setCondition] = useState<SimpleConditionConfig>(
     () => readSimpleCondition(value) || emptyCondition(),
   );
@@ -44,15 +47,19 @@ export function FilterEditor({ kind, value, onChange, onValidityChange }: Props)
   useEffect(() => {
     if (lastValue.current === value) return;
     lastValue.current = value;
-    const nextMode = modeFor(value);
+    const nextMode = kind === 'source' && !value.trim() ? 'simple' : modeFor(value);
     setMode(nextMode);
     const parsed = readSimpleCondition(value);
     if (parsed) setCondition(parsed);
     if (nextMode === 'custom') setCustomScript(value);
     setConditionError('');
-    validityCallback.current?.(true);
+    validityCallback.current?.(!(kind === 'source' && !value.trim()));
     setExpanded(false);
   }, [value]);
+
+  useEffect(() => {
+    if (kind === 'source' && !value.trim()) validityCallback.current?.(false);
+  }, [kind, value]);
 
   function update(script: string) {
     lastValue.current = script;
@@ -82,42 +89,55 @@ export function FilterEditor({ kind, value, onChange, onValidityChange }: Props)
     validityCallback.current?.(true);
     update(nextMode === 'custom' ? customScript : `return ${nextMode === 'accept'};`);
   }
-  const presenceCondition = condition.operator === 'exists' || condition.operator === 'notExists';
+  const presenceCondition = ['exists', 'notExists', 'isEmpty', 'isNotEmpty'].includes(
+    condition.operator,
+  );
   const numericCondition = ['gt', 'gte', 'lt', 'lte'].includes(condition.operator);
 
   return (
     <div className="form-section">
-      <label className="field">
-        <span id={labelId}>{label}</span>
-        <select
-          aria-labelledby={labelId}
-          value={mode}
-          onChange={(event) => choose(event.target.value as FilterMode)}
-        >
-          <option value="accept">
-            {kind === 'source' ? 'Accept all messages' : 'Deliver to this destination'}
-          </option>
-          <option value="simple">Simple condition</option>
-          <option value="custom">Custom condition (advanced)</option>
-          <option value="reject">
-            {kind === 'source' ? 'Filter all messages' : 'Skip this destination'}
-          </option>
-        </select>
-      </label>
+      {kind === 'destination' && (
+        <label className="field">
+          <span id={labelId}>{label}</span>
+          <select
+            aria-labelledby={labelId}
+            value={mode}
+            onChange={(event) => choose(event.target.value as FilterMode)}
+          >
+            <option value="accept">Deliver to this destination</option>
+            <option value="simple">Simple condition</option>
+            <option value="custom">Custom condition (advanced)</option>
+            <option value="reject">Skip this destination</option>
+          </select>
+        </label>
+      )}
+      {kind === 'source' && mode !== 'simple' && (
+        <div className="form-section">
+          <p role="status">
+            Legacy source filter retained. Its existing behavior remains active until you disable it
+            or replace it with a simple condition.
+          </p>
+          <Button type="button" variant="secondary" onClick={() => choose('simple')}>
+            Replace with simple condition
+          </Button>
+        </div>
+      )}
+      {kind === 'source' && mode === 'simple' && (
+        <p className="muted">
+          Configure a rule using a field from your actual message. JSON: patient.id; XML:
+          Patient.ID; HL7: MSH.9. Nested paths use dots; array indexes start at 0.
+        </p>
+      )}
       {mode === 'simple' && (
         <fieldset className="form-section" aria-label={`${label} simple condition`}>
-          <legend>
-            {kind === 'source'
-              ? 'Process only matching valid messages'
-              : 'Send only matching messages'}
-          </legend>
+          <legend>{kind === 'source' ? 'Simple condition' : 'Send only matching messages'}</legend>
           <div className="form-grid">
             <label className="field">
               <span>Field</span>
               <input
                 maxLength={256}
                 value={condition.field}
-                placeholder="message_type"
+                placeholder="patient.id"
                 spellCheck={false}
                 aria-invalid={!!conditionError}
                 aria-describedby={conditionError ? errorId : undefined}
@@ -137,7 +157,9 @@ export function FilterEditor({ kind, value, onChange, onValidityChange }: Props)
                 }
               >
                 <option value="eq">Equals</option>
-                <option value="neq">Does not equal</option>
+                <option value="neq">Not equals</option>
+                <option value="isEmpty">Is empty</option>
+                <option value="isNotEmpty">Is not empty</option>
                 <option value="contains">Contains</option>
                 <option value="startsWith">Starts with</option>
                 <option value="exists">Exists</option>
@@ -170,7 +192,7 @@ export function FilterEditor({ kind, value, onChange, onValidityChange }: Props)
           )}
         </fieldset>
       )}
-      {mode === 'custom' && (
+      {kind === 'destination' && mode === 'custom' && (
         <details
           className="advanced-section"
           open={expanded}
@@ -179,11 +201,7 @@ export function FilterEditor({ kind, value, onChange, onValidityChange }: Props)
           <summary>Advanced {kind} filter script</summary>
           <label className="field">
             <span>{label} script</span>
-            <small>
-              {kind === 'source'
-                ? 'Return true to accept a message, or false to filter it.'
-                : 'Return true to deliver a message, or false to skip this destination.'}
-            </small>
+            <small>Return true to deliver a message, or false to skip this destination.</small>
             <textarea
               aria-label={`${label} script`}
               rows={4}

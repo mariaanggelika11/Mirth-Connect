@@ -1,3 +1,4 @@
+import { readSourceFilter, writeSourceFilter } from '../../../../server/src/utils/sourceFilter';
 import { DestinationEditor } from './DestinationEditor';
 import type { ChannelScriptEditor, MessageValidation } from './channelDraft';
 import {
@@ -117,8 +118,9 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       setProfileText(JSON.stringify(value.validationProfile || {}, null, 2));
       setProfileBaseline(JSON.stringify(value.validationProfile || {}, null, 2));
       setValidation(validationChoice(value.validationProfile));
-      setFilterEnabled(!!value.filterScript?.trim());
-      setRetainedFilter(value.filterScript || '');
+      const storedFilter = readSourceFilter(value.filterScript);
+      setFilterEnabled(storedFilter.enabled);
+      setRetainedFilter(storedFilter.rule);
       setBaseline(JSON.stringify(value));
       setStep(0);
       setError('');
@@ -615,27 +617,37 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                       type="checkbox"
                       checked={filterEnabled}
                       onChange={(e) => {
-                        setFilterEnabled(e.target.checked);
-                        if (!e.target.checked) setRetainedFilter(draft.filterScript || '');
-                        setDraft((d) => ({
-                          ...d,
-                          filterScript: e.target.checked ? retainedFilter : '',
-                        }));
+                        try {
+                          const script = writeSourceFilter(retainedFilter, e.target.checked);
+                          setFilterEnabled(e.target.checked);
+                          setDraft((d) => ({ ...d, filterScript: script }));
+                        } catch (error) {
+                          setError(
+                            error instanceof Error ? error.message : 'Unable to update filter.',
+                          );
+                        }
                       }}
                     />
                     Enable source filter
                   </label>
-                  {!filterEnabled && <p className="muted">All valid messages are accepted.</p>}
+                  <p className="muted">
+                    {filterEnabled
+                      ? 'Matching messages continue through the channel.'
+                      : 'When disabled, messages bypass source filtering.'}
+                  </p>
                   <div
                     style={{ display: filterEnabled ? 'block' : 'none' }}
                     aria-hidden={!filterEnabled}
                   >
                     <FilterEditor
                       kind="source"
-                      value={filterEnabled ? draft.filterScript || '' : retainedFilter}
+                      value={retainedFilter}
                       onChange={(script) => {
                         setRetainedFilter(script);
-                        setDraft((d) => ({ ...d, filterScript: script }));
+                        setDraft((d) => ({
+                          ...d,
+                          filterScript: writeSourceFilter(script, filterEnabled),
+                        }));
                       }}
                       onValidityChange={(valid) => {
                         setSourceFilterValid(valid);
@@ -810,15 +822,11 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                     <div>
                       <dt>Filter</dt>
                       <dd>
-                        {!draft.filterScript?.trim()
-                          ? 'Off'
-                          : readSimpleCondition(draft.filterScript)
+                        {!filterEnabled
+                          ? 'Disabled'
+                          : readSimpleCondition(retainedFilter)
                             ? 'Simple condition'
-                            : /^return\s+true\s*;?$/.test(draft.filterScript.trim())
-                              ? 'Accept all messages'
-                              : /^return\s+false\s*;?$/.test(draft.filterScript.trim())
-                                ? 'Filter all messages'
-                                : 'Custom condition'}
+                            : 'Legacy filter retained'}
                       </dd>
                     </div>
                     <div>

@@ -151,7 +151,7 @@ describe('Simple conditions use the existing isolated filter pipeline', () => {
     await expect(matches(condition(), '{"message_type":"ADT"}')).resolves.toBe(true);
     await expect(matches(condition('MSH.10', 'eq', 'ID123'), sample)).resolves.toBe(true);
     await expect(matches(condition(), 'not structured data')).rejects.toMatchObject({
-      code: 'SCRIPT_EXECUTION_FAILED',
+      code: 'FILTER_INPUT_INVALID',
     });
     await expect(executeScript('return false;', { msg: {} }, 'true')).resolves.toBe(false);
   });
@@ -217,5 +217,23 @@ describe('Simple conditions use the existing isolated filter pipeline', () => {
       results: [],
     });
     expect(JSON.stringify(missingRequired.warnings)).not.toContain('RM-000123');
+  });
+});
+
+describe('Source condition empty-value semantics', () => {
+  it('handles missing, null, empty, scalar and structured fields consistently', async () => {
+    for (const [payload, empty, notEmpty] of [
+      [{}, true, false],
+      [{ field: null }, true, false],
+      [{ field: '' }, true, false],
+      [{ field: 0 }, false, true],
+      [{ field: false }, false, true],
+      [{ field: ' ' }, false, true],
+      [{ field: [] }, false, false],
+      [{ field: {} }, false, false],
+    ] as [unknown, boolean, boolean][]) {
+      await expect(matches(condition('field', 'isEmpty'), payload)).resolves.toBe(empty);
+      await expect(matches(condition('field', 'isNotEmpty'), payload)).resolves.toBe(notEmpty);
+    }
   });
 });

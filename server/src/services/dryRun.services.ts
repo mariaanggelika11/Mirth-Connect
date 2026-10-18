@@ -30,6 +30,8 @@ export function invalidPreviewConfiguration(error: z.ZodError, code: string): Ap
         path[2] === 'inboundDataType'
           ? 'Select a supported input format in Source.'
           : 'Select a supported source connector in Source.';
+    else if (path[1] === 'filterScript')
+      message = 'Complete the source filter condition or review the retained legacy configuration.';
     else if (path[1] === 'validationProfile')
       message =
         'The custom validation schema must be a JSON object. Check its settings in Advanced source settings.';
@@ -83,6 +85,8 @@ function previewFailureMessage(stage: string, code: string): string {
       'Field mapping could not read the sample. Check its input format, structure and size.',
     FILTER_INPUT_INVALID:
       'The filter could not read the sample. Check its input format and field paths.',
+    FILTER_CONFIG_INVALID:
+      'The saved filter configuration is invalid. Replace or restore its condition before testing.',
     FILTER_RESULT_INVALID:
       'The filter must return true or false. Review its condition or advanced script.',
     INVALID_ENDPOINT: 'Check the destination endpoint and connector settings.',
