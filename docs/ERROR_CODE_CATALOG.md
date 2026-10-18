@@ -28,6 +28,8 @@ Errors return success=false, code, safe message and requestId; central handler a
 | DEAD_LETTER_UNAVAILABLE / RESEND_UNAVAILABLE | 409; operation not valid for message state |
 | INVALID_ASSIGNEE | 400; assignment requires existing operator/admin |
 | DESTINATION_HOST_DENIED / DESTINATION_ADDRESS_DENIED | 403; outbound policy |
+| FIELD_VALIDATION_FAILED | 422; input field rules rejected the payload, safe details contain field/type/reason only, IN-ERROR and no delivery |
+| INVALID_FIELD_RULES / INVALID_VALIDATION_PROFILE / VALIDATION_FORMAT_UNSUPPORTED | 400; incomplete/unsupported rule configuration or incompatible input format, never treated as payload success |
 | FILTER_CONFIG_INVALID | 422; corrupted reserved source filter metadata; IN-ERROR, no delivery |
 | SCRIPT_TIMEOUT / SCRIPT_EXECUTION_FAILED / SCRIPT_CAPACITY | sandbox/time/capacity diagnostic |
 | TRANSFORMATION_PREVIEW_INVALID / DRY_RUN_INVALID | 400; invalid test configuration identifies the affected source/destination setting without echoing input |

@@ -1,3 +1,4 @@
+import { messageErrorCode, storedValidationFailure } from '../utils/validationDiagnostics.js';
 import { maskPayload } from '../utils/masking.js';
 import { querySchema } from './monitor/query.js';
 import { parsed, logRow, sourceMetadata } from './monitor/mapping.js';
@@ -84,7 +85,7 @@ export const getMessages = async (req: Request, res: Response, next: NextFunctio
         level: m.last_error ? 'ERROR' : 'INFO',
         retryCount: m.retry_count,
         nextRetryAt: m.next_retry_at,
-        errorCode: m.last_error,
+        errorCode: messageErrorCode(m.last_error),
         destinationLogs: logs
           .filter((l) => (m.direction === 'IN' ? l.inbound_message_id : l.message_id) === m.id)
           .map((l) => logRow(l, false)),
@@ -128,9 +129,10 @@ export const getMessageDetail = async (req: Request, res: Response, next: NextFu
         retryCount: m.retry_count,
         nextRetryAt: m.next_retry_at,
         correlationId: m.correlation_id,
-        errorCode: m.last_error,
+        errorCode: messageErrorCode(m.last_error),
         channelRevision: m.channel_revision,
         ...sourceMetadata(m),
+        validation: storedValidationFailure(m.last_error),
         idempotencyApplied: !!(m.dedupe_key || m.idempotency_key_hash),
         reconciliation:
           m.reconciliation && typeof m.reconciliation === 'object'

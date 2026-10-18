@@ -26,6 +26,59 @@ export const xmlProfileSchema = z
       .optional(),
   })
   .strict();
+export const legacyValidationProfileSchema = z
+  .object({
+    basicSyntax: z.boolean().optional(),
+    jsonSchema: z.record(z.string(), z.unknown()).optional(),
+    xml: xmlProfileSchema.optional(),
+    hl7: z
+      .object({
+        messageTypes: z.array(z.string().max(50)).max(50).optional(),
+        versions: z.array(z.string().max(20)).max(20).optional(),
+        requiredFields: z
+          .array(z.string().regex(/^[A-Z0-9]{3}\.[1-9][0-9]{0,2}$/))
+          .max(50)
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    script: z.string().max(65536).optional(),
+  })
+  .strict();
+const retainedFieldRuleSchema = z
+  .object({
+    field: z.string().max(256),
+    type: z.enum(['text', 'number', 'boolean', 'date']),
+    required: z.boolean(),
+    allowedValues: z
+      .array(
+        z
+          .string()
+          .max(300)
+          .regex(/^[^\r\n]*$/, 'Allowed values must be single-line text.'),
+      )
+      .max(50)
+      .optional(),
+    minLength: z.number().finite().optional(),
+    maxLength: z.number().finite().optional(),
+    minimum: z.number().finite().optional(),
+    maximum: z.number().finite().optional(),
+  })
+  .strict();
+export const validationProfileSchema = z.union([
+  legacyValidationProfileSchema,
+  z
+    .object({
+      version: z.literal(1),
+      mode: z.enum(['NONE', 'FIELDS', 'CUSTOM', 'LEGACY']),
+      // Incomplete inactive rules remain editable, with a safe bounded structure.
+      // Validate active rule semantics in the service, without executing inactive settings.
+      fieldRules: z.array(retainedFieldRuleSchema).max(50),
+      custom: z.record(z.string(), z.unknown()),
+      legacy: z.record(z.string(), z.unknown()).optional(),
+    })
+    .strict(),
+]);
 export const credentials = z.object({
   username: z
     .string()
@@ -74,24 +127,7 @@ export const destinationSchema = z.object({
   timeoutMs: z.number().int().min(100).max(120000).default(10000),
 });
 export const channelSchema = z.object({
-  validationProfile: z
-    .object({
-      basicSyntax: z.boolean().optional(),
-      jsonSchema: z.record(z.string(), z.unknown()).optional(),
-      xml: xmlProfileSchema.optional(),
-      hl7: z
-        .object({
-          messageTypes: z.array(z.string().max(50)).max(50).optional(),
-          versions: z.array(z.string().max(20)).max(20).optional(),
-          requiredFields: z
-            .array(z.string().regex(/^[A-Z0-9]{3}\.[1-9][0-9]{0,2}$/))
-            .max(50)
-            .optional(),
-        })
-        .optional(),
-      script: z.string().max(65536).optional(),
-    })
-    .default({}),
+  validationProfile: validationProfileSchema.default({}),
   idempotencyMode: z
     .enum(['OPTIONAL', 'REQUIRED', 'DISABLED'])
     .default(config.inbound.idempotencyMode),

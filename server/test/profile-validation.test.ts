@@ -111,6 +111,73 @@ describe('Per-channel synthetic healthcare profiles', () => {
       'Invalid JSON Schema',
     );
   });
+  it('shows why JSON Schema date format is unavailable rather than silently ignoring it', () => {
+    expect(() =>
+      validateProfileConfiguration({
+        jsonSchema: {
+          type: 'object',
+          properties: { date_of_birth: { type: 'string', format: 'date' } },
+        },
+      }),
+    ).toThrow('Use a date field rule for YYYY-MM-DD values.');
+  });
+  it('applies new custom JSON Schema to the actual message without coercing field types', async () => {
+    const profile = {
+      version: 1 as const,
+      mode: 'CUSTOM' as const,
+      fieldRules: [],
+      custom: {
+        jsonSchema: {
+          type: 'object',
+          properties: {
+            patient_id: { type: 'string', minLength: 1 },
+            name: { type: 'string', minLength: 1 },
+            gender: { type: 'string', enum: ['M', 'F'] },
+          },
+          required: ['patient_id', 'name', 'gender'],
+        },
+      },
+    };
+    validateProfileConfiguration(profile, 'JSON');
+    const payload = { patient_id: 'SYNTHETIC-ID', name: 'Synthetic Patient', gender: 'F' };
+    await expect(validatePayload(payload, 'JSON', profile)).resolves.toBeUndefined();
+    for (const invalid of [
+      { ...payload, patient_id: undefined },
+      { ...payload, patient_id: '' },
+      { ...payload, patient_id: 123 },
+      { ...payload, gender: 'X' },
+    ])
+      await expect(validatePayload(invalid, 'JSON', profile)).rejects.toMatchObject({
+        code: 'PAYLOAD_SCHEMA_REJECTED',
+        message: 'Payload does not match channel JSON Schema',
+      });
+  });
+  it('runs custom profile scripts in the existing bounded boolean-result sandbox', async () => {
+    const settings = (script: string) => ({
+      version: 1 as const,
+      mode: 'CUSTOM' as const,
+      fieldRules: [],
+      custom: { script },
+    });
+    await expect(
+      validatePayload({ active: true }, 'JSON', settings('return msg.active === true;')),
+    ).resolves.toBeUndefined();
+    await expect(
+      validatePayload({ active: false }, 'JSON', settings('return msg.active === true;')),
+    ).rejects.toMatchObject({ code: 'PAYLOAD_VALIDATION_REJECTED' });
+    await expect(validatePayload({}, 'JSON', settings('return "true";'))).rejects.toMatchObject({
+      code: 'FILTER_RESULT_INVALID',
+    });
+    await expect(validatePayload({}, 'JSON', settings('while(true){}'))).rejects.toMatchObject({
+      code: 'SCRIPT_TIMEOUT',
+    });
+    await expect(
+      validatePayload({}, 'JSON', settings('throw new Error("SYNTHETIC_PRIVATE_EXCEPTION");')),
+    ).rejects.toMatchObject({
+      code: 'SCRIPT_EXECUTION_FAILED',
+      message: 'Script execution failed',
+    });
+  });
   it('sandbox validation rejects payload and XML declarations', async () => {
     await expect(validatePayload({}, 'JSON', { script: 'return false;' })).rejects.toMatchObject({
       code: 'PAYLOAD_VALIDATION_REJECTED',

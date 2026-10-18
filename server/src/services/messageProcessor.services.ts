@@ -1,5 +1,6 @@
 import { serialize, convertPayload } from './engine/conversion.js';
-import { validatePayload } from './profileValidation.services.js';
+import { persistValidationFailure } from '../utils/validationDiagnostics.js';
+import { validatePayload, FieldValidationError } from './profileValidation.services.js';
 import { attempt } from './engine/delivery.js';
 import { recordAttempt, updateAggregate } from './engine/repository.js';
 export { finalStatus, retryDecision } from './engine/policy.js';
@@ -370,7 +371,13 @@ async function processInboundCore(
     await pool
       .request()
       .input('id', inboundMessageId)
-      .input('error', safeError(error))
+      .input(
+        'error',
+        persistValidationFailure(
+          safeError(error),
+          error instanceof FieldValidationError ? error.results : undefined,
+        ),
+      )
       .query(
         'UPDATE "Messages" SET status=\'IN-ERROR\',last_error=@error,updated_at=CURRENT_TIMESTAMP WHERE id=@id',
       );

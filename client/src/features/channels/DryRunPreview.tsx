@@ -1,3 +1,6 @@
+import type { ValidationRuleResult } from '../../../../server/src/utils/validationRules';
+import { ValidationResults } from '../../components/ui/ValidationResults';
+
 export interface DryRunResult {
   success: boolean;
   accepted: boolean;
@@ -7,6 +10,7 @@ export interface DryRunResult {
     format: string;
     payload: unknown;
     validation: string;
+    validationResults?: ValidationRuleResult[];
     filter: string;
     transformation: string;
     code?: string;
@@ -37,7 +41,7 @@ export const previewStageLabels: Record<string, string> = {
   FILTERED: 'Filtered',
   PASS_THROUGH: 'Pass-through',
   TRANSFORMED: 'Transformed',
-  SKIPPED: 'Skipped',
+  SKIPPED: 'Not run',
   APPLIED: 'Applied',
   CONVERTED: 'Converted',
   NOT_CONFIGURED: 'Not configured',
@@ -49,7 +53,7 @@ export function DryRunPreview({ result }: { result: DryRunResult }) {
       <div className={`alert ${result.success ? '' : 'error'}`}>
         <strong>Network delivery: {result.networkDelivery || 'NOT_SENT'}</strong>
         <p>
-          {result.success ? 'Preview completed' : 'Validation failed'} in {result.elapsedMs} ms. No
+          {result.success ? 'Preview completed' : 'Preview failed'} in {result.elapsedMs} ms. No
           message was sent. Destination responses are available after a real delivery in Messages.
         </p>
       </div>
@@ -78,6 +82,7 @@ export function DryRunPreview({ result }: { result: DryRunResult }) {
               </dd>
             </div>
           </dl>
+          <ValidationResults results={result.source.validationResults} />
           {result.source.code && (
             <p className="alert error">
               {result.source.message ||

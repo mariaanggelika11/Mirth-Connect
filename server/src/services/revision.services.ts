@@ -142,12 +142,23 @@ export async function createDraft(
 // Diff and exports omit endpoint credentials and script contents, which may contain embedded secrets.
 export function safeRevision(data: RevisionConfig) {
   const script = (v: string) => (v ? '[CONFIGURED]' : '');
+  const sanitizeProfile = (
+    profile: Record<string, unknown>,
+    envelope = true,
+  ): Record<string, unknown> => {
+    const result = { ...profile };
+    if (typeof result.script === 'string') result.script = script(result.script);
+    if (envelope && result.version === 1)
+      for (const key of ['custom', 'legacy']) {
+        const nested = result[key];
+        if (nested && typeof nested === 'object' && !Array.isArray(nested))
+          result[key] = sanitizeProfile(nested as Record<string, unknown>, false);
+      }
+    return result;
+  };
   return {
     ...data,
-    validationProfile: {
-      ...data.validationProfile,
-      script: script(data.validationProfile.script || ''),
-    },
+    validationProfile: sanitizeProfile(data.validationProfile),
     processingScript: script(data.processingScript),
     responseScript: script(data.responseScript),
     filterScript: script(data.filterScript),
@@ -254,7 +265,7 @@ export const publishRevision = async (req: Request, res: Response, next: NextFun
       if (rollback && requested === c.active_revision)
         throw new AppError(409, 'ROLLBACK_UNAVAILABLE', 'This revision is already active');
       const data = channelSchema.parse(JSON.parse(decrypt(row.configuration)));
-      validateProfileConfiguration(data.validationProfile);
+      validateProfileConfiguration(data.validationProfile, data.source.inboundDataType);
       // Preserve historical destination IDs so saved deliveries keep their FK links.
       await tx
         .request()
@@ -387,7 +398,7 @@ export const editDraft = async (req: Request, res: Response, next: NextFunction)
         channelSchema.parse(JSON.parse(decrypt(row.configuration))),
         input.patch,
       );
-      validateProfileConfiguration(data.validationProfile);
+      validateProfileConfiguration(data.validationProfile, data.source.inboundDataType);
       const successor = await insertRevision(
         tx,
         id,

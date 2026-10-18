@@ -293,3 +293,46 @@ server/src/services/dryRun.services.ts
 server/src/services/transformationPreview.services.ts
 server/test/transformation-preview.test.ts
 ```
+
+
+## Source Message Validation audit and implementation — 2026-10-18
+
+Baseline development commit: `908e208`. Repository and current code were read before implementation; no real patient data or live database was used. Before screenshot is retained under screenshots/validation/before-basic.png.
+
+| Previous mode | Saved configuration | Runtime check | Dry-run check | Verified problem |
+| --- | --- | --- | --- | --- |
+| No additional | {} | HTTP JSON parsing, unconditional bounded XML/HL7 parsing | Same validator after test-input parsing | UI did not explain parsing remains active |
+| Basic | basicSyntax=true | JSON serializability/size; no required field rules. XML/HL7 already parse without it | Same behavior | Ambiguous label, no editable requirements |
+| Legacy JSON-object Basic | jsonSchema: type=object | JSON object shape, arrays/scalars rejected by schema | Same behavior | Different semantics hidden under same Basic label |
+| Custom | Legacy profile with jsonSchema/xml/hl7/script keys | AJV/schema, bounded XML/HL7 rules, sandbox boolean | Same shared validator | Editor lacked language/example; bare JSON Schema unknown top-level keys could be stripped to {} by API schema |
+
+Evidence paths/functions: client ChannelForm radio/state and channelDraft validationChoice/selectedValidationProfile; backend validator.channelSchema, profileValidation.validatePayload/validateProfileConfiguration; messageProcessor.processInboundMessage before source filter/transformer; dryRun.runConfiguration; message.services HTTP parsing and monitor details. Existing MLLP listener uses filter for channel selection before processor; this routing behavior remains explicit and unchanged.
+
+New JSON Field validation, format-specific Custom examples and precise legacy mode address the UI/root causes. Versioned settings retain inactive rules in existing channel/revision storage; strict active-profile validation rejects typo/bare wrapper mistakes rather than silently removing rules. Input failures stop before outbound reservation/retry and are captured as IN-ERROR. Shared evaluator results are sanitized before HTTP, Review and Messages presentation; values, allowed lists, arbitrary exception text and scripts are omitted from diagnoses. Nested custom/legacy scripts are scrubbed from revision diff/review.
+
+Validation versus routing versus mapping remains separate. Field Required means nonempty input, including whitespace handling; JSON Schema legacy required and target mapping required retain their own semantics. JSON-only Field validation never claims XML/XSD/complete HL7 support. See manual 8.3 for examples and downgrade caveat.
+
+
+| Verification command | Actual outcome |
+| --- | --- |
+| npm run test:coverage | PASS: 472 tests, 34 files; 85.61/83.31/87.24/86.40 statement/branch/function/line coverage |
+| npm run test:e2e | PASS: 72 browser tests, including legacy compatibility, source filter regression, rule persistence, format examples, safe Review and accessibility |
+| npm run typecheck | PASS: client/server |
+| npm run lint | PASS |
+| npm run format:check | PASS |
+| npm run build | PASS: client/server production output |
+| npm run docs:check | PASS: structural OpenAPI/local refs, 47 paths/51 operations; not a full semantic API certification |
+| npm run secrets:scan | PASS: targeted source scanner, no findings; not an independent external security review |
+| Live PostgreSQL / deployed production / hospital UAT | NOT TESTED; isolated database/transport fixtures only |
+
+Original full coverage log: /tmp/mirth-validation-baseline.log. Final coverage: /tmp/mirth-validation-acceptance.log. Browser verification: /tmp/mirth-validation-e2e-final.log. Generated reports remain ignored local artifacts; retained synthetic screenshots are linked in manual 8.3. A passing browser fixture alone is not delivery evidence; real evaluator/processor and loopback ACK behavior are covered separately in field-validation-runtime.test.ts.
+
+
+Files changed for validation:
+
+| Area | Files |
+| --- | --- |
+| Frontend | features/channels/ChannelForm.tsx, channelDraft.ts, MessageValidationEditor.tsx, DryRunPreview.tsx, ReviewTest.tsx; components/ui/ValidationResults.tsx; features/monitor/LogDetailModal.tsx; types/monitor.ts; index.css |
+| Backend/runtime | services/profileValidation.services.ts, channel.services.ts, revision.services.ts, messageProcessor.services.ts, dryRun.services.ts, message.services.ts; middleware/errorHandler.ts; utils/validator.ts, validationRules.ts, validationDiagnostics.ts |
+| Tests | client/test/channel-usability.test.ts; client/e2e/usability.spec.ts; server/test/field-validation.test.ts, field-validation-runtime.test.ts, validation-diagnostics.test.ts, profile-validation.test.ts, channel-db.test.ts, monitor-worker.test.ts |
+| Docs/artifacts | README, CHANGELOG, MIRTH_LITE_UI manual8.3, OPERATIONAL_CONTROLS, ARCHITECTURE, ERROR_CODE_CATALOG, OpenAPI, this audit and three synthetic screenshots |

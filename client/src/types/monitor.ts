@@ -64,6 +64,7 @@ export interface LogEntry {
   content?: string;
   error?: string;
   errorCode?: string;
+  validation?: { code: 'FIELD_VALIDATION_FAILED'; results: ValidationRuleResult[] };
 
   originalPayload?: unknown;
   transformedPayload?: unknown;
@@ -73,3 +74,4 @@ export interface LogEntry {
 
   destinationLogs?: DestinationLog[];
 }
+import type { ValidationRuleResult } from '../../../server/src/utils/validationRules';

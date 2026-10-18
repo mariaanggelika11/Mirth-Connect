@@ -1,11 +1,14 @@
 import { readSourceFilter, writeSourceFilter } from '../../../../server/src/utils/sourceFilter';
 import { DestinationEditor } from './DestinationEditor';
-import type { ChannelScriptEditor, MessageValidation } from './channelDraft';
+import type { ChannelScriptEditor } from './channelDraft';
 import {
   newDestination,
   initialDraft,
-  validationChoice,
-  selectedValidationProfile,
+  createMessageValidationDraft,
+  messageValidationProfile,
+  messageValidationSummary,
+  messageValidationConfigured,
+  validationDraftErrors,
 } from './channelDraft';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Code2, Plus } from 'lucide-react';
@@ -20,6 +23,7 @@ import { DataType } from '../../types';
 import { TransformationEditor } from './TransformationEditor';
 import { ReviewTest } from './ReviewTest';
 import { FilterEditor } from './FilterEditor';
+import { MessageValidationEditor } from './MessageValidationEditor';
 import { readFieldMapping } from '../../../../server/src/utils/fieldMapping';
 import { readSimpleCondition } from '../../../../server/src/utils/simpleCondition';
 import { SourceEndpoint } from './SourceEndpoint';
@@ -88,9 +92,9 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     [sample, setSample] = useState('{"message":"Synthetic preview"}'),
     [testResult, setTestResult] = useState<DryRunResult | null>(null),
     [testing, setTesting] = useState(false),
-    [profileText, setProfileText] = useState('{}'),
-    [profileBaseline, setProfileBaseline] = useState('{}'),
-    [validation, setValidation] = useState<MessageValidation>('NONE'),
+    [validation, setValidation] = useState(() => createMessageValidationDraft()),
+    [validationBaseline, setValidationBaseline] = useState(''),
+    [showValidationErrors, setShowValidationErrors] = useState(false),
     [filterEnabled, setFilterEnabled] = useState(false),
     [retainedFilter, setRetainedFilter] = useState(''),
     [rawPreview, setRawPreview] = useState(false);
@@ -99,7 +103,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     isOpen,
     step,
     draft,
-    profileText,
+    validation,
     sample,
     rawPreview,
     canViewRaw,
@@ -115,9 +119,13 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     if (isOpen) {
       const value = seedData || initialDraft(initialData);
       setDraft(value);
-      setProfileText(JSON.stringify(value.validationProfile || {}, null, 2));
-      setProfileBaseline(JSON.stringify(value.validationProfile || {}, null, 2));
-      setValidation(validationChoice(value.validationProfile));
+      const validationValue = createMessageValidationDraft(
+        value.validationProfile,
+        value.source.inboundDataType,
+      );
+      setValidation(validationValue);
+      setValidationBaseline(JSON.stringify(validationValue));
+      setShowValidationErrors(false);
       const storedFilter = readSourceFilter(value.filterScript);
       setFilterEnabled(storedFilter.enabled);
       setRetainedFilter(storedFilter.rule);
@@ -172,7 +180,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
   useEffect(() => setKey(''), [step, draft.source.type]);
   const dirty =
     JSON.stringify(draft) !== baseline ||
-    profileText !== profileBaseline ||
+    JSON.stringify(validation) !== validationBaseline ||
     !transformationValid ||
     (filterEnabled && !sourceFilterValid) ||
     destinationFilterValidity.includes(false);
@@ -217,7 +225,16 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     }
     return false;
   }
+  function unfinishedValidation() {
+    const errors = validationDraftErrors(validation, draft.source.inboundDataType);
+    if (!errors.length) return false;
+    setShowValidationErrors(true);
+    setStep(0);
+    setError(errors[0]);
+    return true;
+  }
   function navigate(targetStep: number) {
+    if (targetStep > 0 && unfinishedValidation()) return;
     if (targetStep !== step && unfinishedFilter()) return;
     if (targetStep > 1 && !transformationValid) {
       setStep(1);
@@ -229,6 +246,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
   }
   function next() {
     setError('');
+    if (unfinishedValidation()) return;
     if (unfinishedFilter()) return;
     if (!draft.name.trim()) {
       setStep(0);
@@ -247,6 +265,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
   }
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    if (unfinishedValidation()) return;
     if (unfinishedFilter()) return;
     if (step < 3) {
       next();
@@ -269,10 +288,13 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     }
     let validationProfile: Record<string, unknown>;
     try {
-      validationProfile = selectedValidationProfile(validation, profileText);
-    } catch {
+      validationProfile = messageValidationProfile(validation, draft.source.inboundDataType);
+    } catch (error) {
+      setShowValidationErrors(true);
       setError(
-        'Enter a valid JSON object for the custom validation profile in Advanced source settings.',
+        error instanceof Error
+          ? error.message
+          : 'Review the message validation configuration in Source.',
       );
       setStep(0);
       return;
@@ -294,17 +316,6 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       setSaving(false);
     }
   }
-  function chooseValidation(choice: MessageValidation) {
-    setValidation(choice);
-    try {
-      setDraft((d) => ({
-        ...d,
-        validationProfile: selectedValidationProfile(choice, profileText),
-      }));
-    } catch {
-      // Keep invalid custom text visible until the user corrects it.
-    }
-  }
   function reviewConfigurationError() {
     if (!draft.name.trim()) return 'Enter a channel name in Source before testing.';
     if (!draft.source.inboundDataType || !dataOptions.includes(draft.source.inboundDataType))
@@ -324,9 +335,11 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
         return `Enter an endpoint for destination ${index + 1} before testing.`;
     }
     try {
-      selectedValidationProfile(validation, profileText);
-    } catch {
-      return 'Fix the custom validation schema in Source before testing.';
+      messageValidationProfile(validation, draft.source.inboundDataType);
+    } catch (error) {
+      return error instanceof Error
+        ? error.message
+        : 'Fix the validation configuration in Source before testing.';
     }
     return '';
   }
@@ -356,7 +369,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     setTesting(true);
     setError('');
     try {
-      const validationProfile = selectedValidationProfile(validation, profileText);
+      const validationProfile = messageValidationProfile(validation, draft.source.inboundDataType);
       const { data } = await api.post<DryRunResult>('/channel/preview-transformation', {
         configuration: { ...draft, validationProfile },
         payload,
@@ -395,7 +408,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     (!fieldMapping && draft.processingScript?.trim()) ||
     draft.filterScript?.trim() ||
     draft.responseScript?.trim() ||
-    validation !== 'NONE' ||
+    messageValidationConfigured(validation, draft.source.inboundDataType) ||
     (draft.idempotencyMode && draft.idempotencyMode !== 'OPTIONAL'),
   );
   return (
@@ -473,6 +486,21 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                         source: { ...d.source, inboundDataType: e.target.value as DataType },
                       }));
                       setSample(syntheticSample(e.target.value as DataType));
+                      setValidation((v) => {
+                        if (v.customText.trim() !== '{}' || Object.keys(v.retainedCustom).length)
+                          return v;
+                        return {
+                          ...v,
+                          customKind:
+                            e.target.value === DataType.XML
+                              ? 'XML'
+                              : e.target.value === DataType.HL7V2
+                                ? 'HL7'
+                                : e.target.value === DataType.TEXT
+                                  ? 'PROFILE'
+                                  : 'JSON_SCHEMA',
+                        };
+                      });
                     }}
                   >
                     {dataOptions.map((format) => (
@@ -548,67 +576,23 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                   <span>Advanced source settings</span>
                   {customSource && <span className="configured-hint">Configured</span>}
                 </summary>
-                <details className="advanced-section" aria-label="Source validation settings">
-                  <summary>
-                    Validation
-                    {validation !== 'NONE' && <small> · Configured</small>}
-                  </summary>
-                  <fieldset className="validation-options">
-                    <legend>Message validation</legend>
-                    <label className="check-field">
-                      <input
-                        type="radio"
-                        name="message-validation"
-                        checked={validation === 'NONE'}
-                        onChange={() => chooseValidation('NONE')}
-                      />
-                      No additional validation
-                    </label>
-                    <label className="check-field">
-                      <input
-                        type="radio"
-                        name="message-validation"
-                        checked={validation === 'BASIC' || validation === 'BASIC_JSON'}
-                        onChange={() => chooseValidation('BASIC')}
-                      />
-                      Basic validation
-                    </label>
-                    <label className="check-field">
-                      <input
-                        type="radio"
-                        name="message-validation"
-                        checked={validation === 'CUSTOM'}
-                        onChange={() => chooseValidation('CUSTOM')}
-                      />
-                      Custom validation schema
-                    </label>
-                    {validation === 'CUSTOM' && (
-                      <label className="field">
-                        <span>Custom validation schema</span>
-                        <textarea
-                          aria-label="Custom validation schema editor"
-                          rows={5}
-                          className="code-input"
-                          value={profileText}
-                          onChange={(e) => {
-                            setProfileText(e.target.value);
-                            try {
-                              setDraft((d) => ({
-                                ...d,
-                                validationProfile: selectedValidationProfile(
-                                  'CUSTOM',
-                                  e.target.value,
-                                ),
-                              }));
-                            } catch {
-                              /* Validate on Test or Save. */
-                            }
-                          }}
-                        />
-                      </label>
-                    )}
-                  </fieldset>
-                </details>
+                <MessageValidationEditor
+                  key={`${initialData?.id || 'new'}:${isOpen}`}
+                  value={validation}
+                  format={draft.source.inboundDataType}
+                  showErrors={showValidationErrors}
+                  onChange={(value) => {
+                    setValidation(value);
+                    setShowValidationErrors(false);
+                    setError('');
+                    try {
+                      const profile = messageValidationProfile(value, draft.source.inboundDataType);
+                      setDraft((d) => ({ ...d, validationProfile: profile }));
+                    } catch {
+                      // Retain incomplete editor text; navigation, Test and Save report configuration errors.
+                    }
+                  }}
+                />
                 <details className="advanced-section" aria-label="Source filter settings">
                   <summary>Source filter{filterEnabled && <small> · Configured</small>}</summary>
                   <p className="muted">Choose which valid messages this channel processes.</p>
@@ -809,15 +793,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                   <dl className="definition-list">
                     <div>
                       <dt>Validation</dt>
-                      <dd>
-                        {validation === 'NONE'
-                          ? 'Parsing only'
-                          : validation === 'CUSTOM'
-                            ? 'Custom schema'
-                            : validation === 'BASIC_JSON'
-                              ? 'Basic (existing JSON object schema)'
-                              : 'Basic'}
-                      </dd>
+                      <dd>{messageValidationSummary(validation, draft.source.inboundDataType)}</dd>
                     </div>
                     <div>
                       <dt>Filter</dt>

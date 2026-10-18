@@ -216,7 +216,7 @@ export async function applyChannelConfiguration(
 async function saveChannel(req: Request, res: Response, next: NextFunction, create: boolean) {
   try {
     const data: ChannelInput = req.body;
-    validateProfileConfiguration(data.validationProfile);
+    validateProfileConfiguration(data.validationProfile, data.source.inboundDataType);
     const id = await withTransaction(async (tx) => {
       let id = Number(req.params.id);
       let previousChannel: Record<string, unknown> | undefined;

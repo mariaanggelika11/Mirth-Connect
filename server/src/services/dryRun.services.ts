@@ -1,4 +1,6 @@
-import { validatePayload } from './profileValidation.services.js';
+import { safeValidationResults } from '../utils/validationDiagnostics.js';
+import type { ValidationRuleResult } from '../utils/validationRules.js';
+import { validatePayload, FieldValidationError } from './profileValidation.services.js';
 import { performance } from 'node:perf_hooks';
 import type { Request, Response, NextFunction } from 'express';
 import { channelSchema } from '../utils/validator.js';
@@ -85,6 +87,13 @@ function previewFailureMessage(stage: string, code: string): string {
       'Field mapping could not read the sample. Check its input format, structure and size.',
     FILTER_INPUT_INVALID:
       'The filter could not read the sample. Check its input format and field paths.',
+    FIELD_VALIDATION_FAILED:
+      'Input fields do not meet the configured validation rules. Review the field results below.',
+    INVALID_FIELD_RULES: 'Complete the field validation rules in Source before testing.',
+    INVALID_VALIDATION_PROFILE:
+      'Check the validation schema configuration and its selected format.',
+    VALIDATION_FORMAT_UNSUPPORTED:
+      'The selected validation rules do not support this source input format.',
     FILTER_CONFIG_INVALID:
       'The saved filter configuration is invalid. Replace or restore its condition before testing.',
     FILTER_RESULT_INVALID:
@@ -177,13 +186,16 @@ export async function runConfiguration(
     validation: 'SKIPPED',
     filter: 'SKIPPED',
     transformation: 'SKIPPED',
+    validationResults: [] as ValidationRuleResult[],
     code: undefined as string | undefined,
     message: undefined as string | undefined,
   };
   let sourceStage: 'validation' | 'filter' | 'transformation' = 'validation';
   let accepted = false;
   try {
-    await validatePayload(payload, data.source.inboundDataType, data.validationProfile);
+    source.validationResults = safeValidationResults(
+      await validatePayload(payload, data.source.inboundDataType, data.validationProfile),
+    );
     source.validation = 'PASSED';
     sourceStage = 'filter';
     accepted = Boolean(
@@ -206,6 +218,8 @@ export async function runConfiguration(
     source.format = data.processingScript.trim() && accepted ? outputFormat(payload) : input.format;
     source.payload = payload;
   } catch (error) {
+    if (error instanceof FieldValidationError)
+      source.validationResults = safeValidationResults(error.results);
     source[sourceStage] = 'ERROR';
     source.code = safeError(error);
     source.message =

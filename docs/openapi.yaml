@@ -1503,7 +1503,8 @@
               }
             }
           }
-        }
+        },
+        "description": " Versioned source field validation uses the same evaluator in runtime and dry-run. FIELD_VALIDATION_FAILED returns safe per-field diagnostics; invalid payloads create no outbound delivery or retry. Preview source.validationResults contains all active field outcomes and redaction remains enforced."
       }
     },
     "/api/inbound/{channelId}": {
@@ -1733,7 +1734,7 @@
             }
           }
         },
-        "description": "Canonical external source endpoint accepts the per-channel X-API-Key. Legacy management bearer automation remains supported. /api/inbound/{channelId} remains an API-key alias; configured INBOUND_PATH is also accepted. Source API-key requests are limited to 60 unsuccessful responses per IP per minute in each process; in-flight requests temporarily count. HTTP 429 includes Retry-After. Management bearer requests retain management rate limits."
+        "description": "Canonical external source endpoint accepts the per-channel X-API-Key. Legacy management bearer automation remains supported. /api/inbound/{channelId} remains an API-key alias; configured INBOUND_PATH is also accepted. Source API-key requests are limited to 60 unsuccessful responses per IP per minute in each process; in-flight requests temporarily count. HTTP 429 includes Retry-After. Management bearer requests retain management rate limits. Versioned source field validation uses the same evaluator in runtime and dry-run. FIELD_VALIDATION_FAILED returns safe per-field diagnostics; invalid payloads create no outbound delivery or retry. Preview source.validationResults contains all active field outcomes and redaction remains enforced."
       }
     },
     "/api/message": {
@@ -3838,7 +3839,7 @@
             }
           }
         },
-        "description": "The channel wizard calls this from Review & Test after Source, Transformation and Destinations are complete. Runs the same isolated source and destination filter/transform/template/conversion pipeline as dry-run. For API compatibility, empty destination names and endpoints remain permitted. DNS, sockets, host allowlist and delivery are not tested. Channel save/full dry-run still requires valid connection settings. Synthetic payloads only; normal redaction and audited administrator raw access apply. Invalid configuration identifies the affected setting; failed stages include safe code/message metadata."
+        "description": "The channel wizard calls this from Review & Test after Source, Transformation and Destinations are complete. Runs the same isolated source and destination filter/transform/template/conversion pipeline as dry-run. For API compatibility, empty destination names and endpoints remain permitted. DNS, sockets, host allowlist and delivery are not tested. Channel save/full dry-run still requires valid connection settings. Synthetic payloads only; normal redaction and audited administrator raw access apply. Invalid configuration identifies the affected setting; failed stages include safe code/message metadata. Versioned source field validation uses the same evaluator in runtime and dry-run. FIELD_VALIDATION_FAILED returns safe per-field diagnostics; invalid payloads create no outbound delivery or retry. Preview source.validationResults contains all active field outcomes and redaction remains enforced."
       }
     },
     "/api/channel/{id}/archive": {
@@ -3932,7 +3933,11 @@
           },
           "details": {
             "type": "array",
-            "items": {}
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/ValidationRuleResult"
+            },
+            "description": "FIELD_VALIDATION_FAILED includes failed input rules. Other existing error codes usually use an empty array."
           }
         }
       },
@@ -3978,103 +3983,14 @@
         "properties": {
           "validationProfile": {
             "default": {},
-            "type": "object",
-            "properties": {
-              "jsonSchema": {
-                "type": "object",
-                "propertyNames": {
-                  "type": "string"
-                },
-                "additionalProperties": {}
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LegacyValidationProfile"
               },
-              "xml": {
-                "type": "object",
-                "properties": {
-                  "root": {
-                    "type": "string",
-                    "maxLength": 100,
-                    "pattern": "^[A-Za-z_][\\w:-]*$"
-                  },
-                  "requiredPaths": {
-                    "maxItems": 50,
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "maxLength": 300,
-                      "pattern": "^[A-Za-z_][\\w:-]*(?:\\.[A-Za-z_][\\w:-]*){0,15}$"
-                    }
-                  },
-                  "values": {
-                    "maxItems": 50,
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "path": {
-                          "type": "string",
-                          "maxLength": 300,
-                          "pattern": "^[A-Za-z_][\\w:-]*(?:\\.[A-Za-z_][\\w:-]*){0,15}$"
-                        },
-                        "allowed": {
-                          "minItems": 1,
-                          "maxItems": 50,
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "maxLength": 300
-                          }
-                        }
-                      },
-                      "required": [
-                        "path",
-                        "allowed"
-                      ],
-                      "additionalProperties": false
-                    }
-                  }
-                },
-                "additionalProperties": false
-              },
-              "hl7": {
-                "type": "object",
-                "properties": {
-                  "messageTypes": {
-                    "maxItems": 50,
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "maxLength": 50
-                    }
-                  },
-                  "versions": {
-                    "maxItems": 20,
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "maxLength": 20
-                    }
-                  },
-                  "requiredFields": {
-                    "maxItems": 50,
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "pattern": "^[A-Z0-9]{3}\\.[1-9][0-9]{0,2}$"
-                    }
-                  }
-                },
-                "additionalProperties": false
-              },
-              "script": {
-                "type": "string",
-                "maxLength": 65536
-              },
-              "basicSyntax": {
-                "type": "boolean",
-                "description": "Enable format-appropriate basic syntax validation. HTTP and preview clients parse JSON once before the pipeline; valid JSON string scalars remain strings. XML and HL7 syntax/security checks apply even without additional profile rules. Mapping required/default checks run during transformation after source filtering."
+              {
+                "$ref": "#/components/schemas/ValidationSettings"
               }
-            },
-            "additionalProperties": false
+            ]
           },
           "idempotencyMode": {
             "default": "OPTIONAL",
@@ -4717,7 +4633,7 @@
             "type": "integer",
             "minimum": 100,
             "maximum": 599,
-            "description": "Actual HTTP status from this attempt. Omitted for legacy attempts, non-HTTP transports, and failures before an HTTP response. The receiving system’s HTTP acceptance does not prove downstream business processing.",
+            "description": "Actual HTTP status from this attempt. Omitted for legacy attempts, non-HTTP transports, and failures before an HTTP response. The receiving system\u2019s HTTP acceptance does not prove downstream business processing.",
             "examples": [
               201,
               204,
@@ -4953,6 +4869,331 @@
             }
           }
         ]
+      },
+      "LegacyValidationProfile": {
+        "type": "object",
+        "properties": {
+          "jsonSchema": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "xml": {
+            "type": "object",
+            "properties": {
+              "root": {
+                "type": "string",
+                "maxLength": 100,
+                "pattern": "^[A-Za-z_][\\w:-]*$"
+              },
+              "requiredPaths": {
+                "maxItems": 50,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 300,
+                  "pattern": "^[A-Za-z_][\\w:-]*(?:\\.[A-Za-z_][\\w:-]*){0,15}$"
+                }
+              },
+              "values": {
+                "maxItems": 50,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "maxLength": 300,
+                      "pattern": "^[A-Za-z_][\\w:-]*(?:\\.[A-Za-z_][\\w:-]*){0,15}$"
+                    },
+                    "allowed": {
+                      "minItems": 1,
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "maxLength": 300
+                      }
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "allowed"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "hl7": {
+            "type": "object",
+            "properties": {
+              "messageTypes": {
+                "maxItems": 50,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 50
+                }
+              },
+              "versions": {
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 20
+                }
+              },
+              "requiredFields": {
+                "maxItems": 50,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Z0-9]{3}\\.[1-9][0-9]{0,2}$"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "script": {
+            "type": "string",
+            "maxLength": 65536
+          },
+          "basicSyntax": {
+            "type": "boolean",
+            "description": "Enable format-appropriate basic syntax validation. HTTP and preview clients parse JSON once before the pipeline; valid JSON string scalars remain strings. XML and HL7 syntax/security checks apply even without additional profile rules. Mapping required/default checks run during transformation after source filtering."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ValidationFieldRule": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field",
+          "type",
+          "required"
+        ],
+        "properties": {
+          "field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Own-property dot path, maximum 12 parts; zero-based numeric array indexes. Prototype keys forbidden."
+          },
+          "type": {
+            "enum": [
+              "text",
+              "number",
+              "boolean",
+              "date"
+            ]
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Reject absent/null/empty/whitespace strings; 0 and false are values."
+          },
+          "allowedValues": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "type": "string",
+              "maxLength": 300,
+              "minLength": 1,
+              "pattern": "^[^\\r\\n]+$"
+            },
+            "description": "Text rules only; exact case-sensitive matching."
+          },
+          "minLength": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1048576
+          },
+          "maxLength": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1048576
+          },
+          "minimum": {
+            "type": "number"
+          },
+          "maximum": {
+            "type": "number"
+          }
+        }
+      },
+      "ValidationSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "mode",
+          "fieldRules",
+          "custom"
+        ],
+        "properties": {
+          "version": {
+            "const": 1
+          },
+          "mode": {
+            "enum": [
+              "NONE",
+              "FIELDS",
+              "CUSTOM",
+              "LEGACY"
+            ]
+          },
+          "fieldRules": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/ValidationFieldRuleDraft"
+            },
+            "description": "Retained while inactive. Active FIELDS requires 1-50 complete unique ValidationFieldRule objects and JSON source."
+          },
+          "custom": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Retained inactive profile; active CUSTOM uses known legacy profile keys and must match input format. JSON editor wraps bare schema in jsonSchema."
+          },
+          "legacy": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "description": "Only active mode evaluates. Unknown active profile keys are rejected; no silent schema stripping. A saved empty JSON Schema is valid and adds no field restrictions.",
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "const": "FIELDS"
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "properties": {
+                "fieldRules": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "items": {
+                    "$ref": "#/components/schemas/ValidationFieldRule"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ValidationRuleResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field",
+          "type",
+          "required",
+          "status",
+          "message"
+        ],
+        "properties": {
+          "field": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "type": {
+            "enum": [
+              "text",
+              "number",
+              "boolean",
+              "date"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "PASSED",
+              "FAILED",
+              "SKIPPED"
+            ]
+          },
+          "code": {
+            "enum": [
+              "REQUIRED",
+              "TYPE",
+              "DATE",
+              "ALLOWED_VALUES",
+              "MIN_LENGTH",
+              "MAX_LENGTH",
+              "MINIMUM",
+              "MAXIMUM"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "Safe fixed reason; no payload value, allowed-list values or exception text."
+          }
+        }
+      },
+      "ValidationFieldRuleDraft": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field",
+          "type",
+          "required"
+        ],
+        "properties": {
+          "field": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Own-property dot path, maximum 12 parts; zero-based numeric array indexes. Prototype keys forbidden."
+          },
+          "type": {
+            "enum": [
+              "text",
+              "number",
+              "boolean",
+              "date"
+            ]
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Reject absent/null/empty/whitespace strings; 0 and false are values."
+          },
+          "allowedValues": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "string",
+              "maxLength": 300,
+              "pattern": "^[^\\r\\n]*$"
+            },
+            "description": "Text rules only; exact case-sensitive matching."
+          },
+          "minLength": {
+            "type": "number"
+          },
+          "maxLength": {
+            "type": "number"
+          },
+          "minimum": {
+            "type": "number"
+          },
+          "maximum": {
+            "type": "number"
+          }
+        },
+        "description": "Bounded structurally safe inactive field settings; incomplete paths and semantic limits may be retained, but must satisfy active ValidationFieldRule rules before FIELDS can run."
       }
     }
   }

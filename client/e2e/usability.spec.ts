@@ -353,6 +353,12 @@ async function openSourceAdvanced(page: Page) {
   await page.getByText('Advanced source settings', { exact: true }).click();
   await page.locator('details[aria-label="Source filter settings"] > summary').click();
 }
+async function validationRule(page: Page, field = 'message_type') {
+  await page.getByRole('radio', { name: 'Field validation', exact: true }).check();
+  const rule = page.getByRole('group', { name: 'Validation rule 1', exact: true });
+  await rule.getByLabel('Field', { exact: true }).fill(field);
+  await rule.getByRole('checkbox', { name: 'Required', exact: true }).check();
+}
 async function newJsonXmlChannel(page: Page) {
   await page.getByRole('button', { name: 'New Channel', exact: true }).click();
   await page.getByLabel('Channel name', { exact: false }).fill('SYNTHETIC_JSON_TO_XML');
@@ -627,7 +633,7 @@ test('advanced filtering validation retry and timeout remain optional and preser
     .locator('summary')
     .filter({ hasText: /^Validation/ })
     .click();
-  await page.getByRole('radio', { name: 'Basic validation' }).check();
+  await validationRule(page, 'message');
   await expect(page.getByLabel('Custom validation schema editor', { exact: false })).toHaveCount(0);
   await expect(page.getByLabel('Duplicate message protection', { exact: false })).toHaveCount(0);
   await page.getByRole('checkbox', { name: 'Enable source filter' }).check();
@@ -664,7 +670,11 @@ test('advanced filtering validation retry and timeout remain optional and preser
   await preview(page);
   expect(captured(state, '/api/channel/preview-transformation')[0].body).toMatchObject({
     configuration: {
-      validationProfile: { basicSyntax: true },
+      validationProfile: {
+        version: 1,
+        mode: 'FIELDS',
+        fieldRules: [{ field: 'message', type: 'text', required: true }],
+      },
       filterScript: writeSourceFilter(
         compileSimpleCondition({ version: 1, field: 'patient.id', operator: 'isNotEmpty' }),
         false,
@@ -895,7 +905,7 @@ test('simple source and destination conditions save safely without opening a scr
   await openExisting(page);
   await openSourceAdvanced(page);
   await page.locator('details[aria-label="Source validation settings"] > summary').click();
-  await page.getByRole('radio', { name: 'Basic validation', exact: true }).check();
+  await validationRule(page);
   await page.getByRole('checkbox', { name: 'Enable source filter' }).check();
   const sourceCondition = page.getByRole('group', {
     name: 'Source filter simple condition',
@@ -942,7 +952,7 @@ test('simple source and destination conditions save safely without opening a scr
   expect(scan.violations).toEqual([]);
   await step(page, 3);
   const processing = page.getByRole('region', { name: 'Source processing summary', exact: true });
-  await expect(processing).toContainText('Basic');
+  await expect(processing).toContainText('1 required fields · 1 rules');
   await expect(processing).toContainText('Simple condition');
   await expect(processing).toContainText('None (pass-through)');
   await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
@@ -956,7 +966,11 @@ test('simple source and destination conditions save safely without opening a scr
   expect(
     readSimpleCondition((saved.destinations as { filterScript: string }[])[0].filterScript),
   ).toEqual({ version: 1, field: 'department', operator: 'eq', value: 'LAB' });
-  expect(saved.validationProfile).toEqual({ basicSyntax: true });
+  expect(saved.validationProfile).toMatchObject({
+    version: 1,
+    mode: 'FIELDS',
+    fieldRules: [{ field: 'message_type', type: 'text', required: true }],
+  });
   expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
   expect(state.externalRequests).toEqual([]);
 });
@@ -1071,35 +1085,31 @@ test('invalid destination conditions cannot leave the step or affect the next de
 });
 
 for (const format of ['XML', 'HL7V2'] as const)
-  test(`Basic validation can be selected for ${format} without exposing a raw profile`, async ({
-    page,
-  }) => {
-    const state = await workspace(page);
+  test(`legacy Basic validation remains unchanged for ${format}`, async ({ page }) => {
+    const state = await workspace(page, {
+      channels: [
+        {
+          ...existingChannel,
+          validationProfile: { basicSyntax: true },
+          source: { ...existingChannel.source, inboundDataType: format },
+        },
+      ],
+    });
     await openExisting(page);
-    await page.getByRole('combobox', { name: /^Inbound format/ }).selectOption(format);
     await openSourceAdvanced(page);
     await page.locator('details[aria-label="Source validation settings"] > summary').click();
-    await page.getByRole('radio', { name: 'Basic validation', exact: true }).check();
-    await expect(page.getByLabel('Custom validation schema editor', { exact: true })).toHaveCount(
-      0,
-    );
-    await step(page, 3);
-    await page.getByRole('button', { name: 'Test Transformation', exact: true }).click();
-    await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toContainText(
-      'Test completed',
-    );
-    expect(
-      captured(state, '/api/channel/preview-transformation')[0].body.configuration,
-    ).toMatchObject({
-      source: { inboundDataType: format },
-      validationProfile: { basicSyntax: true },
-    });
+    await expect(
+      page.getByRole('radio', { name: 'Keep legacy validation', exact: true }),
+    ).toBeChecked();
+    await expect(page.getByRole('radio', { name: 'Field validation', exact: true })).toBeDisabled();
+    await expect(
+      page.getByText('The existing rule checks message syntax and size.', { exact: false }),
+    ).toBeVisible();
     await step(page, 3);
     await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
     expect(captured(state, '/api/channel/1')[0].body.validationProfile).toEqual({
       basicSyntax: true,
     });
-    expect(state.externalRequests).toEqual([]);
   });
 
 test('opening legacy Basic validation and response configuration preserves them without response editors', async ({
@@ -1110,7 +1120,9 @@ test('opening legacy Basic validation and response configuration preserves them 
   await openExisting(page);
   await openSourceAdvanced(page);
   await page.locator('details[aria-label="Source validation settings"] > summary').click();
-  await expect(page.getByRole('radio', { name: 'Basic validation', exact: true })).toBeChecked();
+  await expect(
+    page.getByRole('radio', { name: 'Keep legacy validation', exact: true }),
+  ).toBeChecked();
   await expect(
     page.getByText('Legacy custom source response is active.', { exact: true }),
   ).toBeVisible();
@@ -1126,7 +1138,7 @@ test('opening legacy Basic validation and response configuration preserves them 
   await step(page, 3);
   await expect(
     page.getByRole('region', { name: 'Source processing summary', exact: true }),
-  ).toContainText('Basic (existing JSON object schema)');
+  ).toContainText('Legacy JSON object check');
   await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
   expect(captured(state, '/api/channel/1')[0].body).toMatchObject({
     validationProfile: legacy.validationProfile,
@@ -1738,4 +1750,173 @@ test('Review hides cached raw test output immediately after the administrator ro
   expect(
     captured(state, '/api/channel/preview-transformation').map((request) => request.body.raw),
   ).toEqual([true, false]);
+});
+
+test('validation modes retain inactive rules and bare custom schema across create save and reopen', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 1500 });
+  const state = await workspace(page, { channels: [] });
+  await newJsonXmlChannel(page);
+  await step(page, 0);
+  await openSourceAdvanced(page);
+  const validation = page.locator('details[aria-label="Source validation settings"]');
+  await validation.locator(':scope > summary').click();
+  await expect(
+    page.getByRole('radio', { name: 'No additional validation', exact: true }),
+  ).toBeChecked();
+  await expect(
+    page.getByText('Only message parsing is applied. No additional field rules are configured.', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: /Enable validation/ })).toHaveCount(0);
+  await page.getByRole('radio', { name: 'Field validation', exact: true }).check();
+  const first = page.getByRole('group', { name: 'Validation rule 1', exact: true });
+  await expect(first.getByLabel('Field', { exact: true })).toHaveValue('');
+  await expect(validation.getByRole('alert')).toHaveCount(0);
+  await expect(validation.locator(':scope > summary')).not.toContainText('Configured');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Rule 1:' }).first()).toBeVisible();
+  await first.getByLabel('Field', { exact: true }).fill('patient_id');
+  await first.getByRole('checkbox', { name: 'Required', exact: true }).check();
+  await page.getByRole('button', { name: 'Add validation rule', exact: true }).click();
+  const second = page.getByRole('group', { name: 'Validation rule 2', exact: true });
+  await second.getByLabel('Field', { exact: true }).fill('date_of_birth');
+  await second.getByRole('checkbox', { name: 'Required', exact: true }).uncheck();
+  await second.getByRole('combobox', { name: 'Type', exact: true }).selectOption('date');
+  await expect(validation).toContainText('1 required fields · 2 rules');
+  if (process.env.UI_FIELD_VALIDATION_SCREENSHOT)
+    await page.screenshot({ path: process.env.UI_FIELD_VALIDATION_SCREENSHOT, fullPage: true });
+  await page.getByRole('radio', { name: 'Custom validation schema', exact: true }).check();
+  const schema = {
+    type: 'object',
+    properties: { age: { type: 'number' } },
+    additionalProperties: true,
+  };
+  await page
+    .getByLabel('Custom validation schema editor', { exact: true })
+    .fill(JSON.stringify(schema, null, 2));
+  await expect(validation.locator(':scope > summary')).not.toContainText('Configured');
+  await page.getByRole('radio', { name: 'No additional validation', exact: true }).check();
+  await expect(first).toHaveCount(0);
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  expect(captured(state, '/api/channel')[0].body.validationProfile).toMatchObject({
+    version: 1,
+    mode: 'NONE',
+    fieldRules: [
+      { field: 'patient_id', type: 'text', required: true },
+      { field: 'date_of_birth', type: 'date', required: false },
+    ],
+    custom: { jsonSchema: schema },
+  });
+  await page
+    .getByRole('dialog', { name: 'Channel saved', exact: true })
+    .getByLabel('Close dialog')
+    .click();
+  await openExisting(page, 'SYNTHETIC_JSON_TO_XML');
+  await openSourceAdvanced(page);
+  await page.locator('details[aria-label="Source validation settings"] > summary').click();
+  await expect(
+    page.getByRole('radio', { name: 'No additional validation', exact: true }),
+  ).toBeChecked();
+  await page.getByRole('radio', { name: 'Field validation', exact: true }).check();
+  await expect(first.getByLabel('Field', { exact: true })).toHaveValue('patient_id');
+  await expect(second.getByRole('combobox', { name: 'Type', exact: true })).toHaveValue('date');
+  await page.getByRole('radio', { name: 'Custom validation schema', exact: true }).check();
+  await expect(page.getByLabel('Custom validation schema editor', { exact: true })).toHaveValue(
+    JSON.stringify(schema, null, 2),
+  );
+  const scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(scan.violations).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+for (const format of ['JSON', 'XML', 'HL7V2'] as const)
+  test(`custom ${format} validation has an explicit applicable example`, async ({ page }) => {
+    if (process.env.UI_CUSTOM_VALIDATION_SCREENSHOT)
+      await page.setViewportSize({ width: 1280, height: 1400 });
+    const state = await workspace(page);
+    await openExisting(page);
+    await page.getByRole('combobox', { name: /^Inbound format/ }).selectOption(format);
+    await openSourceAdvanced(page);
+    const validation = page.locator('details[aria-label="Source validation settings"]');
+    await validation.locator(':scope > summary').click();
+    if (format !== 'JSON')
+      await expect(
+        page.getByRole('radio', { name: 'Field validation', exact: true }),
+      ).toBeDisabled();
+    await page.getByRole('radio', { name: 'Custom validation schema', exact: true }).check();
+    await page.getByText('Example configuration', { exact: true }).click();
+    await page.getByRole('button', { name: 'Use example', exact: true }).click();
+    const editor = page.getByLabel('Custom validation schema editor', { exact: true });
+    const custom = JSON.parse(await editor.inputValue());
+    expect(custom).toHaveProperty(
+      format === 'JSON' ? 'properties' : format === 'XML' ? 'requiredPaths' : 'requiredFields',
+    );
+    if (format === 'JSON' && process.env.UI_CUSTOM_VALIDATION_SCREENSHOT)
+      await page.screenshot({ path: process.env.UI_CUSTOM_VALIDATION_SCREENSHOT, fullPage: true });
+    await step(page, 3);
+    await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+    expect(captured(state, '/api/channel/1')[0].body.validationProfile).toMatchObject({
+      version: 1,
+      mode: 'CUSTOM',
+      custom: { [format === 'JSON' ? 'jsonSchema' : format === 'XML' ? 'xml' : 'hl7']: custom },
+    });
+    expect(state.externalRequests).toEqual([]);
+  });
+
+test('Review displays failed input rules with skipped filter transformation and no outbound delivery', async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  await openExisting(page);
+  await openSourceAdvanced(page);
+  await page.locator('details[aria-label="Source validation settings"] > summary').click();
+  await validationRule(page, 'patient_id');
+  await page.route('**/api/channel/preview-transformation', (route) =>
+    route.fulfill({
+      json: {
+        success: false,
+        accepted: false,
+        elapsedMs: 2,
+        networkDelivery: 'NOT_SENT',
+        input: { format: 'JSON', payload: '[REDACTED]' },
+        source: {
+          format: 'JSON',
+          payload: null,
+          validation: 'ERROR',
+          filter: 'SKIPPED',
+          transformation: 'SKIPPED',
+          code: 'FIELD_VALIDATION_FAILED',
+          message: 'Input fields do not meet the configured validation rules.',
+          validationResults: [
+            {
+              field: 'patient_id',
+              type: 'text',
+              required: true,
+              status: 'FAILED',
+              code: 'REQUIRED',
+              message: 'Required value is missing.',
+            },
+          ],
+        },
+        results: [],
+        warnings: [],
+      },
+    }),
+  );
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Test Transformation', exact: true }).click();
+  const output = page.getByRole('region', { name: 'Generated output', exact: true });
+  await expect(output).toContainText('patient_id');
+  await expect(output).toContainText('Required value is missing.');
+  await expect(output).toContainText('Not run');
+  await expect(output).toContainText('NOT SENT');
+  expect(captured(state, '/api/channel/test-connection')).toEqual([]);
+  expect(state.externalRequests).toEqual([]);
 });

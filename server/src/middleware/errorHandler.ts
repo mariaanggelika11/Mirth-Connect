@@ -1,3 +1,5 @@
+import { FieldValidationError } from '../services/profileValidation.services.js';
+import { safeValidationResults } from '../utils/validationDiagnostics.js';
 import type { ErrorRequestHandler } from 'express';
 import { AppError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
@@ -23,7 +25,10 @@ export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
   if (!res.headersSent)
     res.status(status).json({
       success: false,
-      details: [],
+      details:
+        error instanceof FieldValidationError
+          ? safeValidationResults(error.results).filter((r) => r.status === 'FAILED')
+          : [],
       code,
       message:
         error instanceof AppError

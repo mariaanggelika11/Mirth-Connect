@@ -430,3 +430,50 @@ describe('Source filter API persistence and negative validation', () => {
     expect(state.begin).not.toHaveBeenCalled();
   });
 });
+
+describe('Validation modes in durable channel configuration and initial revisions', () => {
+  it('persists active field rules plus inactive custom settings exactly in storage and encrypted revision', async () => {
+    const validationProfile = {
+      version: 1,
+      mode: 'FIELDS',
+      fieldRules: [
+        { field: 'patient_id', type: 'text', required: true },
+        { field: 'date_of_birth', type: 'date', required: false },
+      ],
+      custom: { jsonSchema: { type: 'object', properties: { age: { type: 'number' } } } },
+    };
+    const originalQuery = state.query.getMockImplementation()!;
+    let persisted = '{}';
+    state.query.mockImplementation(async (sql: string, inputs: Record<string, unknown>) => {
+      if (sql.includes('UPDATE "Channels" SET name=')) persisted = String(inputs.profile);
+      const result = await originalQuery(sql, inputs);
+      if (sql.includes('SELECT * FROM "Channels"'))
+        result.recordset = result.recordset.map((row: Record<string, unknown>) => ({
+          ...row,
+          validation_profile: persisted,
+        }));
+      return result;
+    });
+    const response = await request(app)
+      .post('/api/channel')
+      .set('Authorization', 'Bearer ' + token)
+      .send({ ...payload, validationProfile });
+    expect(response.status).toBe(201);
+    expect(JSON.parse(persisted)).toEqual(validationProfile);
+    const revision = state.query.mock.calls.find(([sql]) =>
+      sql.includes('INSERT INTO "ChannelRevisions"'),
+    )?.[1] as Record<string, unknown>;
+    expect(JSON.parse(decrypt(String(revision.config))).validationProfile).toEqual(
+      validationProfile,
+    );
+    expect(state.commit).toHaveBeenCalledOnce();
+  });
+  it('rejects a bare JSON Schema rather than silently saving it as an empty profile', async () => {
+    const response = await request(app)
+      .post('/api/channel')
+      .set('Authorization', 'Bearer ' + token)
+      .send({ ...payload, validationProfile: { type: 'object', required: ['patient_id'] } });
+    expect(response.status).toBe(400);
+    expect(state.begin).not.toHaveBeenCalled();
+  });
+});

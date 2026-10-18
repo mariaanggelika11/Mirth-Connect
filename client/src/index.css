@@ -169,6 +169,91 @@
   font-size: 11px;
   color: var(--primary);
 }
+.message-validation,
+.validation-fields,
+.validation-custom {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.validation-rule {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) auto 28px;
+  align-items: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border-main);
+  border-radius: 8px;
+}
+.validation-rule .field {
+  min-width: 0;
+}
+.validation-rule > .icon-btn,
+.validation-required {
+  margin-top: 28px;
+}
+.validation-more {
+  grid-column: 1 / -1;
+}
+.validation-more > summary,
+.validation-help > summary {
+  cursor: pointer;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+.validation-more[open] > summary,
+.validation-help[open] > summary {
+  margin-bottom: 12px;
+}
+.validation-help p {
+  font-size: 12px;
+  margin: 8px 0;
+}
+.validation-help .code-box {
+  overflow: auto;
+  max-height: 260px;
+  margin-bottom: 10px;
+}
+.validation-errors {
+  padding-left: 28px;
+}
+.validation-results {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  font-size: 12px;
+}
+.validation-results li {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-main);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+.validation-result-failed {
+  color: #a92d32;
+  background: #fff5f5;
+}
+@media (max-width: 600px) {
+  .validation-rule {
+    grid-template-columns: minmax(0, 1fr) 28px;
+    gap: 10px;
+  }
+  .validation-rule > .field,
+  .validation-required {
+    grid-column: 1;
+  }
+  .validation-rule > .icon-btn {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .validation-required {
+    margin-top: 0;
+  }
+}
 .configuration-notice {
   font-size: 12px;
   color: var(--text-soft);
@@ -1279,12 +1364,12 @@ summary::-webkit-details-marker {
 }
 .alert.error {
   background: #fff3f3;
-  color: #b95555;
+  color: #a94343;
   border: 1px solid #f5dada;
 }
 .alert.success {
   background: #eef9f3;
-  color: #368863;
+  color: #28694d;
   border: 1px solid #dbeee3;
 }
 .table-alert {

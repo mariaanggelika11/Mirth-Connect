@@ -62,15 +62,87 @@ Source response editor tidak ditampilkan. Channel existing yang memakainya hanya
 
 Hasil processing gagal yang sudah tercatat mengembalikan HTTP 502 dengan code `MESSAGE_PROCESSING_FAILED`, pesan aman, requestId dan details kosong. `result` dan custom response legacy tetap dipertahankan. FILTERED tetap HTTP 200 dan QUEUED tetap HTTP 202 tanpa error fields.
 
-### Validation
+### 8.3 Message Validation
 
-- **No additional validation**: parsing dasar tetap berlaku.
-- **Basic validation**: syntax sesuai JSON/XML/HL7; preset disimpan sebagai `{ "basicSyntax": true }`. JSON yang sudah diparse tidak diparse ulang sebagai string; scalar JSON yang valid tetap diperbolehkan.
-- **Custom validation schema**: editor baru muncul ketika dipilih. Backend tetap mendukung JSON Schema, XML rules, HL7 profile dan validation script sesuai batas konfigurasi existing.
+Buka **Source → Advanced source settings → Validation**. Validation memeriksa pesan masuk; Source Filter memilih pesan valid yang perlu diproses; Transformation mengubah pesan untuk destination. Contoh: validation mewajibkan `patient_id`, filter memilih `department = LAB`, lalu mapping mengubah `patient_id` menjadi `PatientID`. Field required pada mapping tidak otomatis menjadi aturan input.
 
-Profile lama `{ "jsonSchema": { "type": "object" } }` dikenali sebagai preset Basic existing dan tidak diganti hanya karena editor dibuka/disimpan. Profile custom juga dipertahankan. Memilih preset baru merupakan perubahan eksplisit.
+| Mode | Perilaku |
+| --- | --- |
+| No additional validation | Parsing/pengamanan format, authentication dan batas ukuran tetap berjalan; tidak ada aturan field tambahan. |
+| Field validation | Khusus JSON; tentukan Field, Type dan Required. Semua aturan harus lulus sebelum filter/transformation. |
+| Custom validation schema | Masukkan schema/rules sesuai bahasa yang dijelaskan editor; Save/Test memeriksanya di backend. |
+| Keep legacy validation | Hanya untuk konfigurasi lama yang mempunyai Basic syntax atau JSON-object check; perilaku aslinya dipertahankan. |
 
-Validation dan filter berbeda: JSON valid dengan `message_type = ORM` dapat berstatus FILTERED jika filter hanya menerima ADT. Field Required pada mapping diperiksa saat transformer dijalankan, sesudah source filter; pesan yang sengaja difilter tidak menjadi error karena mapping wajib.
+Basic lama `{ "basicSyntax": true }` memeriksa serializability/batas JSON, bukan field wajib. XML/HL7 sudah diperiksa parsing minimumnya tanpa mode tersebut. Basic lama `{ "jsonSchema": { "type": "object" } }` juga mewajibkan object JSON; array/scalar ditolak oleh aturan bentuk object, bukan karena sintaks JSON salah. Membuka/menyimpan channel lama tidak mengonversinya. Memilih mode baru adalah perubahan eksplisit.
+
+**Field validation**
+
+Pilih Field validation, isi baris pertama, lalu **Add validation rule** bila perlu. Placeholder abu-abu bukan aturan. Required berarti wajib diisi: missing, null, string kosong dan hanya spasi gagal; angka `0` serta boolean `false` tetap valid sesuai tipe. Optional yang missing dilewati, tetapi null/tipe salah tetap gagal. Validation tidak mengonversi `"123"` menjadi angka atau `"false"` menjadi boolean.
+
+| Field contoh | Type | Required | More rules |
+| --- | --- | --- | --- |
+| patient_id | Text | Yes | — |
+| name | Text | Yes | — |
+| gender | Text | No | Allowed values, satu per baris: M / F / U |
+| date_of_birth | Date (YYYY-MM-DD) | No | — |
+
+Ini contoh channel, bukan field wajib global. Gunakan nama field dari input aktual. Text/Number/Boolean memeriksa tipe JSON asli. Date memeriksa kalender, termasuk leap year: `2000-01-01` valid, `2025-02-30` gagal. More rules menyediakan allowed text values, minimum/maximum text length, serta minimum/maximum number. Allowed values case-sensitive dan tidak memangkas nilai payload. Length mengikuti panjang string JavaScript (UTF-16). Field tambahan tetap diperbolehkan.
+
+Path `patient_id` berbeda dari `patient.id`. Path bertingkat menggunakan titik; array memakai index mulai 0, misalnya `patients.0.id` atau `0.id` pada root array. Tidak ada wildcard/bracket syntax atau akses prototype. Maksimum 50 aturan unik, path 256 karakter/12 bagian; allowed values maksimum 50 nilai nonkosong, masing-masing 300 karakter. Nilai berisi spasi dipertahankan persis; baris kosong pada editor berarti tidak menambah nilai. Satu allowed value tidak boleh berisi CR/LF karena setiap baris mewakili satu nilai. Semua aturan aktif harus lulus; ini bukan AND/OR routing. JSON literal/scalar tetap JSON valid, tetapi tidak menyediakan struktur object/array yang dibutuhkan mode field rules.
+
+Input sintetis yang valid untuk contoh tersebut:
+
+```json
+{"patient_id":"RM-000123","name":"Pasien Uji","gender":"F","date_of_birth":"2000-01-01"}
+```
+
+Input sintetis invalid karena `patient_id` hilang dan tanggal tidak mungkin:
+
+```json
+{"name":"Pasien Uji","gender":"F","date_of_birth":"2025-02-30"}
+```
+
+**Custom examples**
+
+Editor menjelaskan bahasa aktif. Buka **Example configuration**, tinjau contoh, lalu klik **Use example**. Konfirmasi diperlukan sebelum menimpa konfigurasi nonkosong. Contoh tidak otomatis dijalankan atau disimpan. JSON-only legacy profile ditampilkan sebagai schema langsung, tetapi wrapper internalnya tetap utuh saat Save tanpa perubahan. Profile mixed/script lama tetap memakai full profile editor agar tidak kehilangan aturan.
+
+Untuk JSON, editor menerima JSON Schema langsung, bukan wrapper internal:
+
+```json
+{"type":"object","properties":{"patient_id":{"type":"string","minLength":1}},"required":["patient_id"],"additionalProperties":true}
+```
+
+JSON Schema memakai AJV strict dengan batas 16 KiB. Keyword mahal/referensi seperti `pattern`, `patternProperties`, `format`, `$ref`, `$async` dan `uniqueItems` tidak didukung. Jangan memakai `format: date`; gunakan tipe Date pada Field validation. Schema `{}` valid tetapi tidak membatasi field; UI menjelaskannya dan tidak memberi badge Configured hanya karena radio dipilih. Semantik `required` JSON Schema legacy tidak diubah menjadi semantik Required builder yang lebih ketat terhadap null/spasi.
+
+Untuk XML, editor menerima bounded XML rules, **bukan XSD/XPath**:
+
+```json
+{"root":"Order","requiredPaths":["Order.ID"],"values":[{"path":"Order.Status","allowed":["NEW","UPDATED"]}]}
+```
+
+Parser mempertahankan root dan repeated elements sebagai array internal. Path rules menyertakan root dan menelusuri repeated elements tanpa index; requiredPaths membutuhkan setidaknya satu nilai teks nonkosong. Allowed-value rule memeriksa seluruh elemen yang cocok. Namespace prefix adalah nama literal (misalnya `ns:Order.ns:ID`), tidak ada namespace expansion, attribute selector atau arbitrary XPath. Entity/DOCTYPE ditolak; depth/node/size tetap dibatasi.
+
+Untuk HL7, editor menerima profil terbatas, bukan implementasi penuh standard profile:
+
+```json
+{"messageTypes":["ADT^A01"],"versions":["2.5"],"requiredFields":["MSH.10","PID.3"]}
+```
+
+Message type memakai nilai field MSH-9 lengkap; version memakai MSH-12. Required field memakai `SEGMENT.number` dan memeriksa minimal satu segmen dengan isi field tersebut. Component/subcomponent/index pada profil validation ini belum tersedia; source filter/mapping mempunyai konteks parser tersendiri. Profil tiap rumah sakit dapat berbeda. Field validation builder tidak tersedia untuk XML/HL7/TEXT; TEXT dapat mempertahankan custom sandbox profile yang didukung dan diuji, tanpa mengklaim JSON field validation.
+
+**Save, mode switching, dan melihat kegagalan**
+
+Konfigurasi baru menyimpan envelope versi 1 pada `validationProfile` existing: mode aktif, fieldRules, custom profile dan legacy profile bila ada. Saat mode diganti, aturan lengkap yang tidak aktif tetap tersimpan tetapi tidak dievaluasi. Input custom JSON yang belum valid hanya tersimpan lokal selama form dibuka; aturan valid sebelumnya dipertahankan saat menyimpan mode lain. Baris field yang belum lengkap menghalangi Continue/Save/Test bila mode FIELDS aktif. Badge/ringkasan menunjukkan aturan aktif yang lengkap; custom baru diperiksa server saat Save/Test. Tidak ada migrasi schema database atau reset channel.
+
+Pengujian tetap di **Review & Test** melalui Test Transformation. Hasil menampilkan setiap rule Passed/Failed/Skipped tanpa nilai payload. Bila input gagal: Validation Failed, Source Filter/Transformation Not run, Network delivery NOT SENT. Preview selalu mengikuti redaction; label synthetic tidak membebaskan permission/audit raw access.
+
+Pada inbound aktual, kegagalan field menghasilkan HTTP 422 `FIELD_VALIDATION_FAILED`, details berisi field/tipe/alasan yang aman, dan message **IN-ERROR**. Tidak dibuat outbound job, destination attempt atau delivery retry. Buka **Messages → pilih pesan → Input validation failed** untuk alasan yang ditangkap saat pemrosesan; tidak dihitung ulang menggunakan konfigurasi terbaru. Konfigurasi salah menghasilkan 400 `INVALID_FIELD_RULES` / `INVALID_VALIDATION_PROFILE` / `VALIDATION_FORMAT_UNSUPPORTED`; internal error tetap 500 melalui kontrak aman. JSON malformed dapat ditolak 400 sebelum row Messages dibuat. FILTERED tetap keputusan filter, bukan error validation.
+
+MLLP mempertahankan routing filter sebelum pemilihan channel (perilaku existing). Sesudah channel dipilih, validation berjalan sebelum transformation/delivery; penolakan validation menghasilkan ACK AE dengan control ID yang sesuai. No-match/ambiguous routing tetap AR. Dry-run tidak melakukan routing listener global; uji listener diperlukan untuk penerimaan rumah sakit.
+
+Envelope baru memerlukan binary yang memahami versi tersebut. Sebelum downgrade ke binary lama, publish konfigurasi legacy yang kompatibel dan tinjau seluruh channel/revision yang akan dijalankan. Binary lama dapat mengabaikan envelope baru; jangan menganggap downgrade langsung tetap menegakkan aturan baru. Tidak ada penghapusan data/revision/audit saat rollback.
+
+Screenshot sintetis: [sebelum](screenshots/validation/before-basic.png), [Field validation](screenshots/validation/after-fields.png), [Custom example](screenshots/validation/after-custom.png). Screenshot membuktikan tampilan; keputusan runtime dibuktikan oleh automated integration tests.
 
 ### Filter tanpa script
 

@@ -211,3 +211,70 @@ describe('Captured delivery metadata', () => {
     ).not.toContain('synthetic-private');
   });
 });
+
+describe('Captured validation failure metadata in Messages', () => {
+  it('shows a safe validation reason without exposing persisted diagnostic JSON or payload to Viewer', async () => {
+    const last_error =
+      'VALIDATION_DETAILS_V1:' +
+      JSON.stringify({
+        code: 'FIELD_VALIDATION_FAILED',
+        results: [
+          {
+            field: 'patient_id',
+            type: 'text',
+            required: true,
+            status: 'FAILED',
+            code: 'REQUIRED',
+            message: 'SYNTHETIC-PHI-EXCEPTION',
+            value: 'SYNTHETIC-PHI-VALUE',
+          },
+        ],
+      });
+    state.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id,name,role'))
+        return { recordset: [{ id: 1, name: 'Test', role: 'VIEWER' }] };
+      if (sql.includes('SELECT m.*'))
+        return {
+          recordset: [
+            {
+              id: 42,
+              channel_id: 1,
+              direction: 'IN',
+              status: 'IN-ERROR',
+              channel_name: 'Test',
+              last_error,
+              original_payload: 'SYNTHETIC-PHI-PAYLOAD',
+            },
+          ],
+        };
+      if (sql.includes('SELECT COUNT(*) total FROM'))
+        return {
+          recordsets: [
+            [{ total: 1 }],
+            [{ id: 42, direction: 'IN', status: 'IN-ERROR', last_error }],
+          ],
+        };
+      return { recordset: [] };
+    });
+    const response = await request(app)
+      .get('/api/message/42')
+      .set('Authorization', 'Bearer ' + token);
+    expect(response.status).toBe(200);
+    expect(response.body.data).toMatchObject({
+      status: 'IN-ERROR',
+      errorCode: 'FIELD_VALIDATION_FAILED',
+      validation: {
+        code: 'FIELD_VALIDATION_FAILED',
+        results: [{ field: 'patient_id', code: 'REQUIRED', message: 'Required value is missing.' }],
+      },
+      destinationLogs: [],
+    });
+    expect(JSON.stringify(response.body)).not.toContain('SYNTHETIC-PHI');
+    const list = await request(app)
+      .get('/api/message')
+      .set('Authorization', 'Bearer ' + token);
+    expect(list.body.data[0].errorCode).toBe('FIELD_VALIDATION_FAILED');
+    expect(JSON.stringify(list.body)).not.toContain('VALIDATION_DETAILS_V1');
+    expect(JSON.stringify(list.body)).not.toContain('SYNTHETIC-PHI');
+  });
+});

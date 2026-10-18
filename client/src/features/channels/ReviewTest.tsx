@@ -1,4 +1,5 @@
 import { Button } from '../../components/ui/Button';
+import { ValidationResults } from '../../components/ui/ValidationResults';
 import type { DataType, Destination } from '../../types';
 import { DestinationConnectionTest } from './DestinationConnectionTest';
 import { DryRunPreview, previewStageLabels, type DryRunResult } from './DryRunPreview';
@@ -95,6 +96,7 @@ export function ReviewTest({
                 </div>
               </dl>
             )}
+            <ValidationResults results={result.source?.validationResults} />
             {!result.success && result.source?.code && (
               <p className="alert error" role="alert">
                 {result.source.message ||

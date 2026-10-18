@@ -8,6 +8,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { StatusBadge, EmptyState, formatTime } from '../../components/ui/OperationalUI';
 import { PayloadViewer } from './PayloadViewer';
+import { ValidationResults } from '../../components/ui/ValidationResults';
 function deliveryDuration(value?: number | null) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
     ? value < 1000
@@ -177,6 +178,17 @@ export default function LogDetailModal({
                   </dd>
                 </div>
               </dl>
+              {log.validation && (
+                <section aria-label="Message validation" className="form-section">
+                  <h3>Input validation failed</h3>
+                  <p>
+                    The incoming message did not meet the source field rules. Source filtering and
+                    transformation were not run. No destination delivery or delivery retry was
+                    created.
+                  </p>
+                  <ValidationResults results={log.validation.results} />
+                </section>
+              )}
               <section aria-label="Delivery Result" className="form-section">
                 <h3>Delivery Result</h3>
                 {!log.destinationLogs?.length ? (
@@ -324,16 +336,20 @@ export default function LogDetailModal({
               </details>
               <div className="summary-help">
                 <strong>
-                  {['FAILED', 'IN-ERROR', 'OUT-ERROR', 'DEAD_LETTER', 'PARTIAL'].includes(
-                    log.status || '',
-                  )
-                    ? 'Review the delivery history'
-                    : 'Follow the message journey'}
+                  {log.validation
+                    ? 'Correct the sending data'
+                    : ['FAILED', 'IN-ERROR', 'OUT-ERROR', 'DEAD_LETTER', 'PARTIAL'].includes(
+                          log.status || '',
+                        )
+                      ? 'Review the delivery history'
+                      : 'Follow the message journey'}
                 </strong>
                 <p>
-                  {log.destinationLogs?.length
-                    ? 'Open Payload for the final output sent to each destination. Delivery history shows attempts, responses and retry actions.'
-                    : 'This message has no destination attempts recorded.'}
+                  {log.validation
+                    ? 'Review the field reasons above, correct the input at the sending system, and submit a new message.'
+                    : log.destinationLogs?.length
+                      ? 'Open Payload for the final output sent to each destination. Delivery history shows attempts, responses and retry actions.'
+                      : 'This message has no destination attempts recorded.'}
                 </p>
               </div>
               {!payloadAllowed && (

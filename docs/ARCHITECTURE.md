@@ -109,3 +109,10 @@ flowchart LR
 ```
 
 Runtime source/destination tables remain materialized for compatibility. Revisions and keyring preserve configuration history; raw credentials never enter revision diff, logs or metrics. See ADR_CHANNEL_VERSIONING for intentional update/delete behavior changes.
+
+
+## Versioned source message validation
+
+The existing validation_profile column and encrypted revision snapshot retain the active mode (NONE/FIELDS/CUSTOM/LEGACY) and inactive rules. HTTP parsing precedes durable inbound acceptance; the processor applies shared input validation → source filter → source transformation → outbound reservation → destination pipeline. FIELDS evaluates bounded own-property JSON paths without executing field/value data. Custom JSON Schema, bounded XML/HL7 rules and existing sandbox scripts remain format-specific. MLLP retains its existing listener routing-filter step before selecting a channel, then uses the same processor.
+
+Dry-run calls the same validator and returns safe per-rule decisions without transport or database side effects. Rejection stores IN-ERROR with bounded field/code diagnostics in last_error, not payload values. Monitor list exposes the error code; detail exposes curated field reasons. Logs keep codes/IDs only, and preview/raw payload permissions remain unchanged. No new schema/table/status enum is required. New envelopes must not be run by older binaries that ignore their semantics; restore a compatible published configuration before downgrade.
