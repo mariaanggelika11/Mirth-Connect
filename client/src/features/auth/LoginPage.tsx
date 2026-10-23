@@ -15,7 +15,7 @@ const LoginPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (isLoggingIn) return;
+    if (isLoggingIn || isLoggingOut) return;
 
     setError(null);
 
@@ -40,7 +40,7 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="login-page">
+    <main className="login-page">
       <div className="login-card">
         <div className="login-brand">
           <span className="brand-mark">
@@ -58,7 +58,12 @@ const LoginPage: React.FC = () => {
             {sessionNotice}
           </p>
         )}
-        {logoutProblem && (
+        {isLoggingOut && (
+          <p className="session-notice" role="status">
+            Signing out…
+          </p>
+        )}
+        {logoutProblem && !isLoggingOut && (
           <div className="session-logout-warning" role="alert">
             <strong>Sign out could not be confirmed</strong>
             <p>
@@ -135,7 +140,7 @@ const LoginPage: React.FC = () => {
 
           <button
             type="submit"
-            disabled={isLoggingIn}
+            disabled={isLoggingIn || isLoggingOut}
             className="btn-primary w-full py-2 mt-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {isLoggingIn ? (
@@ -148,7 +153,7 @@ const LoginPage: React.FC = () => {
           </button>
         </form>
       </div>
-    </div>
+    </main>
   );
 };
 

@@ -28,7 +28,11 @@ function readRoute() {
 }
 export default function App() {
   const [route, setRoute] = useState(readRoute);
-  const { isLoggedIn, logout, isInitializing, role, name } = useAuth();
+  const [logoutConfirmationOpen, setLogoutConfirmationOpen] = useState(false);
+  const { isLoggedIn, isInitializing, role, name } = useAuth();
+  useEffect(() => {
+    if (!isLoggedIn) setLogoutConfirmationOpen(false);
+  }, [isLoggedIn]);
   useEffect(() => {
     const update = () => setRoute(readRoute());
     window.addEventListener('hashchange', update);
@@ -51,7 +55,11 @@ export default function App() {
   const params = new URLSearchParams(route.query);
   return (
     <div className="app-shell">
-      <SessionWarning />
+      <SessionWarning
+        logoutConfirmationOpen={logoutConfirmationOpen}
+        onRequestLogout={() => setLogoutConfirmationOpen(true)}
+        onCancelLogout={() => setLogoutConfirmationOpen(false)}
+      />
       <a
         href="#main-content"
         className="skip-link"
@@ -110,7 +118,13 @@ export default function App() {
                 <small>{role.toLowerCase()}</small>
               </div>
             </div>
-            <button onClick={logout} className="icon-btn" aria-label="Sign out" title="Sign out">
+            <button
+              type="button"
+              onClick={() => setLogoutConfirmationOpen(true)}
+              className="icon-btn"
+              aria-label="Sign out"
+              title="Sign out"
+            >
               <LogOut size={18} />
             </button>
           </div>

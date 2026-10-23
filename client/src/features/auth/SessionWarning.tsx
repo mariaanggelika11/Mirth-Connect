@@ -1,7 +1,17 @@
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Modal } from '../../components/ui/Modal';
-export default function SessionWarning() {
+import { ConfirmationModal } from '../../components/ui/ConfirmationModal';
+interface Props {
+  logoutConfirmationOpen: boolean;
+  onRequestLogout: () => void;
+  onCancelLogout: () => void;
+}
+export default function SessionWarning({
+  logoutConfirmationOpen,
+  onRequestLogout,
+  onCancelLogout,
+}: Props) {
   const {
     sessionWarningSeconds,
     continueSession,
@@ -30,7 +40,7 @@ export default function SessionWarning() {
           </p>
         )}
         <div className="session-warning-actions">
-          <button type="button" className="btn-secondary" onClick={logout}>
+          <button type="button" className="btn-secondary" onClick={onRequestLogout}>
             Sign out
           </button>
           <button
@@ -45,6 +55,17 @@ export default function SessionWarning() {
           </button>
         </div>
       </Modal>
+      <ConfirmationModal
+        isOpen={logoutConfirmationOpen}
+        onClose={onCancelLogout}
+        onConfirm={() => {
+          onCancelLogout();
+          logout();
+        }}
+        title="Log out"
+        message="Are you sure you want to log out?"
+        confirmLabel="Log out"
+      />
     </div>,
     document.body,
   );

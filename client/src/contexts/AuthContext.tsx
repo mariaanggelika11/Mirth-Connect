@@ -78,6 +78,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
   const logout = useCallback(() => {
     clearUser();
+    setLogoutProblem(false);
     setIsLoggingOut(true);
     void logoutSession()
       .catch(() => {
@@ -121,8 +122,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setRemaining(sessionRemaining(current));
       setSessionActivityError(null);
     };
-    const logoutChanged = () =>
-      setLogoutProblem(['pending', 'failed'].includes(logoutState() || ''));
+    // A live pending operation is not a failed revocation. Persisted pending intent
+    // at startup still needs the existing interruption warning and retry path.
+    const logoutChanged = () => setLogoutProblem(logoutState() === 'failed');
     const refreshed = (event: Event) => {
       const current = (event as CustomEvent<string>).detail;
       const attempt = authGeneration();

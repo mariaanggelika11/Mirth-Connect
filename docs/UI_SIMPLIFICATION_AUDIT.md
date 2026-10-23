@@ -931,3 +931,31 @@ The menu now measures its actual height when opening and has a viewport height l
 | `npm run docs:check`, `npm run secrets:scan`, `git diff --check` | **PASS** | OpenAPI 49 paths/53 operations; targeted scanner without findings |
 
 Frontend changes only; no backend/API/schema/migration/dependency change, live database action, backend restart, commit, push or deployment. Full browser/backend suites, coverage and deployed/runtime database behavior were **NOT TESTED again** for this small presentation change. Refresh the local built UI to load the new action menu.
+
+## Confirm manual logout — 2026-10-23
+
+Header Sign out and the Session expiring dialog's Sign out action now open the English prompt **Are you sure you want to log out?** with **Cancel / Log out**. The shared confirmation appears in the existing session portal above editors/warnings. Cancel/Escape only closes the prompt and restores focus; no logout request or revocation intent is sent. Confirm calls the unchanged logout implementation. Pending confirmation resets when authentication ends. Automatic idle/absolute expiry, revocation and cross-tab logout remain immediate and do not wait for user confirmation.
+
+- `npx playwright test client/e2e/session.spec.ts`: **PASS — 11 tests**; `/tmp/mirth-logout-confirm-browser.log`. Covers confirmation/cancel/Escape/focus trap/Axe, warning-dialog logout, expiry with a pending confirmation, fresh login without a stale dialog, cross-tab logout, delayed refresh, logout failure/retry, disabled storage and the existing 15-minute/eight-hour boundaries. Synthetic API fixtures only.
+- `npx vitest run client/test/api.test.ts client/test/session-lifecycle.test.ts`: **PASS — 28 tests / 2 files**; `/tmp/mirth-logout-confirm-unit.log`.
+- `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run build`: **PASS**; build evidence `/tmp/mirth-logout-confirm-build.log`.
+- `npm run docs:check`, `npm run secrets:scan`, `git diff --check`: **PASS**; targeted scanner without findings.
+
+No backend/auth protocol, cookie, migration, dependency, database operation, restart, commit, push or deployment change. Full application/browser/backend coverage and production runtime were **NOT TESTED again** for this UI confirmation. The existing session/security behavior is preserved; this prompt does not establish production readiness.
+
+## False yellow logout warning during successful requests — 2026-10-23
+
+Reproduced the reported flash by holding a successful logout response open. The existing AuthProvider treated both live pending and failed logout events as logoutProblem, so the login page immediately displayed the yellow **Sign out could not be confirmed** warning before the server responded. No fixed millisecond duration is claimed: the interval depended on request/refresh timing.
+
+Live pending events no longer set the failure flag. The initiating tab displays neutral **Signing out…** progress and temporarily blocks form submission while its logout runs. Retry clears the previous warning while processing. Actual failures still show the warning and Retry sign out. Initialization still treats a persisted pending marker as a possibly interrupted logout, preserving its warning/retry and automatic-restore block. Access-token clearing, persistent logout intent, cookie/CSRF behavior, revocation requests, cross-tab propagation and idle/absolute expiry were not changed. The login page now uses a main landmark after accessibility checks identified its previous missing semantic container.
+
+| Command | Actual result | Evidence |
+| --- | --- | --- |
+| Focused successful-pending browser case before the fix | **FAIL — yellow warning present while the held successful request was pending** | `/tmp/mirth-logout-flash-reproduction.log` |
+| First fixed session suite | **13 PASS / 1 FAIL** | `/tmp/mirth-logout-flash-browser.log`; only full-page Axe landmark/region checks failed. Added main instead of excluding checks. |
+| Final `npx playwright test client/e2e/session.spec.ts` | **PASS — 14 tests** | `/tmp/mirth-logout-flash-browser-final.log`; includes a DOM observer proving no failure banner was ever inserted during delayed successful logout in either tab, real failure/retry, persisted interrupted intent, confirmation/cancel, cross-tab and expiry regression. Synthetic APIs only. |
+| `npx vitest run client/test/api.test.ts client/test/session-lifecycle.test.ts` | **PASS — 28 tests / 2 files** | `/tmp/mirth-logout-flash-unit.log` |
+| `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run build` | **PASS** | `/tmp/mirth-logout-flash-build.log` for the final build |
+| `npm run docs:check`, `npm run secrets:scan`, `git diff --check` | **PASS** | OpenAPI structure unchanged; targeted scanner without findings. |
+
+Frontend state/presentation change only. No live account logout, backend/API/migration/database operation, restart, commit, push or deployment. Full application/backend coverage and deployed production logout remain **NOT TESTED again** here. Refresh the built local page to load the fix.

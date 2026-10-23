@@ -1,5 +1,16 @@
 # Changelog
 
+## Remove false logout failure flash — 2026-10-23
+
+- Stop treating a live pending logout as failed. Show neutral Signing out… progress in the initiating tab and temporarily disable sign-in until its request finishes; keep successful cross-tab logout free of failure banners.
+- Preserve the warning/retry path for actual revocation failures and an interrupted logout detected after reload. Retry clears the previous warning while processing; logout-intent persistence and automatic-restore blocking remain unchanged.
+- Give the standalone login page a main landmark after full-page accessibility checks identified the missing semantic container.
+
+## Confirm manual logout — 2026-10-23
+
+- Ask “Are you sure you want to log out?” with Cancel / Log out for the header and session-warning Sign out actions. Cancel/Escape retains the current session; confirmation invokes the existing logout and revocation flow.
+- Keep automatic idle/absolute expiry and cross-tab logout immediate, including while confirmation is open. Reset pending confirmation when authentication ends.
+
 ## Explain unavailable channel deletion — 2026-10-23
 
 - Keep Delete channel visible to authorized administrators on non-archived channels; disable it with a visible, accessible reason when message history exists or the channel is not stopped. Preserve Archive, role checks and backend deletion safeguards.
