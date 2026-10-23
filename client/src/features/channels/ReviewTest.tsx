@@ -15,8 +15,6 @@ interface Props {
   testing: boolean;
   error: string;
   configurationError: string;
-  rawPreview: boolean;
-  onRawPreviewChange: (value: boolean) => void;
   canViewRaw: boolean;
 }
 
@@ -30,11 +28,9 @@ export function ReviewTest({
   testing,
   error,
   configurationError,
-  rawPreview,
-  onRawPreviewChange,
   canViewRaw,
 }: Props) {
-  const result = rawPreview && !canViewRaw ? null : suppliedResult;
+  const result = suppliedResult?.rawPayload && !canViewRaw ? null : suppliedResult;
   return (
     <details className="advanced-section review-test" aria-label="Optional configuration test">
       <summary>
@@ -132,17 +128,6 @@ export function ReviewTest({
         )}
         <details className="advanced-section">
           <summary>Advanced test options</summary>
-          {canViewRaw && (
-            <label className="check-field">
-              <input
-                type="checkbox"
-                checked={rawPreview}
-                onChange={(event) => onRawPreviewChange(event.target.checked)}
-              />
-              Show unmasked preview (access is audited)
-            </label>
-          )}
-          {!rawPreview && <small>Preview values follow privacy settings.</small>}
           {result && (
             <details className="advanced-section">
               <summary>Processing details</summary>

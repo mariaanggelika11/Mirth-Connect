@@ -12,6 +12,7 @@ import {
   formatTime,
 } from '../../components/ui/OperationalUI';
 import LogDetailModal from './LogDetailModal';
+import { useAuth } from '../../contexts/AuthContext';
 interface Props {
   initialFilters?: {
     channelId?: string;
@@ -37,6 +38,8 @@ const statuses = [
   'FILTERED',
 ];
 export default function MonitorView({ initialFilters = {} }: Props) {
+  const { can } = useAuth();
+  const canRaw = can('message:raw');
   const version = useRef(0),
     detailVersion = useRef(0);
   const [logs, setLogs] = useState<LogEntry[]>([]),
@@ -99,20 +102,23 @@ export default function MonitorView({ initialFilters = {} }: Props) {
       version.current++;
     };
   }, [load]);
-  const view = useCallback(async (id: number) => {
-    const current = ++detailVersion.current;
-    setOpeningId(id);
-    setError('');
-    try {
-      const result = await fetchLogDetail(id);
-      if (current === detailVersion.current) setSelectedLog(result);
-    } catch (e) {
-      if (current === detailVersion.current)
-        setError(e instanceof Error ? e.message : 'Unable to open message');
-    } finally {
-      if (current === detailVersion.current) setOpeningId(null);
-    }
-  }, []);
+  const view = useCallback(
+    async (id: number) => {
+      const current = ++detailVersion.current;
+      setOpeningId(id);
+      setError('');
+      try {
+        const result = await fetchLogDetail(id, 1, canRaw);
+        if (current === detailVersion.current) setSelectedLog(result);
+      } catch (e) {
+        if (current === detailVersion.current)
+          setError(e instanceof Error ? e.message : 'Unable to open message');
+      } finally {
+        if (current === detailVersion.current) setOpeningId(null);
+      }
+    },
+    [canRaw],
+  );
   useEffect(() => {
     if (initialFilters.messageId) void view(initialFilters.messageId);
     return () => {

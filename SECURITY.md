@@ -2,6 +2,10 @@
 
 Report vulnerabilities privately through the repository owner's approved channel or GitHub private vulnerability reporting if enabled. No contact is invented here; the owner must configure one. Do not include patient payloads, credentials, private keys or raw database dumps in public issues. Provide affected commit, synthetic reproduction and safe diagnostic codes. Rotate exposed credentials before considering historical cleanup. This custom engine has no formal HIPAA/ISO/SATUSEHAT certification claim. Production deployment requires hospital UAT, independent review and the readiness matrix.
 
+## Payload display update — 2026-10-23
+
+The UI automatically requests audited raw payloads for ADMIN in Messages, Review & Test and revision dry-runs. Manual raw/redacted switches are removed. Other roles retain their existing payload permissions and masking; default API responses remain masked. Role changes immediately hide cached raw content, and stale test responses cannot restore it. Source keys, configuration secrets, structured logs, diagnostics and error sanitization remain protected. This presentation change is not evidence of production security certification.
+
 ## Browser session verification — 21 October 2026
 
 Development source based on `30ceaa5`, including the preceding uncommitted Destination/HL7 changes. Browser sessions now use a 15-minute idle deadline, maximum eight-hour lifetime since login and one-minute UI warning. Backend checks apply on every browser-authenticated request and refresh; explicit CSRF-protected activity can only move idle time. Migration 008 adds family state, preserves token history and intentionally forces legacy sessions to sign in once. No actual environment, application database or deployed server was changed.
@@ -33,8 +37,8 @@ Development working tree based on `ce6db8d`. UI simplification retains all four 
 | API-key rotation | PASS | Generated replacement stored encrypted; old key rejected at both inbound paths; new key accepted; rotation audit emitted |
 | One-time API-key display | PASS | Rotation response is `no-store`; channel list exposes only configured flag; browser closes/reopens without retaining the key; no retrieval API |
 | Audit logging | PASS | Rotation/raw-access/logout metadata assertions; raw response fails closed when audit insert fails. Durable database behavior is not rerun here |
-| Payload redaction | PASS | JSON/HL7/free-text/XML masking tests; default message/preview payload masked; synthetic names/MRN/passwords/tokens excluded. Arbitrary hospital profiles still require review |
-| Audited raw-payload access | PASS | Requires `message:raw`; default remains masked even for ADMIN; explicit access emits `VIEW_MESSAGE_RAW` with request ID before response |
+| Payload redaction | PASS | JSON/HL7/free-text/XML masking tests; default API message/preview payload masked (ADMIN UI now automatically requests audited raw); synthetic names/MRN/passwords/tokens excluded. Arbitrary hospital profiles still require review |
+| Audited raw-payload access | PASS | Requires `message:raw`; API requests without raw remain masked even for ADMIN; each raw request emits `VIEW_MESSAGE_RAW` with request ID before response |
 | Configuration secret encryption | PASS | AES-GCM roundtrip, tamper rejection, historical ciphertext/keyring tests, rotation tests, encrypted source credential storage and sanitized endpoints/revision details |
 | SSRF / destination host protection | PASS | Literal and DNS loopback/private denied without explicit allowlist; metadata/link-local/unspecified/multicast always denied; IPv4-mapped IPv6 cases, pinned DNS answer, real HTTP redirect rejection; existing TCP/TLS probes share policy |
 | Rate limiting / brute force | PASS | Actual repeated wrong-password login reaches 429; invalid source keys limited before more DB lookups; management limiter retained. Limits are per process/IP, not a distributed defense |

@@ -77,6 +77,18 @@ beforeEach(() => {
           },
         ],
       };
+    if (sql.includes('FROM "MessageDestinationLog"'))
+      return {
+        recordset: [
+          {
+            message_id: 2,
+            message_control_id: 'SYNTHETIC-CONTROL-ID',
+            request_data: '{"patientName":"Synthetic Private Patient"}',
+            outbound_data: 'MSH|^~\\&|SYNTHETIC',
+            response_text: 'Synthetic receiver response',
+          },
+        ],
+      };
     return { recordset: [], rowsAffected: [1] };
   });
 });
@@ -188,6 +200,7 @@ describe('Security enforcement survives UI simplification', () => {
       .get('/api/message/1')
       .set('Authorization', 'Bearer ' + token());
     expect(masked.status).toBe(200);
+    expect(masked.body.data.destinationLogs[0].messageControlId).toBe('[REDACTED]');
     for (const value of [
       'Synthetic Private Patient',
       'synthetic-private-token',
@@ -199,6 +212,12 @@ describe('Security enforcement survives UI simplification', () => {
       .set('Authorization', 'Bearer ' + token());
     expect(raw.status).toBe(200);
     expect(raw.body.data.originalPayload.patientName).toBe('Synthetic Private Patient');
+    expect(raw.body.data.destinationLogs[0]).toMatchObject({
+      messageControlId: 'SYNTHETIC-CONTROL-ID',
+      requestData: { patientName: 'Synthetic Private Patient' },
+      outboundData: 'MSH|^~\\&|SYNTHETIC',
+      responseText: 'Synthetic receiver response',
+    });
     expect(state.audits.at(-1)).toMatchObject({
       action: 'VIEW_MESSAGE_RAW',
       resourceId: 1,

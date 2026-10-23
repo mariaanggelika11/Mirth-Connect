@@ -46,7 +46,6 @@ export function RevisionPanel({
   const [activeRevision, setActiveRevision] = useState(channel.activeRevision || 0);
   const canViewRaw = can('message:raw');
   const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null);
-  const [rawPreview, setRawPreview] = useState(false);
   const [rows, setRows] = useState<Revision[]>([]),
     [error, setError] = useState(''),
     [summary, setSummary] = useState(''),
@@ -66,13 +65,15 @@ export function RevisionPanel({
     } | null>(null),
     [selected, setSelected] = useState<number[]>([]);
   const dirty = !!editing && JSON.stringify(editing) !== editBaseline;
+  const dryRunContext = JSON.stringify([channel.id, currentRevision, synthetic, canViewRaw]);
+  const currentDryRunContext = useRef(dryRunContext);
+  currentDryRunContext.current = dryRunContext;
   useEffect(() => {
-    setRawPreview(false);
     setDryRunResult(null);
   }, [canViewRaw]);
   useEffect(() => {
     setDryRunResult(null);
-  }, [synthetic, rawPreview]);
+  }, [synthetic]);
   useEffect(() => {
     if (!dirty) return;
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -151,7 +152,6 @@ export function RevisionPanel({
   useEffect(() => {
     setDryRunResult(null);
     setTestResult('');
-    setRawPreview(false);
     if (currentRevision !== null) void view(currentRevision);
     return () => {
       reviewRequest.current++;
@@ -206,6 +206,7 @@ export function RevisionPanel({
     }
   }
   async function testRevision(revision: number) {
+    const context = dryRunContext;
     setTestOpen(true);
     setBusy(true);
     setError('');
@@ -213,16 +214,19 @@ export function RevisionPanel({
     setDryRunResult(null);
     try {
       const { data: configuration } = await api.get(`/channel/${channel.id}/revisions/${revision}`);
+      if (currentDryRunContext.current !== context) return;
       let payload: unknown = synthetic;
       if (configuration.data.source.inboundDataType === 'JSON') {
         payload = JSON.parse(synthetic);
       }
       const { data } = await api.post(`/channel/${channel.id}/revisions/${revision}/dry-run`, {
         payload,
-        ...(rawPreview && can('message:raw') ? { raw: true } : {}),
+        raw: canViewRaw,
       });
-      setDryRunResult(data);
+      if (currentDryRunContext.current === context)
+        setDryRunResult({ ...data, rawPayload: data.rawPayload ?? canViewRaw });
     } catch (e) {
+      if (currentDryRunContext.current !== context) return;
       setError(
         e instanceof SyntaxError
           ? 'The test payload is not valid JSON.'
@@ -627,19 +631,6 @@ export function RevisionPanel({
                     />
                   </label>
                   <p className="muted">Synthetic data only. Testing does not send messages.</p>
-                  {canViewRaw && (
-                    <label className="check-field">
-                      <input
-                        type="checkbox"
-                        checked={rawPreview}
-                        onChange={(event) => {
-                          setRawPreview(event.target.checked);
-                          setDryRunResult(null);
-                        }}
-                      />
-                      View raw synthetic preview (audited)
-                    </label>
-                  )}
                   <Button
                     variant="secondary"
                     disabled={busy || !!editing || !ready || !synthetic.trim()}
@@ -647,7 +638,7 @@ export function RevisionPanel({
                   >
                     Dry-run revision {row.revision}
                   </Button>
-                  {dryRunResult && (
+                  {dryRunResult && (!dryRunResult.rawPayload || canViewRaw) && (
                     <div aria-label="Revision dry-run result">
                       <DryRunPreview result={dryRunResult} />
                     </div>

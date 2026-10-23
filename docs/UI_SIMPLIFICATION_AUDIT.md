@@ -959,3 +959,25 @@ Live pending events no longer set the failure flag. The initiating tab displays 
 | `npm run docs:check`, `npm run secrets:scan`, `git diff --check` | **PASS** | OpenAPI structure unchanged; targeted scanner without findings. |
 
 Frontend state/presentation change only. No live account logout, backend/API/migration/database operation, restart, commit, push or deployment. Full application/backend coverage and deployed production logout remain **NOT TESTED again** here. Refresh the built local page to load the fix.
+
+
+## Automatic authorized payload display — 2026-10-23
+
+User requested removing [REDACTED TEXT]/[REDACTED] from dummy-data testing and message inspection. Messages now requests raw detail automatically when the current role has message:raw (ADMIN). Review & Test and revision dry-runs similarly request raw output automatically, without unmask checkboxes. Manual View raw / Show redacted controls and their helper text are removed. Copy uses the displayed original content; message pagination preserves raw authorization. Authorized raw detail also returns the actual HL7 message control ID rather than its masked placeholder.
+
+The backend raw permission and audit-before-response checks remain: restricted roles cannot request raw, and audit failure prevents returning a raw payload. Other roles keep their existing payload visibility/masking. API calls without raw remain masked, list endpoints stay metadata-only, and credentials/configuration/logs/error responses retain their existing protection. This is not a global masking disable or a claim that a synthetic label makes arbitrary data safe. No schema, migration, environment, real database or deployed server was changed.
+
+Cached raw message/preview values are hidden immediately on permission downgrade. Revision tests now bind asynchronous results to channel/version/input/permission context so a late response cannot restore stale raw content. Existing wizard request guards remain. Test fixtures were updated to represent raw response markers and actual outbound raw payloads rather than returning masked content after a raw request.
+
+
+| Command | Actual result | Evidence / limits |
+| --- | --- | --- |
+| `npm run typecheck` | **PASS** | Client and server TypeScript checks completed. |
+| `npm run lint` | **PASS** | Full configured source/test lint completed without errors. |
+| `npm run format:check` | **PASS** | `/tmp/mirth-full-payload-format.log`; changed revision test also checked again after its timing correction. |
+| `npm run build` | **PASS** | `/tmp/mirth-full-payload-build.log`; frontend production assets and backend TypeScript build completed before browser tests. |
+| `npm run test:coverage` | **PASS — 742 tests / 47 files** | `/tmp/mirth-full-payload-coverage.log`. Statements 87.51%, branches 85.77%, functions 89.76%, lines 88.53%; previous baseline 87.48/85.66/89.76/88.50%, no decrease. Includes real raw-access denial, audit generation/failure, preview no-delivery and secure-logging regressions with isolated database fixtures. |
+| Initial `npm run test:e2e` | **FAIL — 129 passed / 2 failed** | `/tmp/mirth-full-payload-e2e.log`. Both new revision tests asserted a fixture variable immediately after waitForRequest, before the async route handler assigned it. Replaced that assertion with expect.poll; no production behavior or permission assertion removed. |
+| Final `npm run test:e2e` | **PASS — 131 tests** | `/tmp/mirth-full-payload-e2e-final.log`. Full suite rerun includes automatic full display/copy/pagination, restricted-role requests, cached and late raw response rejection on downgrade, optional testing, sessions, mobile, keyboard and accessibility. Browser APIs are synthetic intercepted fixtures. |
+| `git diff --check` | **PASS** | No whitespace errors. |
+| Deployed/production verification, live database integration | **NOT TESTED** | No production requests, database writes, migration, restart, deployment, commit or push performed. |

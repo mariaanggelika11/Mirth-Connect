@@ -162,6 +162,7 @@ export const getMessageDetail = async (req: Request, res: Response, next: NextFu
           return payload
             ? {
                 ...row,
+                messageControlId: raw ? (l.message_control_id ?? undefined) : row.messageControlId,
                 requestData: visible(row.requestData),
                 outboundData: visible(row.outboundData),
                 responseText: visible(row.responseText),

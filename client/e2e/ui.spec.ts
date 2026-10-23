@@ -843,7 +843,7 @@ test('draft iteration, stored dry-run and handshake probe use functional APIs wi
     }),
   );
   await page.route('**/api/channel/1/revisions/3/dry-run', (r) => {
-    expect(r.request().postDataJSON()).toEqual({ payload: { fixture: 'synthetic' } });
+    expect(r.request().postDataJSON()).toEqual({ payload: { fixture: 'synthetic' }, raw: false });
     return r.fulfill({
       json: {
         success: true,
@@ -1097,7 +1097,7 @@ test('stored TEXT revision dry-run preserves JSON-looking text without changing 
   await expect(page.getByLabel('Revision dry-run result')).toContainText(
     'Source processing · TEXT',
   );
-  expect(posted).toEqual({ payload: '{"fixture":"synthetic"}' });
+  expect(posted).toEqual({ payload: '{"fixture":"synthetic"}', raw: false });
   await page.getByLabel('Synthetic revision test payload').fill('Changed synthetic input');
   await expect(page.getByLabel('Revision dry-run result')).toHaveCount(0);
 });
@@ -1181,3 +1181,84 @@ test('delivery result shows captured duration and exact attempts without inventi
   await expect(legacy.getByText('Not recorded', { exact: true })).toHaveCount(3);
   await expect(legacy).not.toContainText('HTTP 200');
 });
+
+for (const late of [false, true])
+  test(`revision preview shows full admin data automatically and rejects ${late ? 'late' : 'cached'} raw output after role change`, async ({
+    page,
+  }) => {
+    await session(page, 'ADMIN');
+    await page.route('**/api/channel/1/revisions', (route) =>
+      route.fulfill({
+        json: {
+          data: [{ revision: 2, state: 'DRAFT', checksum: 'a'.repeat(64) }],
+        },
+      }),
+    );
+    await page.route('**/api/channel/1/revisions/2', (route) =>
+      route.fulfill({
+        json: {
+          data: {
+            name: 'Synthetic revision',
+            source: { type: 'HTTP', inboundDataType: 'JSON' },
+            destinations: [],
+          },
+        },
+      }),
+    );
+    let release: () => void = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let posted: unknown;
+    await page.route('**/api/channel/1/revisions/2/dry-run', async (route) => {
+      posted = route.request().postDataJSON();
+      if (late) await pending;
+      return route.fulfill({
+        json: {
+          success: true,
+          accepted: true,
+          rawPayload: true,
+          elapsedMs: 1,
+          networkDelivery: 'NOT_SENT',
+          results: [],
+          source: {
+            format: 'JSON',
+            payload: { patient_id: 'DUMMY-001', name: 'Example Patient' },
+            validation: 'PASSED',
+            filter: 'ACCEPTED',
+            transformation: 'PASS_THROUGH',
+          },
+        },
+      });
+    });
+    await page.getByLabel('More actions for Test Channel').click();
+    await page.getByRole('button', { name: 'Revisions', exact: true }).click();
+    await revisionAdvanced(page);
+    await page.getByText('Test with synthetic data', { exact: true }).click();
+    await expect(page.getByRole('checkbox', { name: /raw synthetic preview/ })).toHaveCount(0);
+    const request = page.waitForRequest('**/api/channel/1/revisions/2/dry-run');
+    await page.getByRole('button', { name: 'Dry-run revision 2' }).click();
+    await request;
+    await expect.poll(() => posted).toEqual({ payload: { fixture: 'synthetic' }, raw: true });
+    if (!late)
+      await expect(page.getByLabel('Revision dry-run result')).toContainText('Example Patient');
+    await page.route('**/api/auth/me', (route) =>
+      route.fulfill({
+        json: {
+          success: true,
+          data: { id: 1, name: 'Synthetic developer', role: 'DEVELOPER' },
+        },
+      }),
+    );
+    const reconciled = page.waitForResponse('**/api/auth/me');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await reconciled;
+    if (late) {
+      const response = page.waitForResponse('**/api/channel/1/revisions/2/dry-run');
+      release();
+      await response;
+    }
+    await expect(page.getByLabel('Revision dry-run result')).toHaveCount(0);
+    await expect(page.getByText('Example Patient', { exact: false })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Dry-run revision 2' })).toBeEnabled();
+  });

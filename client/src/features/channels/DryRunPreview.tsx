@@ -4,6 +4,7 @@ import { PayloadPreview } from './PayloadPreview';
 import type { FieldOption } from '../../components/ui/FieldExplorer';
 
 export interface DryRunResult {
+  rawPayload?: boolean;
   success: boolean;
   accepted: boolean;
   elapsedMs: number;

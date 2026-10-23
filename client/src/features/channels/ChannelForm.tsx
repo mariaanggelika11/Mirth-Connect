@@ -101,8 +101,7 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     [validationBaseline, setValidationBaseline] = useState(''),
     [showValidationErrors, setShowValidationErrors] = useState(false),
     [filterEnabled, setFilterEnabled] = useState(false),
-    [retainedFilter, setRetainedFilter] = useState(''),
-    [rawPreview, setRawPreview] = useState(false);
+    [retainedFilter, setRetainedFilter] = useState('');
   const [editor, setEditor] = useState<ChannelScriptEditor | null>(null);
   const previewContext = JSON.stringify({
     isOpen,
@@ -110,7 +109,6 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
     draft,
     validation,
     sample,
-    rawPreview,
     canViewRaw,
     sourceFilterValid,
     filterEnabled,
@@ -145,7 +143,6 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
       setDiscard(false);
       setEditor(null);
       setTestResult(null);
-      setRawPreview(false);
       setTransformationValid(true);
       setSourceFilterValid(true);
       setDestinationFilterValidity(value.destinations.map(() => true));
@@ -166,7 +163,6 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
   }, [previewContext]);
   useEffect(() => {
     if (!canViewRaw) {
-      setRawPreview(false);
       setTestResult(null);
     }
   }, [canViewRaw]);
@@ -400,10 +396,10 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
           validationProfile,
         },
         payload,
-        raw: rawPreview && canViewRaw,
+        raw: canViewRaw,
       });
       if (currentPreviewContext.current === context && previewRequest.current === request)
-        setTestResult(data);
+        setTestResult({ ...data, rawPayload: data.rawPayload ?? canViewRaw });
     } catch (error) {
       if (currentPreviewContext.current === context && previewRequest.current === request)
         setTestError(
@@ -932,8 +928,6 @@ export default function ChannelForm({ isOpen, onClose, onSubmit, initialData, se
                   testing={testing}
                   error={testError}
                   configurationError={reviewConfigurationError()}
-                  rawPreview={rawPreview}
-                  onRawPreviewChange={setRawPreview}
                   canViewRaw={canViewRaw}
                 />
                 <p className="muted">

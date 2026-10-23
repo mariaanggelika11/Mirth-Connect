@@ -178,6 +178,7 @@ async function workspace(
           accepted: true,
           elapsedMs: 5,
           networkDelivery: 'NOT_SENT',
+          rawPayload: !!body.raw,
           input: { format: configuration.source?.inboundDataType || 'JSON', payload },
           source: {
             format: 'JSON',
@@ -301,8 +302,8 @@ async function workspace(
             sourceTransformed: false,
             payloadAllowed: role !== 'VIEWER',
             rawPayload: raw,
-            originalPayload: id === 2 ? inbound : raw ? rawInbound : inbound,
-            transformedPayload: id === 2 ? xml : raw ? rawInbound : inbound,
+            originalPayload: raw ? rawInbound : inbound,
+            transformedPayload: id === 2 ? (raw ? rawXml : xml) : raw ? rawInbound : inbound,
             destinationPagination: { page: logPage, pageSize: 1, hasNext: logPage === 1 },
             destinationLogs: [
               {
@@ -384,18 +385,10 @@ async function newJsonXmlChannel(page: Page) {
   await page.getByLabel('Outbound format', { exact: false }).selectOption('XML');
   await page.getByLabel('Endpoint', { exact: false }).fill(receiver);
 }
-async function preview(page: Page, raw = false, payload: unknown = rawInbound) {
+async function preview(page: Page, payload: unknown = rawInbound) {
   await step(page, 3);
   await openReviewTest(page);
   await page.getByRole('textbox', { name: /^Test input · JSON/ }).fill(JSON.stringify(payload));
-  if (raw) {
-    const rawOption = page.getByRole('checkbox', {
-      name: 'Show unmasked preview (access is audited)',
-    });
-    if (!(await rawOption.isVisible()))
-      await page.getByText('Advanced test options', { exact: true }).click();
-    await page.getByRole('checkbox', { name: 'Show unmasked preview (access is audited)' }).check();
-  }
   await page.getByRole('button', { name: 'Run Test', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toContainText(
     'Transformation successful',
@@ -584,8 +577,8 @@ test('Review keeps testing optional and shows output only after an explicit test
   await page.getByRole('button', { name: 'Run Test', exact: true }).click();
   const output = page.getByRole('region', { name: 'Generated output', exact: true });
   await expect(output).toContainText('No message was sent.');
-  await expect(output).toContainText(xml);
-  expect(captured(state, '/api/channel/preview-transformation')[0].body.raw).toBe(false);
+  await expect(output).toContainText(rawXml);
+  expect(captured(state, '/api/channel/preview-transformation')[0].body.raw).toBe(true);
   expect(
     captured(state, '/api/channel/preview-transformation')[0].body.configuration,
   ).not.toHaveProperty('changeSummary');
@@ -666,12 +659,12 @@ test('JSON to XML preview, connection test and confirmed onboarding delivery kee
   });
   await preview(page);
   const output = page.getByRole('region', { name: 'Generated output', exact: true });
-  await expect(output).toContainText(xml);
+  await expect(output).toContainText(rawXml);
   await output.getByRole('button', { name: 'Copy Output', exact: true }).click();
-  expect(await clipboard(page)).toBe(xml);
+  expect(await clipboard(page)).toBe(rawXml);
   expect(
     captured(state, '/api/channel/preview-transformation').every(
-      (request) => request.body.raw === false,
+      (request) => request.body.raw === true,
     ),
   ).toBe(true);
   await expect(page.getByText('Processing details', { exact: true })).toBeVisible();
@@ -683,7 +676,7 @@ test('JSON to XML preview, connection test and confirmed onboarding delivery kee
   await expect(stages).toContainText('Pass-through');
   await expect(page.getByLabel('Output preview', { exact: true })).toContainText('NOT_SENT');
   expect(captured(state, '/api/channel/preview-transformation')[0].body).toMatchObject({
-    raw: false,
+    raw: true,
     payload: rawInbound,
     configuration: {
       validationProfile: {},
@@ -1289,31 +1282,28 @@ test('Messages separates inbound, source and final output while auditing raw pag
   ).toBeVisible();
   await expect(page.getByText('No source transformation', { exact: true })).toBeVisible();
   const delivery = page.getByRole('region', { name: 'Outbound delivery to PATIENT_XML_RECEIVER' });
-  await expect(delivery).toContainText(xml);
+  await expect(delivery).toContainText(rawXml);
   await expect(delivery).toContainText('XML');
   await expect(delivery).toContainText('OUT-SENT');
   await expect(delivery).toContainText('Synthetic destination accepted');
-  await expect(page.getByText('SYNTHETIC EXAMPLE', { exact: false })).toHaveCount(0);
+  await expect(delivery).toContainText('SYNTHETIC EXAMPLE');
   await delivery.getByRole('button', { name: 'Copy Outbound Message', exact: true }).click();
-  expect(await clipboard(page)).toBe(xml);
-  await expect(
-    page.getByText('Viewing raw payload will be recorded in the audit log.', { exact: true }),
-  ).toBeVisible();
-  expect(state.details.filter((request) => request.raw)).toHaveLength(0);
+  expect(await clipboard(page)).toBe(rawXml);
+  await expect(page.getByRole('button', { name: 'View raw (audited)', exact: true })).toHaveCount(
+    0,
+  );
+  expect(state.details).toEqual([{ id: 1, page: 1, raw: true }]);
   await page.getByRole('button', { name: 'Next results', exact: true }).click();
   await expect(page.getByText('Results page 2', { exact: true })).toBeVisible();
   await expect(delivery).toContainText('REMOTE_HTTP_ERROR');
   await expect(delivery).toContainText('HTTP 503');
-  await page.getByRole('button', { name: 'View raw (audited)', exact: true }).click();
   await expect(delivery).toContainText(rawXml);
   expect(state.details.at(-1)).toEqual({ id: 1, page: 2, raw: true });
-  await page.getByRole('button', { name: 'Show redacted', exact: true }).click();
-  await expect(delivery).toContainText(xml);
-  expect(state.details.at(-1)).toEqual({ id: 1, page: 2, raw: false });
   await page.getByRole('tab', { name: 'Delivery history', exact: true }).click();
   await expect(page.getByText('Results page 2', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Previous results', exact: true }).click();
   await expect(page.getByText('Results page 1', { exact: true })).toBeVisible();
+  expect(state.details.every((request) => request.raw)).toBe(true);
   await page.keyboard.press('Escape');
   await page.getByLabel('Direction', { exact: true }).selectOption('OUT');
   await page.getByRole('button', { name: 'Open message 2', exact: true }).click();
@@ -1348,7 +1338,6 @@ test('Messages hides cached raw payload immediately when an active admin becomes
   await page.getByRole('button', { name: 'Messages', exact: true }).click();
   await page.getByRole('button', { name: 'Open message 1', exact: true }).click();
   await page.getByRole('tab', { name: 'Payload', exact: true }).click();
-  await page.getByRole('button', { name: 'View raw (audited)', exact: true }).click();
   await expect(page.getByText('SYNTHETIC EXAMPLE', { exact: false }).first()).toBeVisible();
   let releaseRedacted: () => void = () => {};
   const waitForRelease = new Promise<void>((resolve) => {
@@ -1440,12 +1429,12 @@ test('raw preview and raw Messages controls follow the current role', async ({ p
   expect(state.details.every((request) => !request.raw)).toBe(true);
 });
 
-test('administrator unmasked synthetic preview is explicit and never sends a delivery', async ({
+test('administrator preview shows full payload automatically and never sends a delivery', async ({
   page,
 }) => {
   const state = await workspace(page);
   await newJsonXmlChannel(page);
-  await preview(page, true);
+  await preview(page);
   await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toContainText(
     rawXml,
   );
@@ -1486,7 +1475,7 @@ test('manual field mappings save required defaults and test only after source an
     name: 'Example Patient',
     date_of_birth: '2000-01-01',
   };
-  await preview(page, true, patient);
+  await preview(page, patient);
   const request = captured(state, '/api/channel/preview-transformation')[0];
   const configuration = request.body.configuration as {
     processingScript: string;
@@ -1827,7 +1816,7 @@ test('editing a mapping clears the previous review output and never tests automa
 }) => {
   const state = await workspace(page);
   await openExisting(page);
-  await preview(page, true);
+  await preview(page);
   await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toContainText(
     rawXml,
   );
@@ -1847,7 +1836,7 @@ test('Review hides cached raw test output immediately after the administrator ro
 }) => {
   const state = await workspace(page);
   await openExisting(page);
-  await preview(page, true);
+  await preview(page);
   await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toContainText(
     rawXml,
   );

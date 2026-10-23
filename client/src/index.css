@@ -2,8 +2,7 @@
 
 .source-endpoint,
 .preview-stage,
-.destination-settings-group,
-.raw-access-controls {
+.destination-settings-group {
   display: grid;
   gap: 10px;
   min-width: 0;

@@ -447,36 +447,6 @@ export default function LogDetailModal({
           )}
           {tab === 'payload' && payloadVisible && (
             <div className="form-section">
-              <p className="muted" role="status">
-                {log.rawPayload
-                  ? 'Raw payload access is audited. Copies contain the raw content displayed below.'
-                  : 'Redacted view. Copies use the displayed content.'}
-              </p>
-              {canRaw && (
-                <div className="raw-access-controls">
-                  {!log.rawPayload && (
-                    <p className="muted">Viewing raw payload will be recorded in the audit log.</p>
-                  )}
-                  <Button
-                    variant="secondary"
-                    disabled={loading}
-                    onClick={() => {
-                      setLoading(true);
-                      setError('');
-                      void fetchLogDetail(
-                        log.id,
-                        log.destinationPagination?.page || 1,
-                        !log.rawPayload,
-                      )
-                        .then(setLog)
-                        .catch((e) => setError(e.message))
-                        .finally(() => setLoading(false));
-                    }}
-                  >
-                    {log.rawPayload ? 'Show redacted' : 'View raw (audited)'}
-                  </Button>
-                </div>
-              )}
               {log.direction === 'OUT' ? (
                 <>
                   <p className="muted">

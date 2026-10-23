@@ -1,5 +1,10 @@
 # Changelog
 
+## Automatic authorized payload display — 2026-10-23
+
+- Show full input/output/response payloads automatically to ADMIN in Messages, Review & Test and revision dry-runs; remove manual raw/redacted controls. Copy and pagination follow the displayed values. Include the original HL7 control ID in authorized raw message detail.
+- Keep backend raw permission checks, audit-before-response, restricted-role masking, secret/log protections and sanitized list APIs. Hide cached raw data on role changes and ignore stale revision-test responses. No migration or data change.
+
 ## Remove false logout failure flash — 2026-10-23
 
 - Stop treating a live pending logout as failed. Show neutral Signing out… progress in the initiating tab and temporarily disable sign-in until its request finishes; keep successful cross-tab logout free of failure banners.
