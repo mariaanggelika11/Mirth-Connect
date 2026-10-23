@@ -66,6 +66,8 @@ describe('Browser session security', () => {
     expires_at: new Date(Date.now() + 60000),
     used_at: null,
     revoked_at: null,
+    created_at: new Date(),
+    last_activity_at: new Date(),
   };
   it('rejects refresh without CSRF before database access', async () => {
     expect((await request(app).post('/api/auth/browser/refresh')).status).toBe(403);
@@ -74,6 +76,7 @@ describe('Browser session security', () => {
   it('rotates refresh once and returns short access token', async () => {
     state.query
       .mockResolvedValueOnce({ recordset: [] })
+      .mockResolvedValueOnce({ recordset: [row] })
       .mockResolvedValueOnce({ recordset: [row] })
       .mockResolvedValue({ recordset: [], rowsAffected: [1] });
     const res = await request(app)
@@ -89,6 +92,7 @@ describe('Browser session security', () => {
     state.query
       .mockResolvedValueOnce({ recordset: [] })
       .mockResolvedValueOnce({ recordset: [{ ...row, used_at: new Date() }] })
+      .mockResolvedValueOnce({ recordset: [row] })
       .mockResolvedValue({ recordset: [], rowsAffected: [1] });
     const res = await request(app)
       .post('/api/auth/browser/refresh')
@@ -97,7 +101,7 @@ describe('Browser session security', () => {
     expect(res.status).toBe(401);
     expect(res.body.token).toBeUndefined();
     expect(state.inputs.action).toBe('REFRESH_REUSE');
-    expect(state.history.some((sql) => sql.includes('revoked_at=CURRENT_TIMESTAMP'))).toBe(true);
+    expect(state.history.some((sql) => sql.includes('revoked_at=COALESCE'))).toBe(true);
   });
   it('rejects expired, revoked and wrong-CSRF sessions', async () => {
     for (const invalid of [

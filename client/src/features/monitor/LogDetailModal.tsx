@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { ArrowRight, ChevronDown, RotateCcw } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchLogDetail, resendMessage } from '../../services/message.api';
-import type { LogEntry, DestinationLog } from '../../types';
+import type { LogEntry, DestinationLog, DestinationOutcome } from '../../types';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { StatusBadge, EmptyState, formatTime } from '../../components/ui/OperationalUI';
@@ -20,6 +20,77 @@ function deliveryAttempts(value?: number | null) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
     ? value
     : 'Not recorded';
+}
+const processingLabels: Record<string, string> = {
+  BYPASSED: 'Disabled',
+  MATCHED: 'Matched',
+  NOT_MATCHED: 'Not matched',
+  NOT_RUN: 'Not run',
+  UNKNOWN: 'Not recorded',
+  ERROR: 'Failed',
+  TRANSFORMED: 'Transformed',
+  PASS_THROUGH: 'Pass-through',
+  APPLIED: 'Applied',
+  NOT_CONFIGURED: 'Not configured',
+  SENT: 'Sent',
+  FAILED: 'Failed',
+  QUEUED: 'Queued',
+  FILTERED: 'Filtered · not sent',
+  DISABLED: 'Destination disabled',
+  NOT_SENT: 'Not sent',
+  CONVERTED: 'Converted',
+};
+function DestinationProcessing({ outcomes }: { outcomes?: DestinationOutcome[] }) {
+  if (!outcomes?.length) return null;
+  return (
+    <section aria-label="Destination processing" className="form-section">
+      <h3>Destination processing</h3>
+      {outcomes.map((outcome) => (
+        <div className="delivery-card" key={outcome.destinationId}>
+          <div className="delivery-heading">
+            <strong>{outcome.name}</strong>
+            <span>{processingLabels[outcome.delivery] || outcome.delivery}</span>
+          </div>
+          <dl className="definition-list">
+            <div>
+              <dt>Destination</dt>
+              <dd>{outcome.enabled ? 'Enabled' : 'Disabled'}</dd>
+            </div>
+            <div>
+              <dt>Filter</dt>
+              <dd>{processingLabels[outcome.filter] || outcome.filter}</dd>
+            </div>
+            <div>
+              <dt>Transformation</dt>
+              <dd>{processingLabels[outcome.transformation] || outcome.transformation}</dd>
+            </div>
+            {!['NOT_CONFIGURED', 'NOT_RUN'].includes(outcome.template) && (
+              <div>
+                <dt>Legacy output script</dt>
+                <dd>{processingLabels[outcome.template] || outcome.template}</dd>
+              </div>
+            )}
+            {outcome.conversion === 'ERROR' && (
+              <div>
+                <dt>Output conversion</dt>
+                <dd>Failed</dd>
+              </div>
+            )}
+            <div>
+              <dt>Delivery</dt>
+              <dd>{processingLabels[outcome.delivery] || outcome.delivery}</dd>
+            </div>
+            <div>
+              <dt>Network attempts</dt>
+              <dd>{outcome.attemptCount === null ? 'Not recorded' : outcome.attemptCount}</dd>
+            </div>
+          </dl>
+          {outcome.code && <p className="muted">Diagnostic: {outcome.code}</p>}
+          <small>{formatTime(outcome.occurredAt)}</small>
+        </div>
+      ))}
+    </section>
+  );
 }
 export default function LogDetailModal({
   log: initialLog,
@@ -46,6 +117,9 @@ export default function LogDetailModal({
   const payloadAllowed = !!log.payloadAllowed && canPayload;
   const rawAccessRevoked = !!log.rawPayload && !canRaw;
   const payloadVisible = payloadAllowed && !rawAccessRevoked;
+  const networkLogs = log.destinationLogs?.filter(
+    (destination) => destination.networkAttempted !== false,
+  );
   useEffect(() => {
     if (!canResend) setConfirm(null);
   }, [canResend]);
@@ -189,12 +263,17 @@ export default function LogDetailModal({
                   <ValidationResults results={log.validation.results} />
                 </section>
               )}
+              <DestinationProcessing outcomes={log.destinationOutcomes} />
               <section aria-label="Delivery Result" className="form-section">
                 <h3>Delivery Result</h3>
-                {!log.destinationLogs?.length ? (
-                  <p className="muted">No destination attempts recorded.</p>
+                {!networkLogs?.length ? (
+                  <p className="muted">
+                    {log.destinationOutcomes?.length
+                      ? 'No network delivery attempts recorded.'
+                      : 'No destination attempts recorded.'}
+                  </p>
                 ) : (
-                  log.destinationLogs.map((dest, i) => (
+                  networkLogs.map((dest, i) => (
                     <div key={`${dest.messageId}-${dest.sentAt}-${i}`} className="delivery-card">
                       <div className="delivery-heading">
                         <strong>{dest.destinationName || 'Destination'}</strong>
@@ -224,7 +303,7 @@ export default function LogDetailModal({
                           <dd>{deliveryAttempts(dest.attemptCount)}</dd>
                         </div>
                       </dl>
-                      <small>{formatTime(dest.sentAt)}</small>
+                      <small>{formatTime(dest.sentAt || dest.occurredAt)}</small>
                     </div>
                   ))
                 )}
@@ -447,7 +526,7 @@ export default function LogDetailModal({
                     <div className="delivery-heading">
                       <div>
                         <h3>{dest.destinationName || 'Destination'}</h3>
-                        <small>{formatTime(dest.sentAt)}</small>
+                        <small>{formatTime(dest.sentAt || dest.occurredAt)}</small>
                       </div>
                       <StatusBadge status={dest.status} />
                     </div>
@@ -462,42 +541,46 @@ export default function LogDetailModal({
                         <strong>{dest.outboundFormat || 'Outbound format not recorded'}</strong>
                       </div>
                     )}
-                    <dl className="definition-list">
-                      <div>
-                        <dt>Outbound format</dt>
-                        <dd>{dest.outboundFormat || 'Not recorded'}</dd>
-                      </div>
-                      {dest.connectorType && (
+                    {dest.networkAttempted === false ? (
+                      <p className="muted">Processing result only. No network request was made.</p>
+                    ) : (
+                      <dl className="definition-list">
                         <div>
-                          <dt>Connector</dt>
-                          <dd>{dest.connectorType}</dd>
+                          <dt>Outbound format</dt>
+                          <dd>{dest.outboundFormat || 'Not recorded'}</dd>
                         </div>
-                      )}
-                      <div>
-                        <dt>Delivery status</dt>
-                        <dd>{dest.status}</dd>
-                      </div>
-                      {dest.httpStatus && (
+                        {dest.connectorType && (
+                          <div>
+                            <dt>Connector</dt>
+                            <dd>{dest.connectorType}</dd>
+                          </div>
+                        )}
                         <div>
-                          <dt>Response</dt>
-                          <dd>HTTP {dest.httpStatus}</dd>
+                          <dt>Delivery status</dt>
+                          <dd>{dest.status}</dd>
                         </div>
-                      )}
-                      {dest.ackCode && (
+                        {dest.httpStatus && (
+                          <div>
+                            <dt>Response</dt>
+                            <dd>HTTP {dest.httpStatus}</dd>
+                          </div>
+                        )}
+                        {dest.ackCode && (
+                          <div>
+                            <dt>Acknowledgement</dt>
+                            <dd>ACK {dest.ackCode}</dd>
+                          </div>
+                        )}
                         <div>
-                          <dt>Acknowledgement</dt>
-                          <dd>ACK {dest.ackCode}</dd>
+                          <dt>Duration</dt>
+                          <dd>{deliveryDuration(dest.durationMs)}</dd>
                         </div>
-                      )}
-                      <div>
-                        <dt>Duration</dt>
-                        <dd>{deliveryDuration(dest.durationMs)}</dd>
-                      </div>
-                      <div>
-                        <dt>Attempts</dt>
-                        <dd>{deliveryAttempts(dest.attemptCount)}</dd>
-                      </div>
-                    </dl>
+                        <div>
+                          <dt>Attempts</dt>
+                          <dd>{deliveryAttempts(dest.attemptCount)}</dd>
+                        </div>
+                      </dl>
+                    )}
                     {dest.snapshotCaptured === false && (
                       <p className="muted">
                         This legacy attempt has no captured destination configuration. Missing
@@ -534,23 +617,27 @@ export default function LogDetailModal({
                       <div>
                         <h3>{dest.destinationName || 'Destination'}</h3>
                         <small>
-                          {formatTime(dest.sentAt)}
+                          {formatTime(dest.sentAt || dest.occurredAt)}
                           {dest.httpStatus ? ` · HTTP ${dest.httpStatus}` : ''}
                           {dest.ackCode ? ` · ACK ${dest.ackCode}` : ''}
                         </small>
                       </div>
                       <StatusBadge status={dest.status} />
                     </div>
-                    <dl className="definition-list">
-                      <div>
-                        <dt>Duration</dt>
-                        <dd>{deliveryDuration(dest.durationMs)}</dd>
-                      </div>
-                      <div>
-                        <dt>Attempts</dt>
-                        <dd>{deliveryAttempts(dest.attemptCount)}</dd>
-                      </div>
-                    </dl>
+                    {dest.networkAttempted === false ? (
+                      <p className="muted">Processing result only. No network request was made.</p>
+                    ) : (
+                      <dl className="definition-list">
+                        <div>
+                          <dt>Duration</dt>
+                          <dd>{deliveryDuration(dest.durationMs)}</dd>
+                        </div>
+                        <div>
+                          <dt>Attempts</dt>
+                          <dd>{deliveryAttempts(dest.attemptCount)}</dd>
+                        </div>
+                      </dl>
+                    )}
                     {canResend &&
                       dest.canResend === true &&
                       ['OUT-ERROR', 'DEAD_LETTER'].includes(dest.status) &&

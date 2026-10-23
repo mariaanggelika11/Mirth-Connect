@@ -6,8 +6,18 @@ interface ModalProps {
   title: string;
   children: ReactNode;
   variant?: 'dialog' | 'drawer';
+  dismissible?: boolean;
+  className?: string;
 }
-export function Modal({ isOpen, onClose, title, children, variant = 'dialog' }: ModalProps) {
+export function Modal({
+  isOpen,
+  onClose,
+  title,
+  children,
+  variant = 'dialog',
+  dismissible = true,
+  className = '',
+}: ModalProps) {
   const ref = useRef<HTMLDivElement>(null),
     titleId = useId();
   const closeRef = useRef(onClose);
@@ -39,7 +49,7 @@ export function Modal({ isOpen, onClose, title, children, variant = 'dialog' }: 
     const keydown = (e: KeyboardEvent) => {
       const dialogs = document.querySelectorAll('[role="dialog"]');
       if (dialogs[dialogs.length - 1] !== ref.current) return;
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && dismissible) {
         // Let the browser dismiss an open native picker before closing its dialog.
         if (CSS.supports('selector(select:open)') && ref.current?.querySelector('select:open'))
           return;
@@ -70,27 +80,29 @@ export function Modal({ isOpen, onClose, title, children, variant = 'dialog' }: 
       document.body.style.overflow = previousOverflow;
       if (previous?.isConnected) previous.focus();
     };
-  }, [isOpen]);
+  }, [isOpen, dismissible]);
   if (!isOpen) return null;
   return (
     <div
       className={`modal-overlay ${variant === 'drawer' ? 'drawer-overlay' : ''}`}
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (dismissible && e.target === e.currentTarget) onClose();
       }}
     >
       <div
         ref={ref}
-        className={`modal-window ${variant === 'drawer' ? 'drawer-window' : ''}`}
+        className={`modal-window ${variant === 'drawer' ? 'drawer-window' : ''} ${className}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
       >
         <div className="modal-heading">
           <h2 id={titleId}>{title}</h2>
-          <button type="button" className="icon-btn" aria-label="Close dialog" onClick={onClose}>
-            <X size={20} />
-          </button>
+          {dismissible && (
+            <button type="button" className="icon-btn" aria-label="Close dialog" onClick={onClose}>
+              <X size={20} />
+            </button>
+          )}
         </div>
         <div className="modal-body">{children}</div>
       </div>

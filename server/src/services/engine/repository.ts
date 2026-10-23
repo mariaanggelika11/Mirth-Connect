@@ -5,6 +5,33 @@ import { logger } from '../../utils/logger.js';
 import type { Destination } from '../../models/Destination.js';
 import type { StoredMessage, OutboundStatus } from '../../models/Message.js';
 import { finalStatus } from './policy.js';
+export async function recordPreparation(
+  message: StoredMessage,
+  dest: Destination,
+  status: 'FILTERED' | 'OUT-ERROR',
+  error: string | null,
+) {
+  const pool = await getConnection();
+  const written = await pool
+    .request()
+    .input('id', message.id)
+    .input('owner', message.lease_owner || null)
+    .input('status', status)
+    .input('error', error)
+    .query(
+      `UPDATE "Messages" SET status=@status,last_error=@error,transport_config=NULL,retry_count=0,next_retry_at=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=@id AND lease_owner=@owner AND status IN ('PROCESSING','RETRYING')`,
+    );
+  if (written.rowsAffected && written.rowsAffected[0] !== 1)
+    throw new AppError(
+      409,
+      'DELIVERY_LEASE_LOST',
+      'Delivery lease changed; reconcile this message before retrying',
+    );
+  logger.info(
+    { messageId: message.id, destinationId: dest.id, status, errorCode: error?.split(':').pop() },
+    'Destination preparation completed',
+  );
+}
 export async function recordAttempt(
   message: StoredMessage,
   dest: Destination,

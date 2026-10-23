@@ -1,15 +1,27 @@
+import { compileV2Mapping, validateV2Mapping, type FieldMappingV2 } from './fieldMappingV2.js';
 /** Visual mappings are compiled into the existing sandboxed source transformer. */
 export interface FieldMappingRow {
   source: string;
   target: string;
   required: boolean;
   defaultValue?: string;
+  conversion?: 'NONE' | 'TEXT' | 'NUMBER' | 'BOOLEAN' | 'DATE_TO_HL7' | 'DATE_FROM_HL7';
 }
 
-export interface FieldMappingConfig {
+export interface FieldMappingV1 {
   version: 1;
   rows: FieldMappingRow[];
   rootElement?: string;
+}
+export type FieldMappingConfig = FieldMappingV1 | FieldMappingV2;
+export type { FieldMappingV2 } from './fieldMappingV2.js';
+
+/** V2 is an engine protocol, not an editable custom-script header. V1 custom edits stay compatible. */
+export function validFieldMappingScript(script: string): boolean {
+  return (
+    !script.trimStart().startsWith('/* MIRTH_FIELD_MAPPING_V2:') ||
+    readFieldMapping(script)?.version === 2
+  );
 }
 
 const marker = '/* MIRTH_FIELD_MAPPING_V1:';
@@ -38,6 +50,7 @@ function path(value: unknown, row: number, label: string): string {
 }
 
 export function validateFieldMapping(input: unknown): FieldMappingConfig {
+  if (record(input) && input.version === 2) return validateV2Mapping(input);
   if (!record(input) || input.version !== 1 || !Array.isArray(input.rows))
     throw new Error('Invalid field mapping configuration.');
   if (input.rows.length < 1 || input.rows.length > 100)
@@ -74,7 +87,7 @@ export function validateFieldMapping(input: unknown): FieldMappingConfig {
     }
     return row;
   });
-  const result: FieldMappingConfig = { version: 1, rows };
+  const result: FieldMappingV1 = { version: 1, rows };
   if (input.rootElement !== undefined && input.rootElement !== '') {
     if (
       typeof input.rootElement !== 'string' ||
@@ -139,6 +152,7 @@ return msg;`;
 
 export function compileFieldMapping(input: FieldMappingConfig): string {
   const configuration = validateFieldMapping(input);
+  if (configuration.version === 2) return compileV2Mapping(configuration);
   const encoded = encodeURIComponent(JSON.stringify(configuration));
   const script = `${marker}${encoded} */\nvar mappingConfig = ${JSON.stringify(configuration)};${mappingBody}`;
   if (script.length > maxScriptLength)
@@ -148,12 +162,15 @@ export function compileFieldMapping(input: FieldMappingConfig): string {
 
 /** Recognize only intact generated scripts; custom or edited scripts remain advanced scripts. */
 export function readFieldMapping(script: string): FieldMappingConfig | null {
-  if (script.length > maxScriptLength || !script.startsWith(marker)) return null;
-  const end = script.indexOf(' */\n', marker.length);
+  const prefix = script.startsWith('/* MIRTH_FIELD_MAPPING_V2:')
+    ? '/* MIRTH_FIELD_MAPPING_V2:'
+    : marker;
+  if (script.length > maxScriptLength || !script.startsWith(prefix)) return null;
+  const end = script.indexOf(' */\n', prefix.length);
   if (end < 0) return null;
   try {
     const configuration = validateFieldMapping(
-      JSON.parse(decodeURIComponent(script.slice(marker.length, end))),
+      JSON.parse(decodeURIComponent(script.slice(prefix.length, end))),
     );
     return compileFieldMapping(configuration) === script ? configuration : null;
   } catch {

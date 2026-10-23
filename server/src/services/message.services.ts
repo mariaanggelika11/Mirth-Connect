@@ -1,8 +1,14 @@
 import { messageErrorCode, storedValidationFailure } from '../utils/validationDiagnostics.js';
 import { maskPayload } from '../utils/masking.js';
 import { querySchema } from './monitor/query.js';
-import { parsed, logRow, sourceMetadata } from './monitor/mapping.js';
-import { listMessages, findMessage, listDeliveryLogs, messageStats } from './monitor/repository.js';
+import { parsed, logRow, sourceMetadata, destinationOutcomes } from './monitor/mapping.js';
+import {
+  listMessages,
+  findMessage,
+  listDeliveryLogs,
+  messageStats,
+  listDestinationOutcomes,
+} from './monitor/repository.js';
 import type { Request, Response, NextFunction } from 'express';
 import { getConnection } from '../config/db.js';
 import {
@@ -114,6 +120,7 @@ export const getMessageDetail = async (req: Request, res: Response, next: NextFu
       );
     const visible = (value: unknown) => (raw ? value : maskPayload(value));
     const logs = await listDeliveryLogs(id, logPage, logPageSize);
+    const outcomes = await listDestinationOutcomes(id);
     if (payload) await audit(raw ? 'VIEW_MESSAGE_RAW' : 'VIEW_MESSAGE_PAYLOAD', req, 'message', id);
     res.json({
       success: true,
@@ -133,6 +140,7 @@ export const getMessageDetail = async (req: Request, res: Response, next: NextFu
         channelRevision: m.channel_revision,
         ...sourceMetadata(m),
         validation: storedValidationFailure(m.last_error),
+        destinationOutcomes: destinationOutcomes(m, outcomes),
         idempotencyApplied: !!(m.dedupe_key || m.idempotency_key_hash),
         reconciliation:
           m.reconciliation && typeof m.reconciliation === 'object'

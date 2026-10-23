@@ -8,9 +8,16 @@ export async function migrationPreflight(tx: DatabaseTransaction) {
     await tx
       .request()
       .query(
-        'SELECT to_regclass(\'"Users"\') users,to_regclass(\'"Destinations"\') destinations,to_regclass(\'"Channels"\') channels,to_regclass(\'"Messages"\') messages',
+        'SELECT to_regclass(\'"Users"\') users,to_regclass(\'"Destinations"\') destinations,to_regclass(\'"Channels"\') channels,to_regclass(\'"Messages"\') messages,to_regclass(\'"SchemaMigrations"\') migrations',
       )
   ).recordset[0];
+  const schemaVersions = tables?.migrations
+    ? (
+        await tx.request().query('SELECT version FROM "SchemaMigrations" ORDER BY version')
+      ).recordset.map((row) => Number(row.version))
+    : [];
+  if (schemaVersions.some((version) => version > 8))
+    throw new Error('UNSUPPORTED_MIGRATION_SCHEMA_VERSION');
   let duplicateUsernames = 0,
     legacyRoles = 0,
     encryptedVerified = 0;
@@ -64,6 +71,9 @@ export async function migrationPreflight(tx: DatabaseTransaction) {
     duplicateUsernames,
     legacyRoles,
     encryptedVerified,
+    schemaVersions,
+    targetSchemaVersion: 8,
+    browserSessionsRequireFreshLogin: !schemaVersions.includes(8),
     storageCapacity: 'RUNTIME VERIFICATION REQUIRED',
   };
 }

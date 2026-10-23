@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { EyeIcon, EyeOffIcon, Workflow, ArrowRight } from 'lucide-react';
 
 const LoginPage: React.FC = () => {
-  const { login, isLoggingIn } = useAuth();
+  const { login, isLoggingIn, logout, logoutProblem, isLoggingOut, sessionNotice } = useAuth();
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -53,6 +53,28 @@ const LoginPage: React.FC = () => {
           One workspace for channels, messages and delivery insights.
         </p>
 
+        {sessionNotice && (
+          <p className="session-notice" role="status">
+            {sessionNotice}
+          </p>
+        )}
+        {logoutProblem && (
+          <div className="session-logout-warning" role="alert">
+            <strong>Sign out could not be confirmed</strong>
+            <p>
+              This browser has stopped using the session. Server revocation is not confirmed;
+              reconnect and retry sign out. Automatic sign-in is blocked.
+            </p>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={logout}
+              disabled={isLoggingOut}
+            >
+              {isLoggingOut ? 'Signing out…' : 'Retry sign out'}
+            </button>
+          </div>
+        )}
         {error && (
           <div className="mb-4 text-sm text-red-600 bg-red-100 border border-red-200 rounded px-3 py-2">
             {error}

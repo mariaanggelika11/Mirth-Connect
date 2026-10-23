@@ -1,3 +1,4 @@
+import type { HttpSettings } from '../../../server/src/utils/httpSettings';
 export enum ChannelStatus {
   RUNNING = 'RUNNING',
   STOPPED = 'STOPPED',
@@ -29,7 +30,12 @@ export interface Source {
 }
 
 export interface Destination {
-  deliveryPolicy?: { failureThreshold?: number; openSeconds?: number; maxConcurrency?: number };
+  deliveryPolicy?: {
+    failureThreshold?: number;
+    openSeconds?: number;
+    maxConcurrency?: number;
+    http?: HttpSettings;
+  };
   circuitState?: string;
   circuitFailures?: number;
   id?: number;

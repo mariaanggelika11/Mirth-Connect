@@ -3,7 +3,7 @@ import type { ValidationRuleResult } from '../utils/validationRules.js';
 import { validatePayload, FieldValidationError } from './profileValidation.services.js';
 import { performance } from 'node:perf_hooks';
 import type { Request, Response, NextFunction } from 'express';
-import { channelSchema } from '../utils/validator.js';
+import { channelPreviewSchema } from '../utils/validator.js';
 import type { RevisionConfig } from './revision.services.js';
 import { validateEndpoint } from '../utils/transport.js';
 import { hl7ToJson } from '../utils/hl7Converer.js';
@@ -15,6 +15,8 @@ import { maskPayload } from '../utils/masking.js';
 import { audit } from './audit.services.js';
 import { z } from 'zod';
 import { compileFieldMapping, readFieldMapping } from '../utils/fieldMapping.js';
+import { readDestinationFilter } from '../utils/sourceFilter.js';
+import { collectFields } from './fieldDiscovery.services.js';
 
 /** Describe only allowlisted configuration fields, never Zod input values or exception text. */
 export function invalidPreviewConfiguration(error: z.ZodError, code: string): AppError {
@@ -27,6 +29,17 @@ export function invalidPreviewConfiguration(error: z.ZodError, code: string): Ap
   if (path[0] === 'payload') message = 'Enter a synthetic sample message in Review before testing.';
   else if (path[0] === 'configuration') {
     if (path[1] === 'name') message = 'Enter a channel name in Source before testing.';
+    else if (path[1] === 'changeSummary')
+      message = 'Use a change summary of at most 500 characters, or leave it empty for testing.';
+    else if (path[1] === 'processingScript')
+      message =
+        error.issues[0]?.code === 'too_big'
+          ? 'Keep the shared transformation script within 65536 characters.'
+          : 'Restore the generated shared field mappings or review the advanced transformation script.';
+    else if (path[1] === 'responseScript')
+      message = 'Review the retained source response script and keep it within 65536 characters.';
+    else if (path[1] === 'idempotencyMode')
+      message = 'Restore a supported inbound idempotency setting in the channel configuration.';
     else if (path[1] === 'source')
       message =
         path[2] === 'inboundDataType'
@@ -85,6 +98,8 @@ function previewFailureMessage(stage: string, code: string): string {
       'The custom JSON Schema contains unsupported rules or exceeds its size limit.',
     FIELD_MAPPING_INPUT_INVALID:
       'Field mapping could not read the sample. Check its input format, structure and size.',
+    FIELD_MAPPING_CONFIG_INVALID:
+      'Restore the generated field mappings or replace them with a complete custom transformation script.',
     FILTER_INPUT_INVALID:
       'The filter could not read the sample. Check its input format and field paths.',
     FIELD_VALIDATION_FAILED:
@@ -129,8 +144,16 @@ function previewFailureMessage(stage: string, code: string): string {
 async function requiredMappingMessage(
   script: string,
   payload: unknown,
+  failure?: unknown,
 ): Promise<string | undefined> {
   const mapping = readFieldMapping(script);
+  if (
+    mapping?.version === 2 &&
+    failure instanceof AppError &&
+    /^(FIELD_MAPPING_|HL7_PROFILE_)/.test(failure.code)
+  )
+    return failure.message;
+  if (failure !== undefined && safeError(failure) !== 'SCRIPT_EXECUTION_FAILED') return undefined;
   if (!mapping || !mapping.rows.some((row) => row.required)) return undefined;
   try {
     // Replay only a canonical visual mapping with its required checks disabled.
@@ -178,6 +201,7 @@ export async function runConfiguration(
   const started = performance.now();
   let payload: unknown = structuredClone(syntheticPayload);
   const input = { format: data.source.inboundDataType, payload: structuredClone(payload) };
+  let parsedInput: { format: 'JSON'; payload: unknown } | undefined;
   if (payload === undefined)
     throw new AppError(400, 'SYNTHETIC_PAYLOAD_REQUIRED', 'Provide a synthetic payload');
   const source = {
@@ -197,6 +221,8 @@ export async function runConfiguration(
       await validatePayload(payload, data.source.inboundDataType, data.validationProfile),
     );
     source.validation = 'PASSED';
+    if (['XML', 'HL7V2'].includes(data.source.inboundDataType))
+      parsedInput = { format: 'JSON', payload: await convertPayload(payload, 'JSON') };
     sourceStage = 'filter';
     accepted = Boolean(
       !data.filterScript.trim() ||
@@ -223,13 +249,14 @@ export async function runConfiguration(
     source[sourceStage] = 'ERROR';
     source.code = safeError(error);
     source.message =
-      (sourceStage === 'transformation' && source.code === 'SCRIPT_EXECUTION_FAILED'
-        ? await requiredMappingMessage(data.processingScript, payload)
+      (sourceStage === 'transformation'
+        ? await requiredMappingMessage(data.processingScript, payload, error)
         : undefined) || previewFailureMessage(sourceStage, source.code);
     return {
       success: false,
       accepted: false,
       input,
+      parsedInput,
       source,
       networkDelivery: 'NOT_SENT',
       elapsedMs: Math.round(performance.now() - started),
@@ -241,24 +268,41 @@ export async function runConfiguration(
   for (const destination of data.destinations) {
     const destinationStarted = performance.now();
     const stages = {
-      filter: 'SKIPPED',
+      filter: 'NOT_RUN',
       transformation: 'SKIPPED',
       template: 'SKIPPED',
       conversion: 'SKIPPED',
     };
-    let stage: keyof typeof stages = 'filter';
+    let stage: keyof typeof stages | 'endpoint' = 'filter';
+    let delivery = !destination.isEnabled ? 'DISABLED' : !accepted ? 'SOURCE_FILTERED' : 'NOT_SENT';
     try {
-      if (options.validateConnections !== false)
-        validateEndpoint(destination.endpoint, destination.type);
       let outbound = structuredClone(payload);
-      const routed = Boolean(
-        accepted &&
-        destination.isEnabled &&
-        (!destination.filterScript.trim() ||
-          (await executeScript(destination.filterScript, { msg: outbound }, 'true'))),
-      );
+      let routed = false;
+      if (accepted && destination.isEnabled) {
+        let filter: ReturnType<typeof readDestinationFilter>;
+        try {
+          filter = readDestinationFilter(destination.filterScript);
+        } catch {
+          throw new AppError(
+            422,
+            'FILTER_CONFIG_INVALID',
+            'Invalid destination filter configuration',
+          );
+        }
+        if (!filter.enabled) {
+          stages.filter = 'BYPASSED';
+          routed = true;
+        } else {
+          routed =
+            (await executeScript(destination.filterScript, { msg: outbound }, 'true')) === true;
+          stages.filter = routed ? 'MATCHED' : 'NOT_MATCHED';
+        }
+        if (!routed) delivery = 'FILTERED';
+      }
       if (routed) {
-        stages.filter = 'ACCEPTED';
+        stage = 'endpoint';
+        if (options.validateConnections !== false)
+          validateEndpoint(destination.endpoint, destination.type);
         stage = 'transformation';
         if (destination.processingScript.trim())
           outbound = await executeScript(destination.processingScript, { msg: outbound });
@@ -272,32 +316,38 @@ export async function runConfiguration(
         stage = 'conversion';
         outbound = await convertPayload(outbound, destination.outboundDataType);
         stages.conversion = 'CONVERTED';
-      } else if (accepted && destination.isEnabled) {
-        stages.filter = 'FILTERED';
       }
       results.push({
         destinationId: destination.id,
         name: destination.name,
         outputFormat: destination.outboundDataType,
         connectorType: destination.type,
+        enabled: destination.isEnabled,
+        delivery,
         routed,
         finalPayload: routed ? outbound : undefined,
+        fieldTree:
+          routed && destination.outboundDataType === 'HL7V2'
+            ? collectFields(hl7ToJson(String(outbound))).fields
+            : undefined,
         status: 'VALID',
         stages,
         elapsedMs: Math.round(performance.now() - destinationStarted),
       });
     } catch (error) {
-      stages[stage] = 'ERROR';
+      if (stage !== 'endpoint') stages[stage] = 'ERROR';
       results.push({
         destinationId: destination.id,
         name: destination.name,
         outputFormat: destination.outboundDataType,
         connectorType: destination.type,
+        enabled: destination.isEnabled,
+        delivery: 'NOT_SENT_ERROR',
         status: 'ERROR',
         code: safeError(error),
         message:
-          (stage === 'transformation' && safeError(error) === 'SCRIPT_EXECUTION_FAILED'
-            ? await requiredMappingMessage(destination.processingScript, payload)
+          (stage === 'transformation'
+            ? await requiredMappingMessage(destination.processingScript, payload, error)
             : undefined) || previewFailureMessage(stage, safeError(error)),
         stages,
         elapsedMs: Math.round(performance.now() - destinationStarted),
@@ -308,6 +358,7 @@ export async function runConfiguration(
     success: results.every((result) => result.status !== 'ERROR'),
     accepted,
     input,
+    parsedInput,
     source,
     networkDelivery: 'NOT_SENT',
     elapsedMs: Math.round(performance.now() - started),
@@ -329,6 +380,15 @@ export function presentDryRun(result: Awaited<ReturnType<typeof runConfiguration
     ...result,
     rawPayload: raw,
     input: { ...result.input, payload: visible(result.input.payload) },
+    parsedInput: result.parsedInput
+      ? {
+          ...result.parsedInput,
+          // Parsed XML/HL7 numeric paths do not share JSON masking semantics.
+          // Expose their structure separately through value-free field metadata;
+          // actual parsed values require the same audited raw access as the source.
+          payload: raw ? result.parsedInput.payload : '[REDACTED]',
+        }
+      : undefined,
     source: { ...result.source, payload: visible(result.source.payload) },
     results: result.results.map((r) => ({ ...r, finalPayload: visible(r.finalPayload) })),
   };
@@ -337,7 +397,7 @@ export async function dryRun(req: Request, res: Response, next: NextFunction) {
   try {
     const raw = rawDryRunRequested(req);
     const result = await runConfiguration(
-      channelSchema.parse(req.body.configuration),
+      channelPreviewSchema.parse(req.body.configuration),
       req.body.payload,
     );
     await audit(raw ? 'DRY_RUN_CONFIGURATION_RAW' : 'DRY_RUN_CONFIGURATION', req, 'channel');

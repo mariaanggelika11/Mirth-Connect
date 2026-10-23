@@ -6,8 +6,9 @@ import { safeError } from '../../utils/errors.js';
 import type { Destination } from '../../models/Destination.js';
 import type { StoredMessage, OutboundStatus } from '../../models/Message.js';
 import { serialize } from './conversion.js';
-import { retryDecision } from './policy.js';
+import { retryDecision, deliveryRejected } from './policy.js';
 import { recordAttempt } from './repository.js';
+import { httpDeliveryConfiguration } from './httpConfiguration.js';
 async function deliver(
   dest: Destination,
   payload: unknown,
@@ -16,18 +17,15 @@ async function deliver(
   onHttpResponse: (status: number) => void,
 ): Promise<string> {
   const body = typeof payload === 'string' ? payload : serialize(payload);
+  const http = dest.type === 'REST' ? httpDeliveryConfiguration(dest) : undefined;
   const response =
     dest.type === 'REST'
       ? await sendRest(
           dest.endpoint,
           body,
           {
-            'Content-Type':
-              dest.outbound_data_type === 'HL7V2'
-                ? 'application/hl7-v2'
-                : dest.outbound_data_type === 'XML'
-                  ? 'application/xml'
-                  : 'application/json',
+            ...http!.headers,
+            'Content-Type': http!.contentType,
             'x-channel-id': String(channelId),
             'x-destination-id': String(dest.id),
             'x-correlation-id': correlationId,
@@ -35,6 +33,7 @@ async function deliver(
           },
           dest.timeout_ms,
           onHttpResponse,
+          http!.method,
         )
       : await sendTcp(dest.endpoint, body, ['HL7', 'MLLP'].includes(dest.type), dest.timeout_ms);
   return response;
@@ -91,8 +90,9 @@ export async function attempt(message: StoredMessage, dest: Destination, retryCo
     }
   } catch (e) {
     error = safeError(e);
+    if (deliveryRejected(error) && httpStatus === null) requestDurationMs = null;
     response = error;
-    const decision = retryDecision(dest, retryCount);
+    const decision = retryDecision(dest, retryCount, error);
     const ambiguous = [
       'DESTINATION_TIMEOUT',
       'ACK_MISSING',
@@ -128,7 +128,8 @@ export async function attempt(message: StoredMessage, dest: Destination, retryCo
       status === 'OUT-SENT',
       dest.delivery_policy,
     );
-    observe('destination_request_seconds', (performance.now() - started) / 1000);
+    if (requestDurationMs !== null)
+      observe('destination_request_seconds', (performance.now() - started) / 1000);
   }
   return {
     destinationId: dest.id,

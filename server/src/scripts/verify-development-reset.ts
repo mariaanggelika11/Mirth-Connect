@@ -147,12 +147,12 @@ try {
   await lockResetDatabase(client, schema, restored.tables, 'ACCESS EXCLUSIVE');
   const result = await resetToSingleAdmin(client, schema, username);
   await client.query('COMMIT');
-  assert.deepEqual(result.schemaVersions, [1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(result.schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8]);
   assert.equal(result.counts.Users, 1);
   assert.ok(operationalTables.every((t) => result.counts[t] === 0));
   assert.equal(result.passwordHashPreserved, true);
   passed.push(
-    'Full schema 1 to 7 upgrade and cleanup retain exactly the chosen administrator and unchanged password hash',
+    'Full schema 1 to 8 upgrade and cleanup retain exactly the chosen administrator and unchanged password hash',
   );
   const clean = await inspectResetDatabase(client, schema);
   await client.query('BEGIN');

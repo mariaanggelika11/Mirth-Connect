@@ -1,5 +1,11 @@
+import type { HttpSettings } from '../utils/httpSettings.js';
 export interface Destination {
-  delivery_policy?: { failureThreshold?: number; openSeconds?: number; maxConcurrency?: number };
+  delivery_policy?: {
+    failureThreshold?: number;
+    openSeconds?: number;
+    maxConcurrency?: number;
+    http?: HttpSettings;
+  };
   id: number;
   channel_id: number;
   name: string;

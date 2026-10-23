@@ -2,6 +2,25 @@
 
 Report vulnerabilities privately through the repository owner's approved channel or GitHub private vulnerability reporting if enabled. No contact is invented here; the owner must configure one. Do not include patient payloads, credentials, private keys or raw database dumps in public issues. Provide affected commit, synthetic reproduction and safe diagnostic codes. Rotate exposed credentials before considering historical cleanup. This custom engine has no formal HIPAA/ISO/SATUSEHAT certification claim. Production deployment requires hospital UAT, independent review and the readiness matrix.
 
+## Browser session verification — 21 October 2026
+
+Development source based on `30ceaa5`, including the preceding uncommitted Destination/HL7 changes. Browser sessions now use a 15-minute idle deadline, maximum eight-hour lifetime since login and one-minute UI warning. Backend checks apply on every browser-authenticated request and refresh; explicit CSRF-protected activity can only move idle time. Migration 008 adds family state, preserves token history and intentionally forces legacy sessions to sign in once. No actual environment, application database or deployed server was changed.
+
+| Session control | Local result | Evidence / limit |
+| --- | --- | --- |
+| Idle / absolute / old three-day session | PASS | Stateful API tests deny authenticated requests/refresh/activity at boundaries, revoke/audit once and refuse revival; virtual-time browser tests require login |
+| Refresh / polling do not extend activity | PASS | Original family creation/last_activity retained across refresh and `/me`; browser polling cannot prevent expiry |
+| Cookie TTL / flags / token rotation | PASS | Remaining absolute Max-Age, HttpOnly/Strict/scoped refresh and production Secure; reuse revokes entire family |
+| Activity authentication / CSRF / family binding | PASS | Missing/wrong CSRF, automation JWT, revoked/expired/mismatched current cookie rejected; server time only |
+| Logout / revoke / stale responses | PASS | Both browser and legacy browser-JWT logout revoke family/rows; late refresh/login and old request 401 cannot restore/erase a newer UI session |
+| Cross-tab / storage failure / offline | PASS locally | Web Locks/local queue, logout and activity notifications, persistent nonsecret intent/cookie fallback, no automatic restoration with disabled storage; failed revocation has Retry. Offline cannot confirm a server transaction |
+| Brute-force / polling contention | PASS | Credential 20/minute/IP shared across aliases, maintenance 300/minute/IP and independent logout 60/minute/IP; polling cannot exhaust login/logout budgets |
+| Warning accessibility / existing flows | PASS | Dialog keyboard/focus/Axe plus the full prior browser suite |
+| Native PostgreSQL / migration 008 / full deployed workflow | NOT TESTED | Latest 29-case SQL suite prepared; no local disposable PostgreSQL/Docker executable |
+| Production TLS, credentials, distributed limiter and security assessment | NOT TESTED in this task | Existing deployment controls remain required; passing fixtures do not certify production |
+
+Fresh full verification: **706 tests / 46 files**, **102 browser tests**, typecheck/lint/format/build, targeted current-source secret scan (`findings: []`) and structural OpenAPI check (49 paths / 53 operations). Coverage **87.44/85.59/89.74/88.47%** statements/branches/functions/lines. Existing authentication/RBAC/source-key/SSRF/sandbox/redaction negative tests remain in the full regression. This was not a fresh history secret scan, dependency audit, penetration test or runtime certification. [Detailed evidence/rollout](docs/UI_SIMPLIFICATION_AUDIT.md#browser-session-hardening--2026-10-21), [policy](docs/OPERATIONAL_CONTROLS.md#browser-session-policy--21-october-2026).
+
 ## Security verification — 16 October 2026
 
 Development working tree based on `ce6db8d`. UI simplification retains all four roles and backend permission checks. No database, account, environment secret or production configuration was changed in this review. **This is not a production-security certification.** PASS below means the named local test/source check passed; it does not certify every possible attack or an external deployment. API tests use mocked database adapters; browser tests use intercepted synthetic API responses. No live patient data is used.

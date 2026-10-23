@@ -12,7 +12,7 @@ export async function verifyRestoredDatabase(url: string, schema: string) {
     const versions = (
       await client.query('SELECT version FROM "SchemaMigrations" ORDER BY version')
     ).rows.map((r) => r.version);
-    if (!versions.includes(7)) throw new Error('RESTORED_SCHEMA_VERSION_MISSING');
+    if (!versions.includes(8)) throw new Error('RESTORED_SCHEMA_VERSION_MISSING');
     const counts: Record<string, number> = {};
     for (const table of ['Users', 'Channels', 'Destinations', 'AuditLog', 'Messages'])
       counts[table] = Number(

@@ -2,6 +2,7 @@ import type { RequestHandler } from 'express';
 import jwt from 'jsonwebtoken';
 import { config } from '../config/env.js';
 import { getConnection } from '../config/db.js';
+import { enforceBrowserSession } from '../services/sessionPolicy.services.js';
 export const roles = ['ADMIN', 'DEVELOPER', 'OPERATOR', 'VIEWER'] as const;
 export type UserRole = (typeof roles)[number];
 export type Permission =
@@ -73,7 +74,13 @@ export const authenticate: RequestHandler = async (req, res, next) => {
       issuer: config.auth.issuer,
       audience: config.auth.audience,
     });
-    if (typeof d === 'string' || !Number.isSafeInteger(d.id) || !d.exp || typeof d.jti !== 'string')
+    if (
+      typeof d === 'string' ||
+      !Number.isSafeInteger(d.id) ||
+      !d.exp ||
+      typeof d.jti !== 'string' ||
+      (d.sid !== undefined && (typeof d.sid !== 'string' || !d.sid || d.sid.length > 128))
+    )
       throw new Error();
     decoded = d;
   } catch (error) {
@@ -94,16 +101,15 @@ export const authenticate: RequestHandler = async (req, res, next) => {
         .request()
         .input('id', decoded.id)
         .input('token', decoded.jti)
-        .input('session', typeof decoded.sid === 'string' ? decoded.sid : null)
         .query(
-          'SELECT id,name,role FROM "Users" WHERE id=@id AND NOT EXISTS(SELECT 1 FROM "RevokedTokens" WHERE token_id=@token) AND (@session::text IS NULL OR EXISTS(SELECT 1 FROM "BrowserSessions" WHERE family_id=@session AND user_id=@id AND revoked_at IS NULL AND expires_at>CURRENT_TIMESTAMP))',
+          'SELECT id,name,role FROM "Users" WHERE id=@id AND NOT EXISTS(SELECT 1 FROM "RevokedTokens" WHERE token_id=@token)',
         )
     ).recordset[0];
     if (!user) {
       res.status(401).json({
         success: false,
         details: [],
-        code: 'TOKEN_INVALID',
+        code: typeof decoded.sid === 'string' ? 'SESSION_INVALID' : 'TOKEN_INVALID',
         message: 'Session invalid',
         requestId: req.requestId,
       });
@@ -116,6 +122,7 @@ export const authenticate: RequestHandler = async (req, res, next) => {
       tokenId: decoded.jti,
       expiresAt: decoded.exp,
     };
+    if (typeof decoded.sid === 'string') await enforceBrowserSession(req, decoded.sid, user.id);
     next();
   } catch (error) {
     next(error);

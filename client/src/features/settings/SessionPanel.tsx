@@ -6,6 +6,8 @@ interface Session {
   family_id: string;
   created_at: string;
   expires_at: string;
+  idle_expires_at?: string;
+  last_activity_at?: string;
   revoked: boolean;
 }
 export function SessionPanel() {
@@ -43,10 +45,19 @@ export function SessionPanel() {
           <div key={s.family_id} className="review-destination">
             <span>
               Created {new Date(s.created_at).toLocaleString('en-US')} · Expires{' '}
-              {new Date(s.expires_at).toLocaleString('en-US')} ·{' '}
+              {new Date(
+                Math.min(
+                  new Date(s.expires_at).getTime(),
+                  s.idle_expires_at ? new Date(s.idle_expires_at).getTime() : Infinity,
+                ),
+              ).toLocaleString('en-US')}{' '}
+              ·{' '}
               {s.revoked
                 ? 'Revoked'
-                : new Date(s.expires_at).getTime() <= Date.now()
+                : Math.min(
+                      new Date(s.expires_at).getTime(),
+                      s.idle_expires_at ? new Date(s.idle_expires_at).getTime() : Infinity,
+                    ) <= Date.now()
                   ? 'Expired'
                   : 'Active'}
             </span>

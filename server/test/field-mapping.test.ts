@@ -75,7 +75,7 @@ describe('Safe visual field mapping configuration', () => {
 
   it('bounds mappings, path depth, defaults, root names, and total script size', () => {
     expect(() => validateFieldMapping(null)).toThrow('Invalid field mapping');
-    expect(() => validateFieldMapping({ version: 2, rows: [] })).toThrow('Invalid field mapping');
+    expect(() => validateFieldMapping({ version: 3, rows: [] })).toThrow('Invalid field mapping');
     expect(() => compileFieldMapping({ version: 1, rows: [] })).toThrow('1 and 100');
     expect(() =>
       compileFieldMapping({
@@ -355,7 +355,11 @@ describe('Visual mappings execute in the existing QuickJS pipeline', () => {
     });
     expect(result.results[0]).toMatchObject({ routed: true, status: 'VALID' });
     expect(result.results[0].finalPayload).toContain('<MappedBy>Destination</MappedBy>');
-    expect(result.results[1]).toMatchObject({ routed: false, stages: { filter: 'FILTERED' } });
+    expect(result.results[1]).toMatchObject({
+      routed: false,
+      delivery: 'FILTERED',
+      stages: { filter: 'NOT_MATCHED' },
+    });
     expect(result.networkDelivery).toBe('NOT_SENT');
   });
 });

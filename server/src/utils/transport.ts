@@ -189,8 +189,14 @@ export async function sendRest(
   headers: Record<string, string>,
   timeout = config.transport.timeout,
   onResponse?: (status: number) => void,
+  method: 'POST' | 'PUT' | 'PATCH' = 'POST',
 ): Promise<string> {
   const url = validateEndpoint(decrypt(endpoint), 'REST');
+  // Explicit environment-backed authentication takes precedence over legacy URL credentials.
+  if (Object.keys(headers).some((name) => name.toLowerCase() === 'authorization')) {
+    url.username = '';
+    url.password = '';
+  }
   const addresses = await resolveHost(url.hostname, timeout);
   const pinnedLookup: net.LookupFunction = (_hostname, options, callback) => {
     if (options.all) callback(null, addresses);
@@ -199,7 +205,10 @@ export async function sendRest(
   const httpAgent = new http.Agent({ lookup: pinnedLookup });
   const httpsAgent = new https.Agent({ lookup: pinnedLookup });
   try {
-    const response = await axios.post(decrypt(endpoint), body, {
+    const response = await axios.request({
+      url: url.toString(),
+      method,
+      data: body,
       headers,
       httpAgent,
       httpsAgent,

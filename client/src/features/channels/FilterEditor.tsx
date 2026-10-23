@@ -1,17 +1,21 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '../../components/ui/Button';
+import { ScriptEditorModal } from '../../components/status/ScriptEditorModal';
+import { FieldPicker, type FieldOption } from '../../components/ui/FieldPicker';
 import {
   compileSimpleCondition,
   readSimpleCondition,
   type SimpleConditionConfig,
 } from '../../../../server/src/utils/simpleCondition';
 
-type FilterMode = 'accept' | 'reject' | 'simple' | 'custom';
+type FilterMode = 'simple' | 'legacy';
 interface Props {
   kind: 'source' | 'destination';
   value: string;
   onChange: (script: string) => void;
   onValidityChange?: (valid: boolean) => void;
+  sourceFields?: FieldOption[];
+  allowAdvanced?: boolean;
 }
 const emptyCondition = (): SimpleConditionConfig => ({
   version: 1,
@@ -20,26 +24,31 @@ const emptyCondition = (): SimpleConditionConfig => ({
   value: '',
 });
 function modeFor(script: string): FilterMode {
-  if (!script.trim() || /^return\s+true\s*;?$/.test(script.trim())) return 'accept';
-  if (/^return\s+false\s*;?$/.test(script.trim())) return 'reject';
-  return readSimpleCondition(script) ? 'simple' : 'custom';
+  return !script.trim() || readSimpleCondition(script) ? 'simple' : 'legacy';
 }
 
-export function FilterEditor({ kind, value, onChange, onValidityChange }: Props) {
+export function FilterEditor({
+  kind,
+  value,
+  onChange,
+  onValidityChange,
+  sourceFields = [],
+  allowAdvanced = false,
+}: Props) {
   const label = kind === 'source' ? 'Source filter' : 'Destination filter';
   const labelId = useId();
   const errorId = `${labelId}-condition-error`;
-  const [mode, setMode] = useState<FilterMode>(() =>
-    kind === 'source' && !value.trim() ? 'simple' : modeFor(value),
-  );
+  const [mode, setMode] = useState<FilterMode>(() => modeFor(value));
   const [condition, setCondition] = useState<SimpleConditionConfig>(
     () => readSimpleCondition(value) || emptyCondition(),
   );
   const [conditionError, setConditionError] = useState('');
-  const [customScript, setCustomScript] = useState(() =>
-    modeFor(value) === 'custom' ? value : '',
+  const [showConditionError, setShowConditionError] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [advancedError, setAdvancedError] = useState('');
+  const [retainedEmptyComparison, setRetainedEmptyComparison] = useState(
+    () => kind === 'destination' && readSimpleCondition(value)?.value === '',
   );
-  const [expanded, setExpanded] = useState(false);
   const lastValue = useRef(value);
   const validityCallback = useRef(onValidityChange);
   validityCallback.current = onValidityChange;
@@ -47,18 +56,18 @@ export function FilterEditor({ kind, value, onChange, onValidityChange }: Props)
   useEffect(() => {
     if (lastValue.current === value) return;
     lastValue.current = value;
-    const nextMode = kind === 'source' && !value.trim() ? 'simple' : modeFor(value);
+    const nextMode = modeFor(value);
     setMode(nextMode);
     const parsed = readSimpleCondition(value);
     if (parsed) setCondition(parsed);
-    if (nextMode === 'custom') setCustomScript(value);
+    setRetainedEmptyComparison(kind === 'destination' && parsed?.value === '');
     setConditionError('');
-    validityCallback.current?.(!(kind === 'source' && !value.trim()));
-    setExpanded(false);
+    validityCallback.current?.(!!value.trim());
+    setShowConditionError(false);
   }, [value]);
 
   useEffect(() => {
-    if (kind === 'source' && !value.trim()) validityCallback.current?.(false);
+    if (!value.trim()) validityCallback.current?.(false);
   }, [kind, value]);
 
   function update(script: string) {
@@ -67,7 +76,14 @@ export function FilterEditor({ kind, value, onChange, onValidityChange }: Props)
   }
   function updateCondition(nextCondition: SimpleConditionConfig) {
     setCondition(nextCondition);
+    setRetainedEmptyComparison(false);
     try {
+      if (
+        kind === 'destination' &&
+        !['exists', 'notExists', 'isEmpty', 'isNotEmpty'].includes(nextCondition.operator) &&
+        nextCondition.value === ''
+      )
+        throw new Error('Enter a value for this destination filter condition.');
       const script = compileSimpleCondition(nextCondition);
       setConditionError('');
       validityCallback.current?.(true);
@@ -77,17 +93,10 @@ export function FilterEditor({ kind, value, onChange, onValidityChange }: Props)
       validityCallback.current?.(false);
     }
   }
-  function choose(nextMode: FilterMode) {
-    if (mode === 'custom') setCustomScript(value);
-    setMode(nextMode);
-    setExpanded(nextMode === 'custom');
-    if (nextMode === 'simple') {
-      updateCondition(condition);
-      return;
-    }
-    setConditionError('');
-    validityCallback.current?.(true);
-    update(nextMode === 'custom' ? customScript : `return ${nextMode === 'accept'};`);
+  function replaceLegacy() {
+    setMode('simple');
+    setShowConditionError(false);
+    updateCondition(condition);
   }
   const presenceCondition = ['exists', 'notExists', 'isEmpty', 'isNotEmpty'].includes(
     condition.operator,
@@ -96,54 +105,61 @@ export function FilterEditor({ kind, value, onChange, onValidityChange }: Props)
 
   return (
     <div className="form-section">
-      {kind === 'destination' && (
-        <label className="field">
-          <span id={labelId}>{label}</span>
-          <select
-            aria-labelledby={labelId}
-            value={mode}
-            onChange={(event) => choose(event.target.value as FilterMode)}
-          >
-            <option value="accept">Deliver to this destination</option>
-            <option value="simple">Simple condition</option>
-            <option value="custom">Custom condition (advanced)</option>
-            <option value="reject">Skip this destination</option>
-          </select>
-        </label>
-      )}
-      {kind === 'source' && mode !== 'simple' && (
+      {mode === 'legacy' && (
         <div className="form-section">
           <p role="status">
-            Legacy source filter retained. Its existing behavior remains active until you disable it
+            Legacy {kind} filter retained. Its existing behavior remains active until you disable it
             or replace it with a simple condition.
           </p>
-          <Button type="button" variant="secondary" onClick={() => choose('simple')}>
+          <Button type="button" variant="secondary" onClick={replaceLegacy}>
             Replace with simple condition
           </Button>
         </div>
       )}
-      {kind === 'source' && mode === 'simple' && (
+      {mode === 'simple' &&
+        (kind === 'source' ? (
+          <details className="validation-help">
+            <summary>Field path help</summary>
+            <p className="muted">
+              Use a field from the incoming message. JSON: patient.id; XML: Patient.ID; HL7: MSH.9.
+              Nested paths use dots; array indexes start at 0.
+            </p>
+          </details>
+        ) : (
+          <details className="validation-help">
+            <summary>Field path help</summary>
+            <p className="muted">
+              Use a field from Source Processed Message, before this destination transforms it.
+              JSON: patient.id; XML: Patient.ID; HL7: MSH.9. Nested paths use dots; array indexes
+              start at 0.
+            </p>
+          </details>
+        ))}
+      {retainedEmptyComparison && (
         <p className="muted">
-          Configure a rule using a field from your actual message. JSON: patient.id; XML:
-          Patient.ID; HL7: MSH.9. Nested paths use dots; array indexes start at 0.
+          This saved condition compares an empty value. Its existing behavior is retained until you
+          edit the condition.
         </p>
       )}
       {mode === 'simple' && (
-        <fieldset className="form-section" aria-label={`${label} simple condition`}>
-          <legend>{kind === 'source' ? 'Simple condition' : 'Send only matching messages'}</legend>
+        <fieldset
+          className="form-section"
+          aria-label={`${label} simple condition`}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+              setShowConditionError(true);
+          }}
+        >
+          <legend>Simple condition</legend>
           <div className="form-grid">
-            <label className="field">
-              <span>Field</span>
-              <input
-                maxLength={256}
-                value={condition.field}
-                placeholder="patient.id"
-                spellCheck={false}
-                aria-invalid={!!conditionError}
-                aria-describedby={conditionError ? errorId : undefined}
-                onChange={(event) => updateCondition({ ...condition, field: event.target.value })}
-              />
-            </label>
+            <FieldPicker
+              label="Field"
+              value={condition.field}
+              options={sourceFields}
+              placeholder="patient.id"
+              onChange={(field) => updateCondition({ ...condition, field })}
+              error={conditionError && showConditionError ? conditionError : undefined}
+            />
             <label className="field">
               <span>Operator</span>
               <select
@@ -179,41 +195,67 @@ export function FilterEditor({ kind, value, onChange, onValidityChange }: Props)
                 maxLength={1024}
                 step={numericCondition ? 'any' : undefined}
                 value={condition.value ?? ''}
-                aria-invalid={!!conditionError}
-                aria-describedby={conditionError ? errorId : undefined}
+                aria-invalid={!!conditionError && showConditionError}
+                aria-describedby={conditionError && showConditionError ? errorId : undefined}
                 onChange={(event) => updateCondition({ ...condition, value: event.target.value })}
               />
             </label>
           )}
-          {conditionError && (
+          {conditionError && showConditionError && (
             <p id={errorId} className="alert error" role="alert">
               {conditionError}
             </p>
           )}
         </fieldset>
       )}
-      {kind === 'destination' && mode === 'custom' && (
-        <details
-          className="advanced-section"
-          open={expanded}
-          onToggle={(event) => setExpanded(event.currentTarget.open)}
-        >
-          <summary>Advanced {kind} filter script</summary>
-          <label className="field">
-            <span>{label} script</span>
-            <small>Return true to deliver a message, or false to skip this destination.</small>
-            <textarea
-              aria-label={`${label} script`}
-              rows={4}
-              className="code-input"
-              value={value}
-              onChange={(event) => {
-                setCustomScript(event.target.value);
-                update(event.target.value);
-              }}
-            />
-          </label>
+      {kind === 'destination' && allowAdvanced && (
+        <details className="advanced-section">
+          <summary>Advanced custom condition</summary>
+          <p className="muted">
+            Use msg from Source Processed Message. Return true to deliver, or false to skip only
+            this destination. A custom condition replaces the simple condition when applied.
+          </p>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              setAdvancedError('');
+              setAdvancedOpen(true);
+            }}
+          >
+            Edit custom condition
+          </Button>
+          {advancedError && (
+            <p className="alert error" role="alert">
+              {advancedError}
+            </p>
+          )}
         </details>
+      )}
+      {kind === 'destination' && allowAdvanced && (
+        <ScriptEditorModal
+          isOpen={advancedOpen}
+          onClose={() => setAdvancedOpen(false)}
+          title="Destination custom condition"
+          scriptType="filter"
+          initialScript={value}
+          onSave={(script) => {
+            if (!script.trim()) {
+              setAdvancedError('Enter a condition script that returns true or false.');
+              setAdvancedOpen(false);
+              return;
+            }
+            update(script);
+            setMode(modeFor(script));
+            const parsedCondition = readSimpleCondition(script);
+            if (parsedCondition) setCondition(parsedCondition);
+            setRetainedEmptyComparison(parsedCondition?.value === '');
+            setConditionError('');
+            setShowConditionError(false);
+            validityCallback.current?.(true);
+            setAdvancedOpen(false);
+          }}
+        />
       )}
     </div>
   );

@@ -22,6 +22,8 @@ import {
 } from '../src/services/messageProcessor.services.js';
 import { sample } from './fixtures.js';
 import { compileFieldMapping, readFieldMapping } from '../src/utils/fieldMapping.js';
+import { defaultHl7Configuration } from '../src/utils/hl7Configuration.js';
+import { parseSegments } from '../src/utils/hl7Converer.js';
 import { compileSimpleCondition } from '../src/utils/simpleCondition.js';
 import bcrypt from 'bcrypt';
 import request from 'supertest';
@@ -41,8 +43,12 @@ let schemaCreated = false;
 let pool: Awaited<ReturnType<typeof getConnection>>;
 let received = 0;
 const receivedBodies: string[] = [];
+const receivedMethods: string[] = [];
+const receivedContentTypes: string[] = [];
 const suffix = randomUUID();
 const username = 'qa-' + suffix;
+const legacySessionFamily = randomUUID();
+const legacySessionTokenHash = createHash('sha256').update(randomUUID()).digest('hex');
 const receiver = http.createServer((req, res) => {
   let body = '';
   req.setEncoding('utf8');
@@ -52,6 +58,8 @@ const receiver = http.createServer((req, res) => {
   req.on('end', () => {
     received++;
     receivedBodies.push(body);
+    receivedMethods.push(req.method || '');
+    receivedContentTypes.push(req.headers['content-type'] || '');
     res.setHeader('Content-Type', 'application/json');
     res.end('{"ok":true}');
   });
@@ -101,6 +109,30 @@ before(async () => {
       .request()
       .batch(
         await readFile(new URL('../migrations/007_delivery_timing.sql', import.meta.url), 'utf8'),
+      );
+    const legacyUser = (
+      await tx
+        .request()
+        .input('username', 'legacy-session-' + suffix)
+        .query(
+          `INSERT INTO "Users"(username,name,password_hash,role) VALUES(@username,'Synthetic pre-upgrade session','unused-synthetic-hash','VIEWER') RETURNING id`,
+        )
+    ).recordset[0];
+    await tx
+      .request()
+      .input('family', legacySessionFamily)
+      .input('token', legacySessionTokenHash)
+      .input('user', legacyUser.id)
+      .query(
+        `INSERT INTO "BrowserSessions"(token_hash,family_id,user_id,csrf_hash,created_at,expires_at) VALUES(@token,@family,@user,@token,CURRENT_TIMESTAMP-INTERVAL '3 days',CURRENT_TIMESTAMP+INTERVAL '4 days')`,
+      );
+    await tx
+      .request()
+      .batch(
+        await readFile(
+          new URL('../migrations/008_browser_session_policy.sql', import.meta.url),
+          'utf8',
+        ),
       );
   });
   const userId = (
@@ -319,11 +351,19 @@ test('real PostgreSQL: migration repeats without duplicate versions or data loss
       .batch(
         await readFile(new URL('../migrations/007_delivery_timing.sql', import.meta.url), 'utf8'),
       );
+    await tx
+      .request()
+      .batch(
+        await readFile(
+          new URL('../migrations/008_browser_session_policy.sql', import.meta.url),
+          'utf8',
+        ),
+      );
   });
   assert.equal(
     (await pool.request().query('SELECT count(*) total FROM "SchemaMigrations"')).recordset[0]
       .total,
-    7,
+    8,
   );
   assert.equal(
     (await pool.request().query('SELECT count(*) total FROM "Channels"')).recordset[0].total,
@@ -513,6 +553,224 @@ test('real PostgreSQL: browser refresh rotation and reuse revoke access session'
     ).status,
     401,
   );
+});
+
+async function syntheticBrowserSession(options: { createdAt?: Date; lastActivityAt?: Date } = {}) {
+  const user = (
+    await pool
+      .request()
+      .input('username', username)
+      .query('SELECT id,name,role FROM "Users" WHERE username=@username')
+  ).recordset[0];
+  const family = randomUUID();
+  const refresh = randomUUID().replaceAll('-', '') + randomUUID().replaceAll('-', '');
+  const csrf = createHash('sha256').update(randomUUID()).digest('hex');
+  const now = Date.now();
+  await withTransaction(async (tx) => {
+    await tx
+      .request()
+      .input('family', family)
+      .input('user', user.id)
+      .input('created', options.createdAt || new Date(now))
+      .input('activity', options.lastActivityAt || new Date(now))
+      .input('expires', new Date(now + 4 * 86400000))
+      .query(
+        'INSERT INTO "BrowserSessionFamilies"(family_id,user_id,created_at,last_activity_at,expires_at) VALUES(@family,@user,@created,@activity,@expires)',
+      );
+    await tx
+      .request()
+      .input('family', family)
+      .input('user', user.id)
+      .input('token', createHash('sha256').update(refresh).digest('hex'))
+      .input('csrf', createHash('sha256').update(csrf).digest('hex'))
+      .input('expires', new Date(now + 4 * 86400000))
+      .query(
+        'INSERT INTO "BrowserSessions"(token_hash,family_id,user_id,csrf_hash,expires_at) VALUES(@token,@family,@user,@csrf,@expires)',
+      );
+  });
+  return {
+    family,
+    csrf,
+    cookie: `mirth_refresh=${refresh}; mirth_csrf=${csrf}`,
+    authorization: 'Bearer ' + signToken({ id: user.id, name: user.name, role: user.role }, family),
+  };
+}
+async function persistedBrowserFamily(family: string) {
+  return (
+    await pool
+      .request()
+      .input('family', family)
+      .query('SELECT * FROM "BrowserSessionFamilies" WHERE family_id=@family')
+  ).recordset[0];
+}
+
+test('real PostgreSQL: session migration retains revoked legacy history and repeated migration preserves fresh sessions', async () => {
+  const legacy = await persistedBrowserFamily(legacySessionFamily);
+  assert.ok(legacy.revoked_at);
+  const token = (
+    await pool
+      .request()
+      .input('token', legacySessionTokenHash)
+      .query('SELECT revoked_at,family_id FROM "BrowserSessions" WHERE token_hash=@token')
+  ).recordset[0];
+  assert.equal(token.family_id, legacySessionFamily);
+  assert.ok(token.revoked_at);
+  const fresh = await syntheticBrowserSession();
+  const before = await persistedBrowserFamily(fresh.family);
+  for (let repetition = 0; repetition < 2; repetition++)
+    await withTransaction(async (tx) =>
+      tx
+        .request()
+        .batch(
+          await readFile(
+            new URL('../migrations/008_browser_session_policy.sql', import.meta.url),
+            'utf8',
+          ),
+        ),
+    );
+  assert.deepEqual(await persistedBrowserFamily(fresh.family), before);
+});
+
+test('real PostgreSQL: failed session upgrade rolls back family history, token revocations and schema version atomically', async () => {
+  const session = await syntheticBrowserSession();
+  const before = await persistedBrowserFamily(session.family);
+  await assert.rejects(
+    withTransaction(async (tx) => {
+      // Reconstruct the legacy shape inside this disposable transaction only.
+      await tx.request().query('DELETE FROM "SchemaMigrations" WHERE version=8');
+      await tx
+        .request()
+        .query('ALTER TABLE "BrowserSessions" DROP CONSTRAINT "FK_BrowserSessions_family"');
+      await tx.request().query('DROP TABLE "BrowserSessionFamilies"');
+      await tx
+        .request()
+        .batch(
+          await readFile(
+            new URL('../migrations/008_browser_session_policy.sql', import.meta.url),
+            'utf8',
+          ),
+        );
+      throw new Error('SYNTHETIC_SESSION_UPGRADE_FAILURE');
+    }),
+    /SYNTHETIC_SESSION_UPGRADE_FAILURE/,
+  );
+  assert.deepEqual(await persistedBrowserFamily(session.family), before);
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('family', session.family)
+        .query(
+          'SELECT count(*) total FROM "BrowserSessions" WHERE family_id=@family AND revoked_at IS NULL',
+        )
+    ).recordset[0].total,
+    1,
+  );
+  assert.equal(
+    (await pool.request().query('SELECT version FROM "SchemaMigrations" WHERE version=8')).recordset
+      .length,
+    1,
+  );
+});
+
+test('real PostgreSQL: CSRF-bound activity extends only the idle deadline and refresh preserves both deadlines', async () => {
+  const session = await syntheticBrowserSession();
+  const initial = await persistedBrowserFamily(session.family);
+  const rejected = await request(app)
+    .post('/api/auth/browser/activity')
+    .set('Authorization', session.authorization)
+    .set('Cookie', session.cookie);
+  assert.equal(rejected.status, 403);
+  assert.equal(rejected.body.code, 'CSRF_REJECTED');
+  assert.deepEqual(await persistedBrowserFamily(session.family), initial);
+  const active = await request(app)
+    .post('/api/auth/browser/activity')
+    .set('Authorization', session.authorization)
+    .set('Cookie', session.cookie)
+    .set('X-CSRF-Token', session.csrf);
+  assert.equal(active.status, 200);
+  const afterActivity = await persistedBrowserFamily(session.family);
+  assert.equal(afterActivity.expires_at.getTime(), initial.expires_at.getTime());
+  assert.ok(afterActivity.last_activity_at.getTime() >= initial.last_activity_at.getTime());
+  const rotated = await request(app)
+    .post('/api/auth/browser/refresh')
+    .set('Cookie', session.cookie)
+    .set('X-CSRF-Token', session.csrf);
+  assert.equal(rotated.status, 200);
+  assert.deepEqual(await persistedBrowserFamily(session.family), afterActivity);
+  const successor = (
+    await pool
+      .request()
+      .input('family', session.family)
+      .query('SELECT expires_at FROM "BrowserSessions" WHERE family_id=@family AND used_at IS NULL')
+  ).recordset;
+  assert.equal(successor.length, 1);
+  assert.equal(successor[0].expires_at.toISOString(), rotated.body.session.absoluteExpiresAt);
+});
+
+test('real PostgreSQL: idle expiry rejects stale access and activity, revokes tokens and audits once', async () => {
+  const elapsed = (config.auth.idleExpiration + 1) * 1000;
+  const session = await syntheticBrowserSession({
+    createdAt: new Date(Date.now() - elapsed - 60000),
+    lastActivityAt: new Date(Date.now() - elapsed),
+  });
+  const denied = await request(app).get('/api/channel').set('Authorization', session.authorization);
+  assert.equal(denied.status, 401);
+  assert.equal(denied.body.code, 'SESSION_IDLE_EXPIRED');
+  assert.ok((await persistedBrowserFamily(session.family)).revoked_at);
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('family', session.family)
+        .query(
+          'SELECT count(*) total FROM "BrowserSessions" WHERE family_id=@family AND revoked_at IS NULL',
+        )
+    ).recordset[0].total,
+    0,
+  );
+  const expiredActivity = await request(app)
+    .post('/api/auth/browser/activity')
+    .set('Authorization', session.authorization)
+    .set('Cookie', session.cookie)
+    .set('X-CSRF-Token', session.csrf);
+  assert.equal(expiredActivity.status, 401);
+  const audit = (
+    await pool
+      .request()
+      .input('request', denied.headers['x-request-id'])
+      .query(
+        `SELECT count(*) total FROM "AuditLog" WHERE request_id=@request AND action='SESSION_IDLE_EXPIRED'`,
+      )
+  ).recordset[0];
+  assert.equal(audit.total, 1);
+});
+
+test('real PostgreSQL: a three-day browser restore and an active absolute-expired session cannot refresh or resume', async () => {
+  const stale = new Date(Date.now() - 3 * 86400000);
+  const restored = await syntheticBrowserSession({ createdAt: stale, lastActivityAt: stale });
+  const denied = await request(app)
+    .post('/api/auth/browser/refresh')
+    .set('Cookie', restored.cookie)
+    .set('X-CSRF-Token', restored.csrf);
+  assert.equal(denied.status, 401);
+  assert.equal(denied.body.code, 'SESSION_ABSOLUTE_EXPIRED');
+  assert.ok(
+    (denied.headers['set-cookie'] as unknown as string[]).every((value) =>
+      value.includes('Expires='),
+    ),
+  );
+  assert.ok((await persistedBrowserFamily(restored.family)).revoked_at);
+  const absolute = await syntheticBrowserSession({
+    createdAt: new Date(Date.now() - (config.auth.absoluteExpiration + 1) * 1000),
+    lastActivityAt: new Date(),
+  });
+  const current = await request(app)
+    .get('/api/channel')
+    .set('Authorization', absolute.authorization);
+  assert.equal(current.status, 401);
+  assert.equal(current.body.code, 'SESSION_ABSOLUTE_EXPIRED');
+  assert.ok((await persistedBrowserFamily(absolute.family)).revoked_at);
 });
 
 test('real PostgreSQL: separate workers deduplicate persisted alert and admin acknowledges', async () => {
@@ -1003,7 +1261,7 @@ test('real PostgreSQL: protected diagnostic bundle has metadata only and reports
   const auth = await syntheticAdminAuth();
   const diagnostic = await request(app).get('/api/system/diagnostics').set('Authorization', auth);
   assert.equal(diagnostic.status, 200);
-  assert.deepEqual(diagnostic.body.schemaVersions, [1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(diagnostic.body.schemaVersions, [1, 2, 3, 4, 5, 6, 7, 8]);
   assert.ok(diagnostic.body.databasePool.database_pool_total > 0);
   const body = JSON.stringify(diagnostic.body);
   for (const value of [
@@ -1236,6 +1494,40 @@ test('real PostgreSQL: visual field mappings preserve routing and final outbound
   assert.equal(xmlAttempt.attemptCount, 1);
   assert.ok(Number.isFinite(xmlAttempt.durationMs) && xmlAttempt.durationMs >= 0);
   assert.equal(xmlAttempt.outboundData, receivedBodies.at(-1));
+  assert.deepEqual(
+    detail.body.data.destinationOutcomes.map(
+      (outcome: { delivery: string; attemptCount: number }) => ({
+        delivery: outcome.delivery,
+        attemptCount: outcome.attemptCount,
+      }),
+    ),
+    [
+      { delivery: 'SENT', attemptCount: 1 },
+      { delivery: 'FILTERED', attemptCount: 0 },
+    ],
+  );
+  const recordedOutbound = (
+    await pool
+      .request()
+      .input('id', delivered.body.messageId)
+      .query(
+        'SELECT id,status,transport_config,transformed_payload FROM "Messages" WHERE inbound_message_id=@id ORDER BY id',
+      )
+  ).recordset;
+  assert.equal(recordedOutbound.length, 2);
+  assert.equal(JSON.parse(decrypt(recordedOutbound[0].transport_config)).preparation_version, 1);
+  assert.equal(JSON.parse(recordedOutbound[0].transformed_payload), expectedXml);
+  assert.equal(recordedOutbound[1].status, 'FILTERED');
+  assert.equal(recordedOutbound[1].transport_config, null);
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', recordedOutbound[1].id)
+        .query('SELECT count(*) total FROM "MessageDestinationLog" WHERE message_id=@id')
+    ).recordset[0].total,
+    0,
+  );
   const channel = (await request(app).get('/api/channel').set('Authorization', auth)).body.find(
     (entry: { id: number }) => entry.id === id,
   );
@@ -1294,6 +1586,284 @@ test('real PostgreSQL: visual field mappings preserve routing and final outbound
   assert.equal(filterDetail.status, 200);
   assert.equal(filterDetail.body.data.status, 'FILTERED');
   assert.deepEqual(filterDetail.body.data.destinationLogs, []);
+});
+
+test('real PostgreSQL: V2 HL7 mapping and HTTP policy survive draft publication, delivery, XML roundtrip and rollback', async () => {
+  const auth = await syntheticAdminAuth();
+  const script = (receivingApplication: string) =>
+    compileFieldMapping({
+      version: 2,
+      hl7: {
+        ...defaultHl7Configuration('ADT^A04'),
+        receivingApplication,
+        messageDateTime: '20261018220000',
+        messageControlId: 'SYNTHETIC-SQL-V2-001',
+      },
+      rows: [
+        { source: 'patient_id', target: 'PID.3.1', required: true },
+        { source: 'family_name', target: 'PID.5.1', required: true },
+        { source: 'given_name', target: 'PID.5.2', required: true },
+        { source: 'birth_date', target: 'PID.7', required: true, conversion: 'DATE_TO_HL7' },
+      ],
+    });
+  const initialScript = script('SYNTHETIC_INITIAL_RECEIVER');
+  const publishedScript = script('SYNTHETIC_PUBLISHED_RECEIVER');
+  const policy = {
+    failureThreshold: 2,
+    maxConcurrency: 1,
+    http: { method: 'PUT', contentType: 'application/hl7-v2', authentication: 'NONE' },
+  };
+  const configuration = {
+    name: 'Synthetic V2 persistence ' + suffix,
+    source: { type: 'HTTP', inboundDataType: 'JSON' },
+    destinations: [
+      {
+        name: 'Synthetic V2 HTTP receiver',
+        type: 'REST',
+        endpoint: `http://127.0.0.1:${port}`,
+        outboundDataType: 'HL7V2',
+        processingScript: initialScript,
+        deliveryPolicy: policy,
+      },
+    ],
+  };
+  const created = await request(app)
+    .post('/api/channel')
+    .set('Authorization', auth)
+    .send(configuration);
+  assert.equal(created.status, 201);
+  const id = created.body.channelId;
+  const list = await request(app).get('/api/channel').set('Authorization', auth);
+  assert.equal(list.status, 200);
+  const listed = list.body.find((entry: { id: number }) => entry.id === id);
+  assert.ok(listed);
+  const destinationId = listed.destinations[0].id;
+  assert.equal(listed.destinations[0].processingScript, initialScript);
+  const reopened = readFieldMapping(listed.destinations[0].processingScript);
+  assert.ok(reopened?.version === 2);
+  assert.equal(reopened.hl7?.receivingApplication, 'SYNTHETIC_INITIAL_RECEIVER');
+  assert.deepEqual(listed.destinations[0].deliveryPolicy, policy);
+  const draft = await request(app)
+    .put(`/api/channel/${id}`)
+    .set('Authorization', auth)
+    .send({
+      ...configuration,
+      name: configuration.name + ' updated',
+      destinations: [
+        { ...configuration.destinations[0], id: destinationId, processingScript: publishedScript },
+      ],
+    });
+  assert.equal(draft.status, 200);
+  assert.equal(draft.body.draft, true);
+  const activeBeforePublish = (
+    await pool
+      .request()
+      .input('id', destinationId)
+      .query('SELECT processing_script,delivery_policy FROM "Destinations" WHERE id=@id')
+  ).recordset[0];
+  assert.equal(activeBeforePublish.processing_script, initialScript);
+  assert.deepEqual(activeBeforePublish.delivery_policy, policy);
+  const encryptedDraft = (
+    await pool
+      .request()
+      .input('id', id)
+      .input('revision', draft.body.revision)
+      .query(
+        'SELECT configuration FROM "ChannelRevisions" WHERE channel_id=@id AND revision=@revision',
+      )
+  ).recordset[0].configuration;
+  assert.match(encryptedDraft, /^enc:v2:/);
+  const storedDraft = JSON.parse(decrypt(encryptedDraft));
+  assert.equal(storedDraft.destinations[0].processingScript, publishedScript);
+  assert.deepEqual(storedDraft.destinations[0].deliveryPolicy, policy);
+  const synthetic = {
+    patient_id: 'SYNTHETIC-SQL-001',
+    family_name: 'Synthetic Family',
+    given_name: 'Synthetic Given',
+    birth_date: '2000-02-29',
+  };
+  const before = received;
+  const preview = await request(app)
+    .post(`/api/channel/${id}/revisions/${draft.body.revision}/dry-run`)
+    .set('Authorization', auth)
+    .send({ payload: synthetic, raw: true });
+  assert.equal(preview.status, 200);
+  assert.equal(preview.body.success, true);
+  assert.equal(preview.body.networkDelivery, 'NOT_SENT');
+  assert.equal(received, before);
+  assert.match(preview.body.results[0].finalPayload, /20000229/);
+  const publish = await request(app)
+    .post(`/api/channel/${id}/revisions/${draft.body.revision}/publish`)
+    .set('Authorization', auth)
+    .send({
+      expectedActiveRevision: created.body.revision,
+      changeSummary: 'Publish synthetic V2 fixture',
+    });
+  assert.equal(publish.status, 200);
+  const current = (await request(app).get('/api/channel').set('Authorization', auth)).body.find(
+    (entry: { id: number }) => entry.id === id,
+  );
+  assert.equal(current.destinations[0].id, destinationId);
+  assert.equal(current.destinations[0].processingScript, publishedScript);
+  assert.deepEqual(current.destinations[0].deliveryPolicy, policy);
+  const credential = await request(app)
+    .put(`/api/channel/${id}/credential`)
+    .set('Authorization', auth);
+  assert.equal(credential.status, 200);
+  assert.equal(
+    (
+      await request(app)
+        .put(`/api/channel/${id}/status`)
+        .set('Authorization', auth)
+        .send({ status: 'RUNNING' })
+    ).status,
+    200,
+  );
+  const delivered = await request(app)
+    .post(`/api/inbound/${id}`)
+    .set('X-API-Key', credential.body.data.apiKey)
+    .send(synthetic);
+  assert.equal(delivered.status, 200);
+  assert.equal(delivered.body.status, 'SUCCESS');
+  assert.equal(received, before + 1);
+  assert.equal(receivedMethods.at(-1), 'PUT');
+  assert.match(receivedContentTypes.at(-1)!, /^application\/hl7-v2(?:;|$)/);
+  assert.equal(receivedBodies.at(-1), preview.body.results[0].finalPayload);
+  assert.equal(
+    parseSegments(receivedBodies.at(-1)!).segments[0].fields[5],
+    'SYNTHETIC_PUBLISHED_RECEIVER',
+  );
+  const { exportChannelXml } = await import('../../client/src/services/channel.config.js');
+  const xml = exportChannelXml(current);
+  assert.ok(xml.includes('MIRTH_FIELD_MAPPING_V2:'));
+  assert.ok(!xml.includes(credential.body.data.apiKey));
+  const imported = await request(app)
+    .post('/api/upload/xml')
+    .set('Authorization', auth)
+    .attach('file', Buffer.from(xml), 'synthetic-v2-roundtrip.xml');
+  assert.equal(imported.status, 201);
+  assert.notEqual(imported.body.channelId, id);
+  const roundtrip = (
+    await pool
+      .request()
+      .input('id', imported.body.channelId)
+      .query(
+        'SELECT id,processing_script,delivery_policy FROM "Destinations" WHERE channel_id=@id AND is_deleted=false',
+      )
+  ).recordset[0];
+  assert.notEqual(roundtrip.id, destinationId);
+  assert.deepEqual(
+    readFieldMapping(roundtrip.processing_script),
+    readFieldMapping(publishedScript),
+  );
+  assert.deepEqual(roundtrip.delivery_policy, policy);
+  assert.equal(received, before + 1);
+  const rollback = await request(app)
+    .post(`/api/channel/${id}/revisions/${created.body.revision}/rollback`)
+    .set('Authorization', auth)
+    .send({
+      expectedActiveRevision: publish.body.activeRevision,
+      changeSummary: 'Rollback synthetic V2 fixture',
+    });
+  assert.equal(rollback.status, 200);
+  const restored = (
+    await pool
+      .request()
+      .input('id', destinationId)
+      .query('SELECT processing_script,delivery_policy FROM "Destinations" WHERE id=@id')
+  ).recordset[0];
+  assert.equal(restored.processing_script, initialScript);
+  assert.deepEqual(restored.delivery_policy, policy);
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', id)
+        .query('SELECT count(*) total FROM "Messages" WHERE channel_id=@id')
+    ).recordset[0].total,
+    2,
+  );
+});
+
+test('real PostgreSQL: preparation failures never become resendable payloads or delivery attempts', async () => {
+  const auth = await syntheticAdminAuth();
+  const created = await request(app)
+    .post('/api/channel')
+    .set('Authorization', auth)
+    .send({
+      name: 'Destination preparation guard ' + suffix,
+      source: { type: 'HTTP', inboundDataType: 'JSON' },
+      destinations: [
+        {
+          name: 'Synthetic preparation failure',
+          type: 'REST',
+          endpoint: `http://127.0.0.1:${port}`,
+          outboundDataType: 'XML',
+          processingScript: 'throw new Error("SYNTHETIC_PRIVATE_TRANSFORM_ERROR");',
+          retryEnabled: true,
+        },
+      ],
+    });
+  assert.equal(created.status, 201);
+  const id = created.body.channelId;
+  const credential = await request(app)
+    .put(`/api/channel/${id}/credential`)
+    .set('Authorization', auth);
+  assert.equal(credential.status, 200);
+  assert.equal(
+    (
+      await request(app)
+        .put(`/api/channel/${id}/status`)
+        .set('Authorization', auth)
+        .send({ status: 'RUNNING' })
+    ).status,
+    200,
+  );
+  const before = received;
+  const inbound = await request(app)
+    .post(`/api/message/inbound/${id}`)
+    .set('X-API-Key', credential.body.data.apiKey)
+    .send({ patient_id: 'SYNTHETIC-PREP-GUARD' });
+  assert.equal(inbound.status, 502);
+  assert.equal(inbound.body.status, 'FAILED');
+  assert.equal(received, before);
+  const row = (
+    await pool
+      .request()
+      .input('id', inbound.body.messageId)
+      .query('SELECT * FROM "Messages" WHERE inbound_message_id=@id')
+  ).recordset[0];
+  assert.equal(row.status, 'OUT-ERROR');
+  assert.equal(row.transport_config, null);
+  assert.equal(row.next_retry_at, null);
+  assert.equal(row.last_error, 'DESTINATION_TRANSFORM_ERROR:SCRIPT_EXECUTION_FAILED');
+  assert.equal(
+    (
+      await pool
+        .request()
+        .input('id', row.id)
+        .query('SELECT count(*) total FROM "MessageDestinationLog" WHERE message_id=@id')
+    ).recordset[0].total,
+    0,
+  );
+  await assert.rejects(
+    resendStoredMessage(row.id),
+    (error: unknown) =>
+      !!error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === 'RESEND_UNAVAILABLE',
+  );
+  assert.equal(received, before);
+  const detail = await request(app)
+    .get(`/api/message/${inbound.body.messageId}`)
+    .set('Authorization', auth);
+  assert.equal(detail.status, 200);
+  assert.deepEqual(detail.body.data.destinationLogs, []);
+  assert.equal(detail.body.data.destinationOutcomes[0].transformation, 'ERROR');
+  assert.equal(detail.body.data.destinationOutcomes[0].delivery, 'NOT_SENT');
+  assert.equal(detail.body.data.destinationOutcomes[0].attemptCount, 0);
+  assert.ok(!JSON.stringify(detail.body).includes('SYNTHETIC_PRIVATE_TRANSFORM_ERROR'));
 });
 
 test('real PostgreSQL: multipart XML import persists stopped revisions and rejects unsafe or unauthorized uploads atomically', async () => {
@@ -1412,7 +1982,7 @@ test('real PostgreSQL: multipart XML import persists stopped revisions and rejec
         .request()
         .input('username', 'xml-' + role + suffix)
         .input('role', role)
-        .query(
+        .query<{ id: number; name: string; role: string }>(
           `INSERT INTO "Users"(username,name,password_hash,role) VALUES(@username,'Synthetic XML tester','synthetic-unused-hash',@role) RETURNING id,name,role`,
         )
     ).recordset[0];

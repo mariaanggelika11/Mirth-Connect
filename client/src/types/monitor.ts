@@ -30,15 +30,38 @@ export interface DestinationLog {
   httpStatus?: number;
   durationMs?: number | null;
   attemptCount?: number | null;
+  networkAttempted?: boolean;
+  eventKind?:
+    | 'DELIVERY_ATTEMPT'
+    | 'DELIVERY_REJECTION'
+    | 'FILTERED'
+    | 'PREPARATION_FAILURE'
+    | 'ADMISSION_WAIT'
+    | 'UNKNOWN';
+  occurredAt?: string;
   destinationName: string;
   outboundFormat?: string;
   connectorType?: string;
   snapshotCaptured?: boolean;
   status: string;
   responseText: string;
-  sentAt: string;
+  sentAt?: string;
   requestData?: unknown;
   outboundData?: unknown;
+}
+export interface DestinationOutcome {
+  destinationId: number;
+  name: string;
+  enabled: boolean;
+  status: string;
+  filter: 'BYPASSED' | 'MATCHED' | 'NOT_MATCHED' | 'NOT_RUN' | 'ERROR' | 'UNKNOWN';
+  transformation: 'TRANSFORMED' | 'PASS_THROUGH' | 'ERROR' | 'NOT_RUN' | 'UNKNOWN';
+  template: 'APPLIED' | 'NOT_CONFIGURED' | 'ERROR' | 'NOT_RUN' | 'UNKNOWN';
+  conversion: 'CONVERTED' | 'ERROR' | 'NOT_RUN' | 'UNKNOWN';
+  delivery: 'SENT' | 'FAILED' | 'QUEUED' | 'FILTERED' | 'DISABLED' | 'NOT_SENT' | 'UNKNOWN';
+  code?: string;
+  occurredAt?: string;
+  attemptCount: number | null;
 }
 
 // LOG ENTRY
@@ -73,5 +96,6 @@ export interface LogEntry {
   direction?: 'IN' | 'OUT';
 
   destinationLogs?: DestinationLog[];
+  destinationOutcomes?: DestinationOutcome[];
 }
 import type { ValidationRuleResult } from '../../../server/src/utils/validationRules';

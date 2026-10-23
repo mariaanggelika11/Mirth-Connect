@@ -359,7 +359,9 @@ test('used channel offers archive and archived filter preserves read-only histor
   });
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await page.getByLabel('More actions for Test Channel').click();
-  await expect(page.getByRole('button', { name: 'Delete channel', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delete channel', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete channel', exact: true })).toBeDisabled();
+  await expect(page.getByText('Has message history. Use Archive.', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Archive channel', exact: true }).click();
   expect(archived).toBe(false);
   await page
@@ -374,6 +376,46 @@ test('used channel offers archive and archived filter preserves read-only histor
   await expect(page.getByRole('button', { name: 'Edit channel', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'View messages', exact: true })).toBeVisible();
 });
+for (const [label, metadata, reason] of [
+  [
+    'retained history with zero counters',
+    { hasMessages: true, received: 0 },
+    'Has message history. Use Archive.',
+  ],
+  ['running channel', { status: 'RUNNING', received: 0 }, 'Stop the channel before deleting.'],
+] as const)
+  test(`Delete remains discoverable but disabled for ${label} on a short mobile viewport`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 600 });
+    await session(page, 'ADMIN');
+    const deletes: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'DELETE') deletes.push(request.url());
+    });
+    await page.route('**/api/channel', (route) =>
+      route.fulfill({ json: [{ ...channel, ...metadata }] }),
+    );
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    const trigger = page.getByLabel('More actions for Test Channel');
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    const remove = page.getByRole('button', { name: 'Delete channel', exact: true });
+    await expect(remove).toBeInViewport();
+    await expect(remove).toBeDisabled();
+    await expect(remove).toHaveAccessibleDescription(reason);
+    await expect(page.getByText(reason, { exact: true })).toBeInViewport();
+    const bounds = await page.locator('.action-popover').boundingBox();
+    expect(bounds!.y).toBeGreaterThanOrEqual(8);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(592);
+    const scan = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze();
+    expect(scan.violations).toEqual([]);
+    await page.keyboard.press('Escape');
+    await expect(remove).toHaveCount(0);
+    expect(deletes).toEqual([]);
+  });
 async function revisionAdvanced(page: Page) {
   const advanced = page.locator('details.revision-advanced');
   if ((await advanced.getAttribute('open')) === null)
@@ -523,6 +565,7 @@ test('operator can operate but cannot edit or delete', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Start channel' })).toBeVisible();
   await page.getByLabel('More actions for Test Channel').click();
   await expect(page.getByRole('button', { name: 'Edit channel', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delete channel', exact: true })).toHaveCount(0);
 });
 test('developer can edit and admin can delete through contextual menu', async ({ page }) => {
   await session(page, 'DEVELOPER');
@@ -637,7 +680,7 @@ test('channel wizard prevents accidental loss and requires review before saving'
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Transformation', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await expect(page.getByText('Where should messages go?')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Destination 1', exact: true })).toBeVisible();
   await page.getByLabel('Destination name').fill('REST receiver');
   await page.getByLabel('Endpoint', { exact: false }).fill('https://api.example.com/messages');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();

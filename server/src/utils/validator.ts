@@ -2,9 +2,18 @@ import { z } from 'zod';
 import { config } from '../config/env.js';
 import type { RequestHandler } from 'express';
 import { AppError } from './errors.js';
-import { readSourceFilter } from './sourceFilter.js';
-import { readSimpleCondition } from './simpleCondition.js';
-const script = z.string().max(65536).default('');
+import { validFilterConfiguration } from './sourceFilter.js';
+import { validFieldMappingScript } from './fieldMapping.js';
+import { compatibleContentTypes } from './httpSettings.js';
+import { httpSettingsSchema } from './httpSettingsSchema.js';
+const script = z
+  .string()
+  .max(65536)
+  .refine(
+    validFieldMappingScript,
+    'Generated mapping metadata is invalid; restore the mapping or explicitly replace it with a custom script.',
+  )
+  .default('');
 const dataType = z.enum(['HL7V2', 'JSON', 'XML', 'TEXT']);
 const xmlPath = z
   .string()
@@ -104,28 +113,55 @@ export const registration = credentials
   .strict();
 export const deliveryPolicySchema = z
   .object({
+    http: httpSettingsSchema.optional(),
     failureThreshold: z.number().int().min(1).max(100).optional(),
     openSeconds: z.number().int().min(1).max(3600).optional(),
     maxConcurrency: z.number().int().min(1).max(100).optional(),
   })
   .strict();
-export const destinationSchema = z.object({
-  deliveryPolicy: deliveryPolicySchema.default({}),
-  id: z.number().int().positive().optional(),
-  name: z.string().trim().min(1).max(150),
-  type: z.enum(['REST', 'HL7', 'MLLP', 'TCP', 'RAW']),
-  endpoint: z.string().trim().min(1).max(2048),
-  outboundDataType: dataType.default('HL7V2'),
-  processingScript: script,
-  responseScript: script,
-  templateScript: script,
-  filterScript: script,
-  isEnabled: z.boolean().default(true),
-  retryEnabled: z.boolean().default(false),
-  maxRetries: z.number().int().min(0).max(10).default(3),
-  retryIntervalSeconds: z.number().int().min(1).max(86400).default(30),
-  timeoutMs: z.number().int().min(100).max(120000).default(10000),
-});
+export const destinationSchema = z
+  .object({
+    deliveryPolicy: deliveryPolicySchema.default({}),
+    id: z.number().int().positive().optional(),
+    name: z.string().trim().min(1).max(150),
+    type: z.enum(['REST', 'HL7', 'MLLP', 'TCP', 'RAW']),
+    endpoint: z.string().trim().min(1).max(2048),
+    outboundDataType: dataType.default('HL7V2'),
+    processingScript: script,
+    responseScript: script,
+    templateScript: script,
+    filterScript: script.refine(
+      (value) => validFilterConfiguration(value, 'destination'),
+      'Invalid destination filter condition.',
+    ),
+    isEnabled: z.boolean().default(true),
+    retryEnabled: z.boolean().default(false),
+    maxRetries: z.number().int().min(0).max(10).default(3),
+    retryIntervalSeconds: z.number().int().min(1).max(86400).default(30),
+    timeoutMs: z.number().int().min(100).max(120000).default(10000),
+  })
+  .superRefine(validateDestinationContentType);
+export function validateDestinationContentType(
+  destination: {
+    type: string;
+    outboundDataType: string;
+    deliveryPolicy: { http?: { contentType?: string } };
+  },
+  context: z.RefinementCtx,
+) {
+  const type = destination.deliveryPolicy.http?.contentType;
+  if (
+    destination.type === 'REST' &&
+    type &&
+    !compatibleContentTypes(destination.outboundDataType).includes(type)
+  )
+    context.addIssue({
+      code: 'custom',
+      path: ['deliveryPolicy', 'http', 'contentType'],
+      message: 'Content-Type must match the outbound format.',
+    });
+}
+
 export const channelSchema = z.object({
   validationProfile: validationProfileSchema.default({}),
   idempotencyMode: z
@@ -141,14 +177,19 @@ export const channelSchema = z.object({
   destinations: z.array(destinationSchema).max(50),
   processingScript: script,
   responseScript: script,
-  filterScript: script.refine((value) => {
-    try {
-      const { rule } = readSourceFilter(value);
-      return !rule.startsWith('/* MIRTH_SIMPLE_CONDITION_') || !!readSimpleCondition(rule);
-    } catch {
-      return false;
-    }
-  }, 'Invalid source filter condition.'),
+  filterScript: script.refine(
+    (value) => validFilterConfiguration(value, 'source'),
+    'Invalid source filter condition.',
+  ),
+});
+// A preview does not create a revision. Older wizard builds send an empty optional
+// summary; normalize only that value here while retaining all other schema limits.
+export const channelPreviewSchema = channelSchema.extend({
+  changeSummary: z.preprocess(
+    (value) =>
+      typeof value === 'string' && value.length <= 500 && !value.trim() ? undefined : value,
+    channelSchema.shape.changeSummary,
+  ),
 });
 // A revision editor never needs to receive/repost credentials or hidden script bodies.
 // Only this explicit public subset can be patched; all other fields are retained server-side.

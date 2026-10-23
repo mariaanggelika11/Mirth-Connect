@@ -30,7 +30,13 @@ vi.mock('../src/services/messageProcessor.services.js', () => ({
 import app from '../src/app.js';
 import { signToken } from '../src/services/auth.services.js';
 import { retryTick, retentionTick } from '../src/services/worker.services.js';
-import { logRow, type DestinationLogRow } from '../src/services/monitor/mapping.js';
+import {
+  logRow,
+  destinationOutcomes,
+  type DestinationLogRow,
+  type MonitorRow,
+} from '../src/services/monitor/mapping.js';
+import { encrypt } from '../src/utils/secrets.js';
 const token = signToken({ id: 1, name: 'Test', role: 'VIEWER' });
 beforeEach(() => {
   state.inputs = {};
@@ -62,6 +68,9 @@ describe('Monitor pagination and PHI separation', () => {
     const attemptSql = state.history.find((h) => h.sql.includes('WITH latest'))?.sql;
     expect(attemptSql).toContain('OVER(PARTITION BY l.message_id)');
     expect(attemptSql).toContain('DELIVERY_CAPACITY');
+    expect(attemptSql).toContain('END processing_event');
+    expect(attemptSql).not.toContain(',l.response_text,');
+    expect(attemptSql).not.toContain('l.response_text response_text');
   });
   it('viewer detail omits all payloads and responses', async () => {
     state.query.mockImplementation(async (sql: string) => {
@@ -201,6 +210,101 @@ describe('Captured delivery metadata', () => {
       { durationMs: 1500, attemptCount: null },
     );
   });
+  it('classifies historical processing events without inventing delivery attempts', () => {
+    for (const patch of [
+      { status: 'FILTERED', response_text: 'FILTERED', eventKind: 'FILTERED' },
+      {
+        status: 'OUT-ERROR',
+        response_text: 'SCRIPT_EXECUTION_FAILED',
+        eventKind: 'PREPARATION_FAILURE',
+      },
+      { status: 'OUT-ERROR', response_text: 'DELIVERY_CAPACITY', eventKind: 'ADMISSION_WAIT' },
+    ]) {
+      const event = logRow({ ...row, ...patch, attempt_count: 0, retry_eligible: true }, false);
+      expect(event).toMatchObject({
+        networkAttempted: false,
+        attemptCount: 0,
+        eventKind: patch.eventKind,
+        occurredAt: row.sent_at,
+      });
+      expect(event.sentAt).toBeUndefined();
+      if (patch.eventKind !== 'ADMISSION_WAIT') expect(event.canResend).toBe(false);
+    }
+    expect(
+      logRow({ ...row, request_duration_ms: 0, http_status: 200, attempt_count: 1 }, false),
+    ).toMatchObject({
+      networkAttempted: true,
+      eventKind: 'DELIVERY_ATTEMPT',
+      attemptCount: 1,
+      sentAt: row.sent_at,
+    });
+  });
+  it('excludes policy/endpoint rejections even when historical rows captured preflight time', () => {
+    for (const code of [
+      'INVALID_ENDPOINT',
+      'DESTINATION_HOST_DENIED',
+      'DESTINATION_ADDRESS_DENIED',
+    ]) {
+      const rejected = logRow(
+        {
+          ...row,
+          status: 'OUT-ERROR',
+          response_text: code,
+          http_status: null,
+          ack_code: null,
+          request_duration_ms: 1500,
+          attempt_count: 0,
+        } as unknown as DestinationLogRow,
+        false,
+      );
+      expect(rejected).toMatchObject({
+        eventKind: 'DELIVERY_REJECTION',
+        networkAttempted: false,
+        durationMs: null,
+        attemptCount: 0,
+      });
+      expect(rejected.sentAt).toBeUndefined();
+      const listed = logRow(
+        {
+          ...row,
+          status: 'OUT-ERROR',
+          response_text: undefined as unknown as string,
+          processing_event: 'DELIVERY_REJECTION',
+          http_status: null,
+          ack_code: null,
+          request_duration_ms: 1500,
+          attempt_count: 0,
+        } as unknown as DestinationLogRow,
+        false,
+      );
+      expect(listed).toMatchObject({
+        eventKind: 'DELIVERY_REJECTION',
+        networkAttempted: false,
+        durationMs: null,
+        attemptCount: 0,
+      });
+      expect(listed).not.toHaveProperty('responseText');
+      expect(
+        logRow(
+          {
+            ...row,
+            status: 'OUT-ERROR',
+            response_text: code,
+            http_status: 403,
+            request_duration_ms: 1500,
+            attempt_count: 1,
+          },
+          false,
+        ),
+      ).toMatchObject({
+        eventKind: 'DELIVERY_ATTEMPT',
+        networkAttempted: true,
+        httpStatus: 403,
+        durationMs: 1500,
+        attemptCount: 1,
+      });
+    }
+  });
   it('rejects invalid captured metrics without exposing payload metadata', () => {
     for (const duration of [-1, Number.NaN, Number.POSITIVE_INFINITY])
       expect(logRow({ ...row, request_duration_ms: duration }, false).durationMs).toBeNull();
@@ -209,6 +313,137 @@ describe('Captured delivery metadata', () => {
     expect(
       JSON.stringify(logRow({ ...row, request_duration_ms: 1, attempt_count: 2 }, false)),
     ).not.toContain('synthetic-private');
+  });
+});
+
+describe('Destination outcomes use captured preparation metadata without payloads', () => {
+  const now = new Date();
+  const destination = {
+    id: 2,
+    name: 'Synthetic destination',
+    filterScript: 'return true;',
+    processingScript: 'msg.secret="SYNTHETIC_SCRIPT_SECRET";return msg;',
+    templateScript: '',
+    isEnabled: true,
+  };
+  const message = {
+    id: 1,
+    updated_at: now,
+    revision_configuration: encrypt(
+      JSON.stringify({
+        destinations: [
+          destination,
+          {
+            id: 3,
+            name: 'Disabled destination',
+            isEnabled: false,
+            filterScript: 'throw new Error("not run");',
+          },
+        ],
+      }),
+    ),
+  } as MonitorRow;
+  const row = {
+    id: 4,
+    destination_id: 2,
+    destination_name: 'Renamed current destination',
+    status: 'FILTERED',
+    updated_at: now,
+  };
+  it('reports filtered and captured disabled destinations with no delivery attempts', () => {
+    const result = destinationOutcomes(message, [row]);
+    expect(result).toMatchObject([
+      {
+        destinationId: 2,
+        name: 'Synthetic destination',
+        enabled: true,
+        filter: 'NOT_MATCHED',
+        transformation: 'NOT_RUN',
+        delivery: 'FILTERED',
+        attemptCount: 0,
+        networkAttempted: false,
+      },
+      {
+        destinationId: 3,
+        name: 'Disabled destination',
+        enabled: false,
+        filter: 'NOT_RUN',
+        delivery: 'DISABLED',
+        attemptCount: 0,
+        networkAttempted: false,
+      },
+    ]);
+    expect(JSON.stringify(result)).not.toContain('SYNTHETIC_SCRIPT_SECRET');
+    expect(JSON.stringify(result)).not.toContain('filterScript');
+  });
+  it('distinguishes each preparation failure from a transport failure', () => {
+    for (const [name, stage] of [
+      ['FILTER', 'filter'],
+      ['TRANSFORM', 'transformation'],
+      ['TEMPLATE', 'template'],
+      ['CONVERSION', 'conversion'],
+    ] as const) {
+      const [result] = destinationOutcomes(message, [
+        {
+          ...row,
+          status: 'OUT-ERROR',
+          last_error: `DESTINATION_${name}_ERROR:SCRIPT_EXECUTION_FAILED`,
+        },
+      ]);
+      expect(result[stage]).toBe('ERROR');
+      expect(result).toMatchObject({
+        delivery: 'NOT_SENT',
+        attemptCount: 0,
+        networkAttempted: false,
+        code: 'SCRIPT_EXECUTION_FAILED',
+      });
+    }
+    const [sent] = destinationOutcomes(message, [
+      {
+        ...row,
+        status: 'OUT-SENT',
+        recorded_attempts: 1,
+        transport_config: encrypt(
+          JSON.stringify({
+            id: 2,
+            name: 'Captured destination',
+            preparation_version: 1,
+            filter_script: '',
+            processing_script: '',
+            template_script: '',
+          }),
+        ),
+      },
+    ]);
+    expect(sent).toMatchObject({
+      name: 'Captured destination',
+      filter: 'BYPASSED',
+      transformation: 'PASS_THROUGH',
+      template: 'NOT_CONFIGURED',
+      conversion: 'CONVERTED',
+      delivery: 'SENT',
+      attemptCount: 1,
+      networkAttempted: true,
+    });
+  });
+  it('keeps uncertain historical/crash counts unknown instead of claiming no send', () => {
+    const [unknown] = destinationOutcomes(message, [
+      {
+        ...row,
+        status: 'DEAD_LETTER',
+        last_error: 'DELIVERY_OUTCOME_UNKNOWN',
+        transport_config: encrypt(
+          JSON.stringify({ preparation_version: 1, name: 'Captured', filter_script: '' }),
+        ),
+      },
+    ]);
+    expect(unknown).toMatchObject({ attemptCount: null });
+    expect(unknown.networkAttempted).toBeUndefined();
+    expect(
+      destinationOutcomes(message, [
+        { ...row, status: 'OUT-ERROR', last_error: 'PROCESSING_ERROR' },
+      ])[0].attemptCount,
+    ).toBeNull();
   });
 });
 

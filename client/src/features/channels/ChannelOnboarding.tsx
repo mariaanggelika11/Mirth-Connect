@@ -89,6 +89,15 @@ export function ChannelOnboarding({
               Open Messages
             </Button>
           </div>
+          {http ? (
+            <SourceEndpoint channel={channel} />
+          ) : (
+            <div className="field">
+              <span>Source endpoint</span>
+              <code>{channel.source.endpoint}</code>
+              <small>Access is controlled by the listener network and TLS settings.</small>
+            </div>
+          )}
           {http && can('channel:write') && (
             <section className="channel-key-setup form-section" aria-label="Source API key setup">
               <div className="channel-ready-heading">
@@ -131,7 +140,6 @@ export function ChannelOnboarding({
             <div className="form-section">
               {http ? (
                 <>
-                  <SourceEndpoint channel={channel} />
                   <Button
                     type="button"
                     variant="secondary"

@@ -2,10 +2,13 @@ import { increment, gauge } from '../utils/runtimeMetrics.js';
 import { Worker } from 'node:worker_threads';
 import { config } from '../config/env.js';
 import { AppError } from '../utils/errors.js';
-import { readFieldMapping } from '../utils/fieldMapping.js';
-import { readSourceFilter } from '../utils/sourceFilter.js';
+import { readFieldMapping, validFieldMappingScript } from '../utils/fieldMapping.js';
+import { readRetainedFilter } from '../utils/sourceFilter.js';
 import { readSimpleCondition } from '../utils/simpleCondition.js';
 import { Parser } from 'xml2js';
+import { randomUUID } from 'node:crypto';
+import { hl7ToJson } from '../utils/hl7Converer.js';
+import { describeHl7Field, hl7TargetFields } from '../utils/hl7Configuration.js';
 let active = 0;
 export async function executeScript(
   script: string,
@@ -19,12 +22,15 @@ export async function executeScript(
     throw new AppError(413, 'SCRIPT_INPUT_LIMIT', 'Script input limit exceeded');
   if (resultVariable === 'true') {
     try {
-      const filter = readSourceFilter(script);
+      const filter = readRetainedFilter(script);
       if (filter.rule.startsWith('/* MIRTH_SIMPLE_CONDITION_') && !readSimpleCondition(filter.rule))
         throw new Error('Invalid generated condition');
       if (!filter.enabled) return true;
+      // Legacy literal booleans represent filter decisions, not fall-through to return true.
+      const literal = /^(true|false)\s*;?$/.exec(script.trim());
+      if (literal) return literal[1] === 'true';
     } catch {
-      throw new AppError(422, 'FILTER_CONFIG_INVALID', 'Invalid source filter configuration');
+      throw new AppError(422, 'FILTER_CONFIG_INVALID', 'Invalid filter configuration');
     }
   }
   if (active >= config.scripts.concurrency)
@@ -33,10 +39,32 @@ export async function executeScript(
   active++;
   gauge('script_workers_active', active);
   try {
+    const mapping = readFieldMapping(script);
+    if (!mapping && !validFieldMappingScript(script))
+      throw new AppError(
+        422,
+        'FIELD_MAPPING_CONFIG_INVALID',
+        'The generated mapping has been changed. Restore its field mappings or replace it with a complete custom transformation script.',
+      );
+    if (
+      mapping?.version === 2 &&
+      typeof context.msg === 'string' &&
+      context.msg.trim().startsWith('MSH')
+    ) {
+      try {
+        context = { ...context, msg: hl7ToJson(context.msg.trim()) };
+      } catch {
+        throw new AppError(
+          422,
+          'FIELD_MAPPING_INPUT_INVALID',
+          'The source is not valid HL7. Check its MSH header and delimiters.',
+        );
+      }
+    }
     // Visual mappings/filters normalize XML before entering the existing isolated worker.
     // Legacy/custom scripts continue to receive their original input unchanged.
     if (
-      (readFieldMapping(script) || readSimpleCondition(script)) &&
+      (mapping || readSimpleCondition(script)) &&
       typeof context.msg === 'string' &&
       context.msg.trim().startsWith('<')
     ) {
@@ -69,6 +97,16 @@ export async function executeScript(
       if (Buffer.byteLength(JSON.stringify(context)) > config.server.payloadLimit)
         throw new AppError(413, 'SCRIPT_INPUT_LIMIT', 'Script input limit exceeded');
     }
+    const workerContext =
+      mapping?.version === 2
+        ? {
+            ...context,
+            mappingRuntime: {
+              timestamp: new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14) + '+0000',
+              controlId: randomUUID(),
+            },
+          }
+        : context;
     return await new Promise((resolve, reject) => {
       // tsx loader is needed only for development. Production always uses compiled JS.
       const isTs = import.meta.url.endsWith('.ts');
@@ -81,7 +119,7 @@ export async function executeScript(
               execArgv: [],
               workerData: {
                 script,
-                context,
+                context: workerContext,
                 resultVariable,
                 ...config.scripts,
                 maxBytes: config.server.payloadLimit,
@@ -93,7 +131,7 @@ export async function executeScript(
             execArgv: [],
             workerData: {
               script,
-              context,
+              context: workerContext,
               resultVariable,
               ...config.scripts,
               maxBytes: config.server.payloadLimit,
@@ -120,6 +158,78 @@ export async function executeScript(
         config.scripts.timeout + 1000,
       );
       worker.once('message', (result) => {
+        if (result.success && mapping?.version === 2) {
+          const envelope = result.value;
+          if (
+            !envelope ||
+            typeof envelope !== 'object' ||
+            envelope.kind !== 'MIRTH_MAPPING_V2_RESULT' ||
+            typeof envelope.success !== 'boolean'
+          )
+            return finish(
+              new AppError(
+                422,
+                'FIELD_MAPPING_RESULT_INVALID',
+                'The mapping did not produce a valid result.',
+              ),
+            );
+          if (envelope.success) {
+            if (resultVariable === 'true' && typeof envelope.value !== 'boolean')
+              return finish(
+                new AppError(422, 'FILTER_RESULT_INVALID', 'Filter must return a boolean'),
+              );
+            return finish(undefined, envelope.value);
+          }
+          const row =
+            Number.isInteger(envelope.index) && envelope.index >= 0
+              ? mapping.rows[envelope.index]
+              : undefined;
+          const field =
+            mapping.hl7 &&
+            typeof envelope.field === 'string' &&
+            hl7TargetFields(mapping.hl7.messageType).some((item) => item.path === envelope.field)
+              ? envelope.field
+              : undefined;
+          let code = 'FIELD_MAPPING_FAILED',
+            message = 'Check the mapping source fields, target fields and type conversions.';
+          if (envelope.code === 'FIELD_MAPPING_REQUIRED' && row) {
+            code = envelope.code;
+            message = `Source path ${row.source} is missing or empty for target ${row.target}.`;
+          }
+          if (envelope.code === 'FIELD_MAPPING_CONVERSION' && row) {
+            code = envelope.code;
+            message = `Mapping ${envelope.index + 1}: ${row.source} cannot be converted for ${row.target}. ${row.conversion === 'DATE_TO_HL7' ? 'Expected YYYY-MM-DD.' : row.conversion === 'DATE_FROM_HL7' ? 'Expected YYYYMMDD.' : 'Check the selected type conversion.'}`;
+          }
+          if (envelope.code === 'FIELD_MAPPING_INPUT_INVALID') {
+            code = envelope.code;
+            message = 'Use a structured JSON, XML or HL7 message for field mapping.';
+          }
+          if (envelope.code === 'FIELD_MAPPING_TARGET') {
+            code = envelope.code;
+            message = 'Mapping targets overlap or conflict with the selected output structure.';
+          }
+          if (
+            field &&
+            [
+              'HL7_PROFILE_REQUIRED',
+              'HL7_PROFILE_DATE',
+              'HL7_PROFILE_CODE',
+              'HL7_PROFILE_IDENTIFIER',
+            ].includes(envelope.code)
+          ) {
+            code = envelope.code;
+            const label = `${field.replace('.', '-')} (${describeHl7Field(field) || 'HL7 field'})`;
+            message =
+              envelope.code === 'HL7_PROFILE_REQUIRED'
+                ? `${label} is required by the selected template.`
+                : envelope.code === 'HL7_PROFILE_DATE'
+                  ? `${label} must be a valid date in ${field === 'PID.7' ? 'YYYYMMDD' : 'YYYYMMDDHHmmss with optional +/-HHMM offset'} format.`
+                  : envelope.code === 'HL7_PROFILE_IDENTIFIER'
+                    ? `${label} must contain a valid, consistent identifier.`
+                    : `${label} contains a code unsupported by this curated template.`;
+          }
+          return finish(new AppError(422, code, message));
+        }
         if (result.success && resultVariable === 'true' && typeof result.value !== 'boolean')
           return finish(new AppError(422, 'FILTER_RESULT_INVALID', 'Filter must return a boolean'));
         finish(

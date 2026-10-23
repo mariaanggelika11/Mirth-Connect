@@ -59,7 +59,10 @@ export function loadConfig(input: NodeJS.ProcessEnv) {
       .default('current'),
     CONFIG_ENCRYPTION_PREVIOUS_KEYS: z.string().default('{}'),
     UI_ACCESS_TOKEN_SECONDS: integer(300, 60, 900),
-    REFRESH_TOKEN_SECONDS: integer(604800, 300, 2592000),
+    REFRESH_TOKEN_SECONDS: integer(28800, 300, 2592000),
+    SESSION_ABSOLUTE_SECONDS: integer(28800, 300, 28800),
+    SESSION_IDLE_SECONDS: integer(900, 60, 28800),
+    SESSION_WARNING_SECONDS: integer(60, 1, 600),
     RETENTION_ENABLED: bool(false),
     INBOUND_IDEMPOTENCY_MODE: z.enum(['OPTIONAL', 'REQUIRED', 'DISABLED']).default('OPTIONAL'),
     IDEMPOTENCY_RETENTION_HOURS: integer(0, 0, 87600),
@@ -123,6 +126,15 @@ export function loadConfig(input: NodeJS.ProcessEnv) {
         result.error.issues.map((i) => i.path.join('.') + ': ' + i.message).join('; '),
     );
   const e = result.data;
+  const sessionAbsolute = Math.min(e.SESSION_ABSOLUTE_SECONDS, e.REFRESH_TOKEN_SECONDS);
+  if (
+    e.SESSION_IDLE_SECONDS > sessionAbsolute ||
+    e.UI_ACCESS_TOKEN_SECONDS > e.SESSION_IDLE_SECONDS ||
+    e.SESSION_WARNING_SECONDS >= e.SESSION_IDLE_SECONDS
+  )
+    throw new Error(
+      'Session policy requires UI_ACCESS_TOKEN_SECONDS <= SESSION_IDLE_SECONDS <= effective absolute lifetime and SESSION_WARNING_SECONDS < SESSION_IDLE_SECONDS',
+    );
   if (e.NODE_ENV === 'production') {
     // Reject obvious example/test keys; operators must still generate independent random secrets.
     if (
@@ -219,7 +231,10 @@ export function loadConfig(input: NodeJS.ProcessEnv) {
       audience: e.JWT_AUDIENCE,
       publicRegistration: e.PUBLIC_REGISTRATION,
       uiExpiration: e.UI_ACCESS_TOKEN_SECONDS,
-      refreshExpiration: e.REFRESH_TOKEN_SECONDS,
+      refreshExpiration: sessionAbsolute,
+      absoluteExpiration: sessionAbsolute,
+      idleExpiration: e.SESSION_IDLE_SECONDS,
+      warningSeconds: e.SESSION_WARNING_SECONDS,
     },
     encryptionKey: e.CONFIG_ENCRYPTION_KEY,
     encryptionKeyId: e.CONFIG_ENCRYPTION_KEY_ID,

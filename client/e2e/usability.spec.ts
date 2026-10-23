@@ -1,8 +1,13 @@
-import { readSourceFilter, writeSourceFilter } from '../../server/src/utils/sourceFilter';
+import {
+  readDestinationFilter,
+  readSourceFilter,
+  writeSourceFilter,
+} from '../../server/src/utils/sourceFilter';
 import type { Page } from '@playwright/test';
 import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { compileFieldMapping, readFieldMapping } from '../../server/src/utils/fieldMapping';
+import { defaultHl7Configuration } from '../../server/src/utils/hl7Configuration';
 import {
   compileSimpleCondition,
   readSimpleCondition,
@@ -345,9 +350,20 @@ async function clipboard(page: Page) {
 async function step(page: Page, index: number) {
   await page.getByLabel('Channel setup steps').getByRole('button').nth(index).click();
 }
+async function openReviewTest(page: Page) {
+  const section = page.locator('details[aria-label="Optional configuration test"]');
+  if ((await section.getAttribute('open')) === null)
+    await section.locator(':scope > summary').click();
+}
 async function openExisting(page: Page, name = existingChannel.name) {
   await page.getByLabel(`More actions for ${name}`).click();
   await page.getByRole('button', { name: 'Edit channel', exact: true }).click();
+}
+async function destinationSection(page: Page, name: string) {
+  const section = page.locator(`details[aria-label="${name}"]`).first();
+  if ((await section.getAttribute('open')) === null)
+    await section.locator(':scope > summary').click();
+  return section;
 }
 async function openSourceAdvanced(page: Page) {
   await page.getByText('Advanced source settings', { exact: true }).click();
@@ -370,6 +386,7 @@ async function newJsonXmlChannel(page: Page) {
 }
 async function preview(page: Page, raw = false, payload: unknown = rawInbound) {
   await step(page, 3);
+  await openReviewTest(page);
   await page.getByRole('textbox', { name: /^Test input · JSON/ }).fill(JSON.stringify(payload));
   if (raw) {
     const rawOption = page.getByRole('checkbox', {
@@ -379,10 +396,14 @@ async function preview(page: Page, raw = false, payload: unknown = rawInbound) {
       await page.getByText('Advanced test options', { exact: true }).click();
     await page.getByRole('checkbox', { name: 'Show unmasked preview (access is audited)' }).check();
   }
-  await page.getByRole('button', { name: 'Test Transformation', exact: true }).click();
+  await page.getByRole('button', { name: 'Run Test', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toContainText(
-    'Test completed',
+    'Transformation successful',
   );
+}
+async function addSharedMapping(page: Page) {
+  await page.getByRole('radio', { name: 'Modify fields', exact: true }).check();
+  await page.getByRole('button', { name: 'Add Mapping', exact: true }).click();
 }
 async function addPatientMappings(page: Page) {
   const fields = [
@@ -391,8 +412,9 @@ async function addPatientMappings(page: Page) {
     ['gender', 'Gender'],
     ['date_of_birth', 'BirthDate'],
   ];
+  await page.getByRole('radio', { name: 'Modify fields', exact: true }).check();
   for (const [index, [source, target]] of fields.entries()) {
-    await page.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+    await addSharedMapping(page);
     await page.getByLabel(`Source Field ${index + 1}`, { exact: true }).fill(source);
     await page.getByLabel(`Target Field ${index + 1}`, { exact: true }).fill(target);
     if (index < 2) {
@@ -419,10 +441,10 @@ test('four-step setup keeps core choices visible and technical options optional'
     'Review & Test',
   ].entries())
     await expect(steps.nth(index)).toContainText(label);
-  await expect(page.getByRole('region', { name: 'Source authentication' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Source authentication' })).toHaveCount(0);
   await expect(
     page.getByText(`${productionBase}/api/message/inbound/{channelId}`, { exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(page.getByRole('checkbox', { name: 'Enable source filter' })).not.toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Configure transformation', exact: true }).first(),
@@ -432,24 +454,21 @@ test('four-step setup keeps core choices visible and technical options optional'
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Transformation', exact: true })).toBeVisible();
   await expect(
-    page.getByText('Map incoming fields to the fields required by the destination.', {
-      exact: true,
-    }),
+    page.getByText('The message will continue to destinations.', { exact: true }),
   ).toBeVisible();
   await expect(page.getByLabel('Input format', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('combobox', { name: /^Output format/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Use patient example', exact: true })).toHaveCount(
     0,
   );
-  await expect(page.getByRole('button', { name: 'Test Transformation', exact: true })).toHaveCount(
-    0,
-  );
+  await expect(page.getByRole('button', { name: 'Run Test', exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Test input', { exact: false })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toHaveCount(0);
   await expect(
     page.getByRole('checkbox', { name: 'Show unmasked preview (access is audited)' }),
   ).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Add Mapping', exact: true })).toBeVisible();
+  await expect(page.getByRole('radio', { name: 'No transformation', exact: true })).toBeChecked();
+  await expect(page.getByRole('button', { name: 'Add Mapping', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Edit Script', exact: true })).not.toBeVisible();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByLabel('Destination name')).toHaveCount(1);
@@ -460,14 +479,13 @@ test('four-step setup keeps core choices visible and technical options optional'
   await expect(page.getByRole('button', { name: 'Add Destination', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByLabel('Integration flow')).toContainText('HTTP / JSON');
-  await expect(
-    page.getByRole('button', { name: 'Test Transformation', exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run Test', exact: true })).not.toBeVisible();
   await expect(page.getByLabel('Change summary', { exact: false })).toHaveCount(0);
   await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
   const onboarding = page.getByRole('dialog', { name: 'Channel saved', exact: true });
   await expect(onboarding).toBeVisible();
   await expect(onboarding.getByRole('button', { name: 'Create API key' })).toBeVisible();
+  await expect(onboarding.getByRole('region', { name: 'Current source endpoint' })).toBeVisible();
   await expect(onboarding.getByRole('button', { name: 'Start channel' })).toBeVisible();
   expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
   expect(captured(state, '/api/channel/test-connection')).toEqual([]);
@@ -481,15 +499,110 @@ test('jumping to review directs incomplete destinations back to their fields', a
   await page.getByRole('button', { name: 'New Channel', exact: true }).click();
   await page.getByLabel('Channel name', { exact: false }).fill('SYNTHETIC_INCOMPLETE_SETUP');
   await step(page, 3);
-  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText(
-    'Each destination needs a name and endpoint.',
+  await expect(
+    page
+      .getByRole('alert')
+      .filter({ hasText: 'Each destination needs a name, endpoint and outbound format.' }),
+  ).toBeVisible();
+  await expect(page.getByLabel('Destination name', { exact: true })).toHaveAttribute(
+    'aria-invalid',
+    'true',
   );
   await expect(page.getByLabel('Destination name')).toBeVisible();
   await expect(page.getByLabel('Endpoint', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save Channel', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByLabel('Destination name', { exact: true })).toBeFocused();
+  await page.getByLabel('Destination name', { exact: true }).fill('SYNTHETIC_RECEIVER');
+  await step(page, 3);
+  await expect(page.getByLabel('Endpoint', { exact: false })).toBeFocused();
+  await page.getByLabel('Endpoint', { exact: false }).fill(receiver);
+  await step(page, 3);
+  await expect(page.getByRole('heading', { name: 'Review & Test', exact: true })).toBeVisible();
+  await expect(page.getByText('Unnamed destination', { exact: true })).toHaveCount(0);
   expect(captured(state, '/api/channel').filter((request) => request.method === 'POST')).toEqual(
     [],
   );
+});
+
+test('direct wizard navigation requires the channel name and retains receive-only channels', async ({
+  page,
+}) => {
+  const state = await workspace(page, { channels: [] });
+  await page.getByRole('button', { name: 'New Channel', exact: true }).click();
+  const name = page.getByLabel('Channel name', { exact: false });
+  for (const target of [1, 2, 3]) {
+    await step(page, target);
+    await expect(name).toBeVisible();
+    await expect(name).toBeFocused();
+    await expect(page.getByRole('alert')).toContainText('Give this channel a name');
+  }
+  await name.fill('SYNTHETIC_RECEIVE_ONLY');
+  await step(page, 2);
+  await page.getByRole('button', { name: 'Remove destination', exact: false }).click();
+  await step(page, 3);
+  await expect(page.getByLabel('Integration flow')).toContainText('Receive only');
+  await expect(page.getByRole('button', { name: 'Save Channel', exact: true })).toBeVisible();
+  expect(captured(state, '/api/channel')).toEqual([]);
+  expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
+});
+
+test('Review keeps testing optional and shows output only after an explicit test', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const state = await workspace(page);
+  await openExisting(page);
+  await step(page, 3);
+  const optional = page.locator('details[aria-label="Optional configuration test"]');
+  const flow = page.getByLabel('Integration flow');
+  await expect(optional).not.toHaveAttribute('open');
+  await expect(page.getByRole('button', { name: 'Run Test', exact: true })).not.toBeVisible();
+  await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toHaveCount(0);
+  await expect(page.getByText('View details', { exact: true }).locator('..')).not.toHaveAttribute(
+    'open',
+  );
+  expect((await flow.boundingBox())!.height).toBeLessThan(160);
+  await expect(page.getByRole('button', { name: 'Save Channel', exact: true })).toBeInViewport();
+  if (process.env.UI_COMPACT_REVIEW_SCREENSHOT)
+    await page.screenshot({ path: process.env.UI_COMPACT_REVIEW_SCREENSHOT });
+  const summary = optional.locator(':scope > summary');
+  await summary.focus();
+  await page.keyboard.press('Enter');
+  const input = page.getByRole('textbox', { name: /^Test input · JSON/ });
+  await expect(input).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Load sample', exact: true })).not.toBeVisible();
+  await expect(
+    page.getByRole('checkbox', { name: 'Show unmasked preview (access is audited)' }),
+  ).not.toBeVisible();
+  await input.fill('{"patient_id":');
+  await page.getByRole('button', { name: 'Run Test', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('The test payload is not valid JSON.');
+  await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toHaveCount(0);
+  expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
+  await input.fill('{"patient_id":"SYNTHETIC-001"}');
+  await page.getByRole('button', { name: 'Run Test', exact: true }).click();
+  const output = page.getByRole('region', { name: 'Generated output', exact: true });
+  await expect(output).toContainText('No message was sent.');
+  await expect(output).toContainText(xml);
+  expect(captured(state, '/api/channel/preview-transformation')[0].body.raw).toBe(false);
+  expect(
+    captured(state, '/api/channel/preview-transformation')[0].body.configuration,
+  ).not.toHaveProperty('changeSummary');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(page.getByRole('button', { name: 'Save Channel', exact: true })).toBeInViewport();
+  const scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(scan.violations).toEqual([]);
+  await summary.click();
+  await expect(output).not.toBeVisible();
+  await expect(optional).not.toHaveAttribute('open');
+  expect(captured(state, '/api/channel/preview-transformation')).toHaveLength(1);
+  expect(captured(state, '/api/channel/test-connection')).toEqual([]);
+  expect(captured(state, '/api/channel/1')).toEqual([]);
+  expect(state.externalRequests).toEqual([]);
 });
 
 test('visible source authentication rotates explicitly and navigating clears the one-time key', async ({
@@ -542,6 +655,7 @@ test('JSON to XML preview, connection test and confirmed onboarding delivery kee
   await newJsonXmlChannel(page);
   await expect(page.getByRole('button', { name: 'Test connection', exact: true })).toHaveCount(0);
   await step(page, 3);
+  await openReviewTest(page);
   await page.getByText('Advanced test options', { exact: true }).click();
   await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect(page.getByText('Endpoint reachable', { exact: true })).toBeVisible();
@@ -553,12 +667,21 @@ test('JSON to XML preview, connection test and confirmed onboarding delivery kee
   await preview(page);
   const output = page.getByRole('region', { name: 'Generated output', exact: true });
   await expect(output).toContainText(xml);
-  const stages = output.getByLabel('Transformation test stages', { exact: true });
+  await output.getByRole('button', { name: 'Copy Output', exact: true }).click();
+  expect(await clipboard(page)).toBe(xml);
+  expect(
+    captured(state, '/api/channel/preview-transformation').every(
+      (request) => request.body.raw === false,
+    ),
+  ).toBe(true);
+  await expect(page.getByText('Processing details', { exact: true })).toBeVisible();
+  await page.getByText('Processing details', { exact: true }).click();
+  const stages = page.getByRole('region', { name: 'Preview source processing', exact: true });
   await expect(stages).toBeVisible();
   await expect(stages).toContainText('Passed');
   await expect(stages).toContainText('Accepted');
   await expect(stages).toContainText('Pass-through');
-  await expect(stages).toContainText('NOT SENT');
+  await expect(page.getByLabel('Output preview', { exact: true })).toContainText('NOT_SENT');
   expect(captured(state, '/api/channel/preview-transformation')[0].body).toMatchObject({
     raw: false,
     payload: rawInbound,
@@ -585,7 +708,7 @@ test('JSON to XML preview, connection test and confirmed onboarding delivery kee
   await onboarding.getByText('Test this channel', { exact: true }).click();
   const endpoint = onboarding.getByRole('region', { name: 'Current source endpoint' });
   await expect(endpoint).toContainText(`${productionBase}/api/message/inbound/2`);
-  await expect(endpoint.getByRole('button')).toHaveCount(0);
+  await expect(endpoint.getByRole('button', { name: 'Copy Endpoint', exact: true })).toBeVisible();
   await expect(endpoint.locator('summary')).toHaveCount(0);
   await expect(
     endpoint.getByText(
@@ -654,17 +777,16 @@ test('advanced filtering validation retry and timeout remain optional and preser
   await page.getByLabel('Endpoint', { exact: false }).fill(receiver);
   await expect(page.getByRole('checkbox', { name: 'Automatic retry' })).not.toBeVisible();
   await page.getByText('Advanced destination settings', { exact: true }).click();
-  await page
-    .locator('summary')
-    .filter({ hasText: /^Delivery settings/ })
-    .click();
+  await destinationSection(page, 'Delivery settings');
   await expect(page.getByRole('checkbox', { name: 'Automatic retry' })).not.toBeChecked();
+  await destinationSection(page, 'Delivery settings');
   await page.getByRole('checkbox', { name: 'Automatic retry' }).check();
   await page.getByLabel('Retry attempts', { exact: true }).fill('4');
   await page.getByLabel('Retry interval (seconds)', { exact: true }).fill('15');
   await page.getByLabel('Request timeout (seconds)', { exact: true }).fill('2.5');
   await page.getByRole('checkbox', { name: 'Automatic retry' }).uncheck();
   await expect(page.getByLabel('Retry attempts', { exact: true })).toHaveCount(0);
+  await destinationSection(page, 'Delivery settings');
   await page.getByRole('checkbox', { name: 'Automatic retry' }).check();
   await expect(page.getByLabel('Retry attempts', { exact: true })).toHaveValue('4');
   await preview(page);
@@ -819,13 +941,19 @@ test('editing preserves advanced legacy settings while removing the mandatory ch
   );
   await expect(
     page.getByText('Legacy custom source response is active.', { exact: true }),
-  ).toBeVisible();
+  ).not.toBeVisible();
   await step(page, 1);
   await expect(
-    page.getByText('A custom transformation is configured.', { exact: false }),
+    page
+      .getByRole('region', { name: 'Shared transformation', exact: true })
+      .getByText('A custom transformation is configured.', { exact: false }),
   ).toBeVisible();
   await step(page, 3);
   await expect(page.getByLabel('Change summary', { exact: false })).toHaveCount(0);
+  await page.getByText('View details', { exact: true }).click();
+  await expect(
+    page.getByText('Legacy custom source response is active.', { exact: true }),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(captured(state, '/api/channel/1')[0].body).toMatchObject({
@@ -870,7 +998,7 @@ for (const [label, base] of [
   ['local', 'http://localhost:9000'],
   ['production', productionBase],
 ] as const)
-  test(`${label} source endpoint stays visible without copy controls or request examples`, async ({
+  test(`${label} source endpoint uses the configured origin and supports safe copying`, async ({
     page,
   }) => {
     await workspace(page, {
@@ -886,7 +1014,8 @@ for (const [label, base] of [
     const endpoint = page.getByRole('region', { name: 'Current source endpoint' });
     await expect(endpoint).toBeVisible();
     await expect(endpoint).toContainText(`${base}/api/message/inbound/1`);
-    await expect(endpoint.getByRole('button')).toHaveCount(0);
+    await endpoint.getByRole('button', { name: 'Copy Endpoint', exact: true }).click();
+    expect(await clipboard(page)).toBe(`${base}/api/message/inbound/1`);
     await expect(endpoint.locator('summary')).toHaveCount(0);
     await expect(
       endpoint.getByText(
@@ -914,32 +1043,25 @@ test('simple source and destination conditions save safely without opening a scr
   await sourceCondition.getByLabel('Field', { exact: true }).fill('message_type');
   await sourceCondition.getByLabel('Value', { exact: true }).fill('ADT');
   await expect(page.getByLabel('Source filter script', { exact: true })).toHaveCount(0);
-  await page.locator('details[aria-label="Source transformer settings"] > summary').click();
-  await expect(
-    page.getByRole('group', { name: 'Source transformer settings', exact: true }),
-  ).toContainText('No transformation');
+  await expect(page.locator('[aria-label="Source transformer settings"]')).toHaveCount(0);
   if (process.env.UI_FINAL_SOURCE_SCREENSHOT)
     await page.screenshot({ path: process.env.UI_FINAL_SOURCE_SCREENSHOT });
   await step(page, 2);
   await page.getByText('Advanced destination settings', { exact: true }).click();
-  const destinationAdvanced = page.locator('.destination-editor > details');
+  const destinationAdvanced = page.locator('details[aria-label="Advanced destination settings"]');
   await expect(destinationAdvanced.locator(':scope > details > summary')).toHaveText([
-    'Destination filter',
-    'Destination transformer',
-    'Delivery settings',
+    'Transformation',
+    'Filter · Off',
+    'Delivery',
   ]);
-  await page.locator('details[aria-label="Destination filter settings"] > summary').click();
-  await page
-    .getByRole('combobox', { name: 'Destination filter', exact: true })
-    .selectOption('simple');
+  await destinationSection(page, 'Destination filter settings');
+  await page.getByRole('checkbox', { name: 'Enable destination filter', exact: true }).check();
   const destinationCondition = page.getByRole('group', {
     name: 'Destination filter simple condition',
     exact: true,
   });
   await destinationCondition.getByLabel('Field', { exact: true }).fill('department');
   await destinationCondition.getByLabel('Value', { exact: true }).fill('LAB');
-  await page.locator('details[aria-label="Destination transformer settings"] > summary').click();
-  await page.locator('details[aria-label="Delivery settings"] > summary').click();
   await expect(page.getByLabel('Destination filter script', { exact: true })).toHaveCount(0);
   await expect(
     page.getByRole('button', { name: 'Configure custom response', exact: true }),
@@ -951,6 +1073,7 @@ test('simple source and destination conditions save safely without opening a scr
     .analyze();
   expect(scan.violations).toEqual([]);
   await step(page, 3);
+  await page.getByText('View details', { exact: true }).click();
   const processing = page.getByRole('region', { name: 'Source processing summary', exact: true });
   await expect(processing).toContainText('1 required fields · 1 rules');
   await expect(processing).toContainText('Simple condition');
@@ -1057,9 +1180,7 @@ test('invalid destination conditions cannot leave the step or affect the next de
   const first = page.locator('.destination-editor').nth(0);
   await first.getByText('Advanced destination settings', { exact: true }).click();
   await first.locator('details[aria-label="Destination filter settings"] > summary').click();
-  await first
-    .getByRole('combobox', { name: 'Destination filter', exact: true })
-    .selectOption('simple');
+  await first.getByRole('checkbox', { name: 'Enable destination filter', exact: true }).check();
   await first.getByLabel('Field', { exact: true }).fill('patient.');
   await step(page, 3);
   await expect(
@@ -1125,7 +1246,7 @@ test('opening legacy Basic validation and response configuration preserves them 
   ).toBeChecked();
   await expect(
     page.getByText('Legacy custom source response is active.', { exact: true }),
-  ).toBeVisible();
+  ).not.toBeVisible();
   await step(page, 2);
   await page.getByText('Advanced destination settings', { exact: true }).click();
   await expect(
@@ -1136,6 +1257,7 @@ test('opening legacy Basic validation and response configuration preserves them 
     0,
   );
   await step(page, 3);
+  await page.getByText('View details', { exact: true }).click();
   await expect(
     page.getByRole('region', { name: 'Source processing summary', exact: true }),
   ).toContainText('Legacy JSON object check');
@@ -1349,9 +1471,7 @@ test('manual field mappings save required defaults and test only after source an
   await page.getByRole('checkbox', { name: 'Required field 3', exact: true }).check();
   await page.locator('details[aria-label="Mapping options 3"] > summary').click();
   await expect(page.getByLabel('XML root element', { exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Test Transformation', exact: true })).toHaveCount(
-    0,
-  );
+  await expect(page.getByRole('button', { name: 'Run Test', exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Preview input', { exact: false })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toHaveCount(0);
   expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
@@ -1394,14 +1514,14 @@ test('manual field mappings save required defaults and test only after source an
     mappedPatientXml.replace('<Patient>', '<root>').replace('</Patient>', '</root>'),
   );
   await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toContainText(
-    'NOT SENT',
+    'No message was sent.',
   );
   if (process.env.UI_REVIEW_REVIEW_SCREENSHOT) {
     await page.getByText('Advanced test options', { exact: true }).click();
     await page.setViewportSize({ width: 1440, height: 2600 });
     await page
       .getByRole('dialog', { name: 'New channel', exact: true })
-      .locator('.modal-body')
+      .locator('.editor-body')
       .evaluate((element) => {
         element.scrollTop = 0;
       });
@@ -1412,6 +1532,7 @@ test('manual field mappings save required defaults and test only after source an
   await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toHaveCount(0);
   await step(page, 3);
   await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Channel saved', exact: true })).toBeVisible();
   const saved = captured(state, '/api/channel').find((item) => item.method === 'POST')?.body;
   expect(readFieldMapping(String(saved?.processingScript))).toEqual(mapping);
   expect((saved?.destinations as { outboundDataType: string }[])[0].outboundDataType).toBe('XML');
@@ -1425,11 +1546,9 @@ test('unfinished field mappings block navigation and keep local input when going
   const state = await workspace(page);
   await openExisting(page);
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+  await addSharedMapping(page);
   await page.getByLabel('Source Field 1', { exact: true }).fill('patient_id');
-  await expect(page.getByRole('button', { name: 'Test Transformation', exact: true })).toHaveCount(
-    0,
-  );
+  await expect(page.getByRole('button', { name: 'Run Test', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(
     page.getByText('Complete or remove the unfinished field mapping.', { exact: true }),
@@ -1443,10 +1562,8 @@ test('unfinished field mappings block navigation and keep local input when going
   await expect(page.getByLabel('Source Field 1', { exact: true })).toBeVisible();
   expect(captured(state, '/api/channel/1')).toEqual([]);
   await page.getByLabel('Target Field 1', { exact: true }).fill('PatientID');
-  await expect(page.getByRole('button', { name: 'Test Transformation', exact: true })).toHaveCount(
-    0,
-  );
-  await page.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Run Test', exact: true })).toHaveCount(0);
+  await addSharedMapping(page);
   await page.getByLabel('Source Field 2', { exact: true }).fill('name');
   await page.getByLabel('Target Field 2', { exact: true }).fill('PatientID');
   await expect(
@@ -1509,14 +1626,21 @@ test('legacy transformation script is replaced only after an explicit confirmati
   await openExisting(page);
   await step(page, 1);
   await expect(
-    page.getByText('A custom transformation is configured.', { exact: false }),
+    page
+      .getByRole('region', { name: 'Shared transformation', exact: true })
+      .getByText('A custom transformation is configured.', { exact: false }),
   ).toBeVisible();
-  await page.getByText('Advanced Custom Transformation Script', { exact: false }).click();
+  await page
+    .getByRole('region', { name: 'Shared transformation', exact: true })
+    .getByText('Advanced Custom Transformation Script', { exact: false })
+    .click();
   await page.getByRole('button', { name: 'Switch to field mapping', exact: true }).click();
   let confirmation = page.getByRole('dialog', { name: 'Switch to field mapping?', exact: true });
   await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(
-    page.getByText('A custom transformation is configured.', { exact: false }),
+    page
+      .getByRole('region', { name: 'Shared transformation', exact: true })
+      .getByText('A custom transformation is configured.', { exact: false }),
   ).toBeVisible();
   await preview(page);
   expect(
@@ -1530,7 +1654,7 @@ test('legacy transformation script is replaced only after an explicit confirmati
   await page.getByRole('button', { name: 'Switch to field mapping', exact: true }).click();
   confirmation = page.getByRole('dialog', { name: 'Switch to field mapping?', exact: true });
   await confirmation.getByRole('button', { name: 'Use field mapping', exact: true }).click();
-  await page.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+  await addSharedMapping(page);
   await page.getByLabel('Source Field 1', { exact: true }).fill('patient.identifier');
   await page.getByLabel('Target Field 1', { exact: true }).fill('PatientID');
   await step(page, 3);
@@ -1628,15 +1752,16 @@ test('test errors stay in Review and disappear when returning to mapping', async
   const state = await workspace(page);
   await openExisting(page);
   await step(page, 3);
+  await openReviewTest(page);
   await page.getByRole('textbox', { name: /^Test input · JSON/ }).fill('{"patient_id":');
-  await page.getByRole('button', { name: 'Test Transformation', exact: true }).click();
+  await page.getByRole('button', { name: 'Run Test', exact: true }).click();
   await expect(page.getByRole('alert').filter({ hasText: /JSON/i })).toBeVisible();
   expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
   await step(page, 1);
   await expect(page.getByRole('heading', { name: 'Transformation', exact: true })).toBeVisible();
   await expect(page.getByRole('alert').filter({ hasText: /JSON/i })).toHaveCount(0);
   await expect(page.getByLabel('Test input', { exact: false })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+  await addSharedMapping(page);
   await page.getByLabel('Source Field 1', { exact: true }).fill('patient_id');
   await page.getByLabel('Target Field 1', { exact: true }).fill('PatientID');
   expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
@@ -1677,10 +1802,11 @@ test('missing required mapping target shows the actionable server result in Revi
   });
   await openExisting(page);
   await step(page, 3);
+  await openReviewTest(page);
   await page
     .getByRole('textbox', { name: /^Test input · JSON/ })
     .fill('{"name":"Synthetic Patient"}');
-  await page.getByRole('button', { name: 'Test Transformation', exact: true }).click();
+  await page.getByRole('button', { name: 'Run Test', exact: true }).click();
   const error = page.getByRole('alert').filter({ hasText: /PatientID/ });
   await expect(error).toBeVisible();
   await expect(error).toContainText('Target field PatientID is required.');
@@ -1689,9 +1815,9 @@ test('missing required mapping target shows the actionable server result in Revi
   await page
     .getByRole('textbox', { name: /^Test input · JSON/ })
     .fill('{"patient_id":"SYNTHETIC-001"}');
-  await page.getByRole('button', { name: 'Test Transformation', exact: true }).click();
+  await page.getByRole('button', { name: 'Run Test', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toContainText(
-    'Test completed',
+    'Transformation successful',
   );
   expect(previewCalls).toBe(2);
 });
@@ -1706,15 +1832,13 @@ test('editing a mapping clears the previous review output and never tests automa
     rawXml,
   );
   await step(page, 1);
-  await page.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+  await addSharedMapping(page);
   await page.getByLabel('Source Field 1', { exact: true }).fill('patient.identifier');
   await page.getByLabel('Target Field 1', { exact: true }).fill('PatientID');
   expect(captured(state, '/api/channel/preview-transformation')).toHaveLength(1);
   await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toHaveCount(0);
   await step(page, 3);
-  await expect(
-    page.getByRole('region', { name: 'Generated output', exact: true }),
-  ).not.toContainText(rawXml);
+  await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toHaveCount(0);
   expect(captured(state, '/api/channel/preview-transformation')).toHaveLength(1);
 });
 
@@ -1740,10 +1864,8 @@ test('Review hides cached raw test output immediately after the administrator ro
   await expect(
     page.getByRole('checkbox', { name: 'Show unmasked preview (access is audited)' }),
   ).toHaveCount(0);
-  await expect(
-    page.getByRole('region', { name: 'Generated output', exact: true }),
-  ).not.toContainText(rawXml);
-  await page.getByRole('button', { name: 'Test Transformation', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Run Test', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toContainText(
     xml,
   );
@@ -1911,12 +2033,1671 @@ test('Review displays failed input rules with skipped filter transformation and 
     }),
   );
   await step(page, 3);
-  await page.getByRole('button', { name: 'Test Transformation', exact: true }).click();
+  await openReviewTest(page);
+  await page.getByRole('button', { name: 'Run Test', exact: true }).click();
   const output = page.getByRole('region', { name: 'Generated output', exact: true });
-  await expect(output).toContainText('patient_id');
-  await expect(output).toContainText('Required value is missing.');
-  await expect(output).toContainText('Not run');
-  await expect(output).toContainText('NOT SENT');
+  await expect(output).toContainText('Input fields do not meet');
+  await page.getByText('Advanced test options', { exact: true }).click();
+  await page.getByText('Processing details', { exact: true }).click();
+  const diagnostic = page.getByLabel('Output preview', { exact: true });
+  await expect(diagnostic).toContainText('patient_id');
+  await expect(diagnostic).toContainText('Required value is missing.');
+  await expect(diagnostic).toContainText('Not run');
+  await expect(diagnostic).toContainText('NOT_SENT');
   expect(captured(state, '/api/channel/test-connection')).toEqual([]);
   expect(state.externalRequests).toEqual([]);
 });
+
+async function destinationAdvanced(page: Page) {
+  await step(page, 2);
+  const destination = page.locator('.destination-editor').first();
+  await destination.getByText('Advanced destination settings', { exact: true }).click();
+  await destinationSection(page, 'Destination filter settings');
+  return destination;
+}
+
+test('destination filter retains its exact rule while OFF across save and reopen', async ({
+  page,
+}) => {
+  const state = await workspace(page, { channels: [] });
+  await newJsonXmlChannel(page);
+  const destination = await destinationAdvanced(page);
+  const filter = destination.getByRole('group', {
+    name: 'Destination filter settings',
+    exact: true,
+  });
+  const enabled = filter.getByRole('checkbox', { name: 'Enable destination filter', exact: true });
+  await expect(enabled).not.toBeChecked();
+  await enabled.check();
+  await expect(filter).not.toContainText('Configured');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(
+    page.getByRole('alert').filter({ hasText: 'Complete the filter condition' }),
+  ).toBeVisible();
+  await filter.getByLabel('Field', { exact: true }).fill('patient.department');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(
+    page.getByRole('alert').filter({ hasText: 'Complete the filter condition' }),
+  ).toBeVisible();
+  await filter.getByLabel('Value', { exact: true }).fill('LAB');
+  await expect(
+    destination.locator('details[aria-label="Advanced destination settings"] > summary'),
+  ).toContainText('Customized');
+  await enabled.uncheck();
+  await expect(filter.getByLabel('Field', { exact: true })).not.toBeVisible();
+  await expect(enabled).not.toBeChecked();
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  const saved = (
+    captured(state, '/api/channel')[0].body.destinations as { filterScript: string }[]
+  )[0];
+  const retained = readDestinationFilter(saved.filterScript);
+  expect(retained.enabled).toBe(false);
+  expect(readSimpleCondition(retained.rule)).toMatchObject({
+    field: 'patient.department',
+    value: 'LAB',
+  });
+  await page
+    .getByRole('dialog', { name: 'Channel saved', exact: true })
+    .getByLabel('Close dialog')
+    .click();
+  await openExisting(page, 'SYNTHETIC_JSON_TO_XML');
+  await destinationAdvanced(page);
+  await expect(enabled).not.toBeChecked();
+  await enabled.check();
+  await expect(filter.getByLabel('Field', { exact: true })).toHaveValue('patient.department');
+  await expect(filter.getByLabel('Value', { exact: true })).toHaveValue('LAB');
+  await filter.getByLabel('Operator', { exact: true }).selectOption('isEmpty');
+  await expect(filter.getByLabel('Value', { exact: true })).toHaveCount(0);
+  expect(state.externalRequests).toEqual([]);
+});
+
+for (const [label, script] of [
+  ['deliver', 'return true;'],
+  ['skip', 'return false;'],
+  ['bare skip', 'false'],
+  ['custom', 'return msg.department === "LAB";'],
+] as const)
+  test(`legacy destination ${label} remains read-only and unchanged on save`, async ({ page }) => {
+    const state = await workspace(page, {
+      channels: [
+        {
+          ...existingChannel,
+          destinations: [{ ...existingChannel.destinations[0], filterScript: script }],
+        },
+      ],
+    });
+    await openExisting(page);
+    const destination = await destinationAdvanced(page);
+    const filter = destination.getByRole('group', {
+      name: 'Destination filter settings',
+      exact: true,
+    });
+    await expect(filter).toContainText('Legacy destination filter retained');
+    await expect(filter.getByRole('combobox')).toHaveCount(0);
+    await expect(filter.locator('textarea')).toHaveCount(0);
+    const enabled = filter.getByRole('checkbox', {
+      name: 'Enable destination filter',
+      exact: true,
+    });
+    await enabled.uncheck();
+    await enabled.check();
+    await expect(filter).toContainText('Legacy destination filter retained');
+    await step(page, 3);
+    await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+    expect(
+      (captured(state, '/api/channel/1')[0].body.destinations as { filterScript: string }[])[0]
+        .filterScript,
+    ).toBe(script);
+  });
+
+test('destination mapping uses the existing editor and preserves legacy output script', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 1200 });
+  const template = 'return { Envelope: msg };';
+  const state = await workspace(page, {
+    channels: [
+      {
+        ...existingChannel,
+        destinations: [{ ...existingChannel.destinations[0], templateScript: template }],
+      },
+    ],
+  });
+  await openExisting(page);
+  const destination = await destinationAdvanced(page);
+  await expect(destination.getByRole('button', { name: 'Add template', exact: true })).toHaveCount(
+    0,
+  );
+  await destination
+    .locator('details[aria-label="Destination transformation settings"] > summary')
+    .click();
+  const dialog = page.getByRole('region', {
+    name: 'Transformation · PATIENT_XML_RECEIVER',
+    exact: true,
+  });
+  await dialog.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+  await dialog.getByLabel('Source Field 1', { exact: true }).fill('patient_id');
+  await dialog.getByLabel('Target Field 1', { exact: true }).fill('patientCode');
+  await dialog.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+  await dialog.getByLabel('Source Field 2', { exact: true }).fill('name');
+  await dialog.getByLabel('Target Field 2', { exact: true }).fill('fullName');
+  await destination
+    .locator('details[aria-label="Legacy destination output script"] > summary')
+    .click();
+  await expect(destination).toContainText('Its return value replaces the outbound payload');
+  const scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(scan.violations).toEqual([]);
+  if (process.env.UI_DESTINATION_MAPPING_SCREENSHOT)
+    await page.screenshot({ path: process.env.UI_DESTINATION_MAPPING_SCREENSHOT });
+  await destination.getByRole('button', { name: 'Edit legacy output script', exact: true }).click();
+  const scriptDialog = page.getByRole('dialog').last();
+  await expect(scriptDialog.locator('textarea')).toHaveValue(template);
+  await scriptDialog.getByLabel('Close dialog').click();
+  await destination
+    .locator('details[aria-label="Destination transformation settings"] > summary')
+    .click();
+  await expect(dialog.getByLabel('Target Field 2', { exact: true })).toHaveValue('fullName');
+  await destination
+    .locator('details[aria-label="Destination transformation settings"] > summary')
+    .click();
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  const saved = (
+    captured(state, '/api/channel/1')[0].body.destinations as {
+      processingScript: string;
+      templateScript: string;
+    }[]
+  )[0];
+  expect(saved.templateScript).toBe(template);
+  expect(readFieldMapping(saved.processingScript)?.rows).toEqual([
+    { source: 'patient_id', target: 'patientCode', required: false },
+    { source: 'name', target: 'fullName', required: false },
+  ]);
+  expect(state.externalRequests).toEqual([]);
+});
+
+test('unfinished destination mapping survives collapsing its editor and blocks review until corrected', async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  await openExisting(page);
+  const destination = await destinationAdvanced(page);
+  const configure = destination.locator(
+    'details[aria-label="Destination transformation settings"] > summary',
+  );
+  await configure.click();
+  const dialog = page.getByRole('region', {
+    name: 'Transformation · PATIENT_XML_RECEIVER',
+    exact: true,
+  });
+  await dialog.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+  await dialog.getByLabel('Source Field 1', { exact: true }).fill('patient_id');
+  await destination
+    .locator('details[aria-label="Destination transformation settings"] > summary')
+    .click();
+  await step(page, 3);
+  await expect(
+    page
+      .getByRole('alert')
+      .filter({ hasText: 'Complete or remove the unfinished field mapping for destination 1' }),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save Channel', exact: true })).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel('Source Field 1', { exact: true })).toHaveValue('patient_id');
+  await dialog.getByLabel('Target Field 1', { exact: true }).fill('patientCode');
+  await destination
+    .locator('details[aria-label="Destination transformation settings"] > summary')
+    .click();
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  expect(captured(state, '/api/channel/1')).toHaveLength(1);
+});
+
+test('review labels filtered and disabled destinations without claiming transformation or delivery', async ({
+  page,
+}) => {
+  await workspace(page);
+  await page.route('**/api/channel/preview-transformation', (route) =>
+    route.fulfill({
+      json: {
+        success: true,
+        accepted: true,
+        elapsedMs: 2,
+        networkDelivery: 'NOT_SENT',
+        source: {
+          format: 'JSON',
+          payload: {},
+          validation: 'PASSED',
+          filter: 'ACCEPTED',
+          transformation: 'PASS_THROUGH',
+        },
+        results: [
+          {
+            name: 'LAB_RECEIVER',
+            enabled: true,
+            status: 'FILTERED',
+            routed: false,
+            outputFormat: 'XML',
+            delivery: 'FILTERED',
+            stages: {
+              filter: 'NOT_MATCHED',
+              transformation: 'NOT_RUN',
+              template: 'NOT_RUN',
+              conversion: 'NOT_RUN',
+            },
+          },
+          {
+            name: 'DISABLED_RECEIVER',
+            enabled: false,
+            status: 'SKIPPED',
+            routed: false,
+            outputFormat: 'JSON',
+            delivery: 'DISABLED',
+            stages: {
+              filter: 'NOT_RUN',
+              transformation: 'NOT_RUN',
+              template: 'NOT_RUN',
+              conversion: 'NOT_RUN',
+            },
+          },
+        ],
+      },
+    }),
+  );
+  await openExisting(page);
+  await preview(page);
+  const output = page.getByRole('region', { name: 'Generated output', exact: true });
+  await expect(output.getByLabel('Processing results: LAB_RECEIVER')).toHaveCount(0);
+  await page.getByText('Advanced test options', { exact: true }).click();
+  await page.getByText('Processing details', { exact: true }).click();
+  const diagnostics = page.getByLabel('Output preview', { exact: true });
+  await expect(diagnostics.getByLabel('Processing results: LAB_RECEIVER')).toContainText(
+    'Not matched',
+  );
+  await expect(diagnostics.getByLabel('Processing results: LAB_RECEIVER')).toContainText('Not run');
+  await expect(output).toContainText('No message was sent to this destination');
+  await expect(diagnostics.getByLabel('Processing results: DISABLED_RECEIVER')).toContainText(
+    'Destination disabled',
+  );
+  await expect(output).not.toContainText('Delivery success');
+});
+
+test('Messages distinguishes filtering disabled and preparation errors with zero network attempts', async ({
+  page,
+}) => {
+  await workspace(page);
+  await page.route('**/api/message/1?*', (route) =>
+    route.fulfill({
+      json: {
+        success: true,
+        data: {
+          id: 1,
+          direction: 'IN',
+          status: 'PARTIAL',
+          channelId: 1,
+          channelName: existingChannel.name,
+          timestamp,
+          payloadAllowed: true,
+          destinationLogs: [],
+          destinationOutcomes: [
+            {
+              destinationId: 1,
+              name: 'Filtered LAB',
+              enabled: true,
+              status: 'FILTERED',
+              filter: 'NOT_MATCHED',
+              transformation: 'NOT_RUN',
+              template: 'NOT_RUN',
+              conversion: 'NOT_RUN',
+              delivery: 'FILTERED',
+              occurredAt: timestamp,
+              attemptCount: 0,
+            },
+            {
+              destinationId: 2,
+              name: 'Disabled RIS',
+              enabled: false,
+              status: 'DISABLED',
+              filter: 'NOT_RUN',
+              transformation: 'NOT_RUN',
+              template: 'NOT_RUN',
+              conversion: 'NOT_RUN',
+              delivery: 'DISABLED',
+              occurredAt: timestamp,
+              attemptCount: 0,
+            },
+            {
+              destinationId: 3,
+              name: 'Broken mapping',
+              enabled: true,
+              status: 'OUT-ERROR',
+              filter: 'MATCHED',
+              transformation: 'ERROR',
+              template: 'NOT_RUN',
+              conversion: 'NOT_RUN',
+              delivery: 'NOT_SENT',
+              code: 'FIELD_MAPPING_INVALID',
+              occurredAt: timestamp,
+              attemptCount: 0,
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.getByRole('button', { name: 'Messages', exact: true }).click();
+  await page.getByRole('button', { name: 'Open message 1', exact: true }).click();
+  const result = page.getByRole('region', { name: 'Destination processing', exact: true });
+  await expect(result).toContainText('Filtered LAB');
+  await expect(result).toContainText('Filtered · not sent');
+  await expect(result).toContainText('Disabled RIS');
+  await expect(result).toContainText('FIELD_MAPPING_INVALID');
+  await expect(result.getByText('Network attempts', { exact: true })).toHaveCount(3);
+  await expect(page.getByRole('region', { name: 'Delivery Result', exact: true })).toContainText(
+    'No network delivery attempts recorded.',
+  );
+  await expect(result).not.toContainText('HTTP 200');
+});
+
+test('replacing a legacy destination filter requires an explicit complete condition', async ({
+  page,
+}) => {
+  const state = await workspace(page, {
+    channels: [
+      {
+        ...existingChannel,
+        destinations: [{ ...existingChannel.destinations[0], filterScript: 'return false;' }],
+      },
+    ],
+  });
+  await openExisting(page);
+  const destination = await destinationAdvanced(page);
+  const filter = destination.getByRole('group', {
+    name: 'Destination filter settings',
+    exact: true,
+  });
+  await filter.getByRole('button', { name: 'Replace with simple condition', exact: true }).click();
+  await expect(
+    filter.getByRole('group', { name: 'Destination filter simple condition', exact: true }),
+  ).toBeVisible();
+  await step(page, 3);
+  await expect(page.getByRole('button', { name: 'Save Channel', exact: true })).toHaveCount(0);
+  await filter.getByLabel('Field', { exact: true }).fill('department');
+  await filter.getByLabel('Value', { exact: true }).fill('LAB');
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  expect(
+    readSimpleCondition(
+      (captured(state, '/api/channel/1')[0].body.destinations as { filterScript: string }[])[0]
+        .filterScript,
+    ),
+  ).toMatchObject({ field: 'department', operator: 'eq', value: 'LAB' });
+  expect(state.externalRequests).toEqual([]);
+});
+
+test('Source has no sample controls and mapping works with test input only in Review', async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  await openExisting(page);
+  await expect(page.getByText('Sample message (optional)', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Analyze fields', exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole('textbox', { name: 'Source sample · JSON', exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Load JSON example', exact: true })).toHaveCount(0);
+  await step(page, 1);
+  await addSharedMapping(page);
+  const source = page.getByLabel('Source Field 1', { exact: true });
+  await source.fill('patient_id');
+  await page.getByLabel('Target Field 1', { exact: true }).fill('PatientID');
+  await step(page, 3);
+  await openReviewTest(page);
+  const input = page.getByRole('textbox', { name: /^Test input · JSON/ });
+  const sample = JSON.stringify({ patient_id: 'SYNTHETIC-001' });
+  await input.fill(sample);
+  await page.getByRole('button', { name: 'Run Test', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Generated output', exact: true })).toContainText(
+    'Transformation successful',
+  );
+  expect(captured(state, '/api/channel/preview-transformation')[0].body.payload).toEqual({
+    patient_id: 'SYNTHETIC-001',
+  });
+  await step(page, 0);
+  await expect(page.getByText('Sample message (optional)', { exact: true })).toHaveCount(0);
+  await step(page, 1);
+  await expect(source).toHaveValue('patient_id');
+  await expect(page.getByLabel('Target Field 1', { exact: true })).toHaveValue('PatientID');
+  await step(page, 3);
+  await openReviewTest(page);
+  await expect(input).toHaveValue(sample);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  const saved = captured(state, '/api/channel/1')[0].body;
+  expect(saved).not.toHaveProperty('sample');
+  expect(saved).not.toHaveProperty('payload');
+  expect(readFieldMapping(saved.processingScript as string)?.rows).toMatchObject([
+    { source: 'patient_id', target: 'PatientID' },
+  ]);
+  expect(captured(state, '/api/channel/discover-fields')).toEqual([]);
+  expect(state.externalRequests).toEqual([]);
+});
+
+test('blank mapping rows are harmless while partial paths get specific inline guidance', async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  await openExisting(page);
+  await step(page, 1);
+  await addSharedMapping(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await step(page, 3);
+  await expect(page.getByRole('button', { name: 'Save Channel', exact: true })).toBeVisible();
+  await step(page, 1);
+  await page.getByLabel('Source Field 1', { exact: true }).fill('patient.id');
+  await expect(page.getByRole('alert').filter({ hasText: 'Target Field' })).toBeVisible();
+  await step(page, 3);
+  await expect(page.getByRole('button', { name: 'Save Channel', exact: true })).toHaveCount(0);
+  await page.getByLabel('Target Field 1', { exact: true }).fill('patientId');
+  await page.locator('details[aria-label="Mapping options 1"] > summary').click();
+  await page.getByRole('combobox', { name: 'Type conversion 1', exact: true }).selectOption('TEXT');
+  await page.getByLabel('Default value 1', { exact: true }).fill('SYNTHETIC-DEFAULT');
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  expect(
+    readFieldMapping(String(captured(state, '/api/channel/1')[0].body.processingScript)),
+  ).toMatchObject({
+    version: 2,
+    rows: [
+      {
+        source: 'patient.id',
+        target: 'patientId',
+        conversion: 'TEXT',
+        defaultValue: 'SYNTHETIC-DEFAULT',
+      },
+    ],
+  });
+});
+
+async function hl7Destination(page: Page) {
+  await step(page, 2);
+  await page.getByLabel('Outbound format', { exact: false }).first().selectOption('HL7V2');
+  const editor = page.getByRole('region', { name: 'HL7 destination mapping', exact: true }).first();
+  await expect(editor).toBeVisible();
+  const advanced = editor.locator('details[aria-label="Advanced destination settings"]');
+  await expect(advanced).not.toHaveAttribute('open');
+  await expect(editor.getByRole('combobox', { name: 'Message type', exact: true })).toHaveCount(0);
+  await expect(editor.getByRole('table', { name: 'HL7 field mappings' })).toHaveCount(0);
+  await advanced.locator(':scope > summary').click();
+  await destinationSection(page, 'Destination transformation settings');
+  await expect(page.getByRole('dialog', { name: /^Transformation ·/ })).toHaveCount(0);
+  return editor;
+}
+
+async function selectHl7Target(editor: ReturnType<Page['locator']>, index: number, path: string) {
+  const trigger = editor.getByRole('button', { name: `Target Field ${index}`, exact: true });
+  await trigger.click();
+  const choices = editor.getByRole('region', {
+    name: `Target Field ${index} choices`,
+    exact: true,
+  });
+  await choices.getByLabel('Search fields', { exact: true }).fill(path.replace('.', '-'));
+  const branch = choices.getByRole('button', { name: `Select ${path}`, exact: true });
+  if (await branch.count()) await branch.click();
+  else
+    await choices
+      .getByRole('button', {
+        name: new RegExp(`^${path.replace('.', '-').replaceAll('.', '\\.')} —`),
+      })
+      .click();
+  await expect(choices).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+}
+
+test('destination HL7 configuration saves version headers mappings and conversion then reopens intact', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1400 });
+  const state = await workspace(page, { channels: [] });
+  await newJsonXmlChannel(page);
+  const dialog = await hl7Destination(page);
+  await expect(dialog.locator('output[aria-label="HL7 version"]')).toHaveText('2.5');
+  await expect(dialog.getByRole('combobox', { name: 'Message type', exact: true })).toHaveValue(
+    'ADT^A04',
+  );
+  await dialog.getByText('HL7 settings', { exact: true }).click();
+  await expect(
+    dialog.getByRole('textbox', { name: /^Message date\/time|^Message control ID/ }),
+  ).toHaveCount(0);
+  await dialog.getByLabel('Sending application', { exact: true }).fill('SYNTHETIC_SOURCE');
+  const rows = [
+    ['patient_id', 'PID.3', 'NONE'],
+    ['last_name', 'PID.5.1', 'NONE'],
+    ['first_name', 'PID.5.2', 'NONE'],
+    ['dob', 'PID.7', 'DATE_TO_HL7'],
+  ];
+  for (const [index, [source, target, conversion]] of rows.entries()) {
+    await dialog.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+    await dialog.getByLabel(`Source Field ${index + 1}`, { exact: true }).fill(source);
+    await selectHl7Target(dialog, index + 1, target);
+    if (conversion !== 'NONE') {
+      await dialog.locator(`details[aria-label="Mapping options ${index + 1}"] > summary`).click();
+      await dialog
+        .getByRole('combobox', { name: `Type conversion ${index + 1}`, exact: true })
+        .selectOption(conversion);
+    }
+  }
+  await dialog.getByRole('button', { name: 'Target Field 1', exact: true }).click();
+  const choices = dialog.getByRole('region', { name: 'Target Field 1 choices', exact: true });
+  await choices.getByLabel('Search fields', { exact: true }).fill('Patient identifier');
+  await expect(choices).toContainText('PID-3');
+  await choices.getByRole('button', { name: 'Select PID.3', exact: true }).click();
+  await dialog.getByText('HL7 settings', { exact: true }).click();
+  await page.getByText('Advanced destination settings', { exact: true }).click();
+  if (process.env.UI_HL7_MAPPING_SCREENSHOT)
+    await page.screenshot({ path: process.env.UI_HL7_MAPPING_SCREENSHOT });
+  const scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(scan.violations).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 1400 });
+  await step(page, 3);
+  await page.getByText('View details', { exact: true }).click();
+  await expect(page.getByText('ADT^A04 · 2.5', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  const saved = (
+    captured(state, '/api/channel')[0].body.destinations as { processingScript: string }[]
+  )[0];
+  expect(readFieldMapping(saved.processingScript)).toMatchObject({
+    version: 2,
+    hl7: { version: '2.5', messageType: 'ADT^A04', sendingApplication: 'SYNTHETIC_SOURCE' },
+    rows: expect.arrayContaining([
+      { source: 'dob', target: 'PID.7', required: false, conversion: 'DATE_TO_HL7' },
+    ]),
+  });
+  await page
+    .getByRole('dialog', { name: 'Channel saved', exact: true })
+    .getByLabel('Close dialog')
+    .click();
+  await openExisting(page, 'SYNTHETIC_JSON_TO_XML');
+  await step(page, 2);
+  await expect(dialog.getByRole('table', { name: 'HL7 field mappings' })).toHaveCount(0);
+  await page.getByText('Advanced destination settings', { exact: true }).click();
+  await destinationSection(page, 'Destination transformation settings');
+  await expect(dialog.getByLabel('Source Field 4', { exact: true })).toHaveValue('dob');
+  await expect(dialog.getByRole('combobox', { name: 'Message type', exact: true })).toHaveValue(
+    'ADT^A04',
+  );
+  expect(state.externalRequests).toEqual([]);
+});
+
+test('compact JSON to HL7 mapping skips optional source mapping and keeps advanced settings closed', async ({
+  page,
+}) => {
+  const state = await workspace(page, { channels: [] });
+  await newJsonXmlChannel(page);
+  await step(page, 1);
+  await addSharedMapping(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const editor = await hl7Destination(page);
+  await expect(editor.getByRole('table', { name: 'HL7 field mappings' })).toBeVisible();
+  await expect(editor.getByLabel('Sending application', { exact: true })).not.toBeVisible();
+  await expect(editor.getByRole('region', { name: /Target Field/ })).toHaveCount(0);
+  const rows = [
+    ['patient_id', 'PID.3.1'],
+    ['name', 'PID.5'],
+    ['birth_date', 'PID.7'],
+    ['gender', 'PID.8'],
+  ];
+  for (const [index, [source, target]] of rows.entries()) {
+    await editor.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+    await editor.getByLabel(`Source Field ${index + 1}`, { exact: true }).fill(source);
+    if (index === 0) {
+      await expect(editor.getByRole('alert')).toHaveCount(1);
+      await expect(editor.getByRole('alert')).toContainText('select or enter a Target Field');
+    }
+    await selectHl7Target(editor, index + 1, target);
+  }
+  await expect(editor).toContainText('Full text; no name splitting');
+  await expect(editor).toContainText('YYYY-MM-DD → YYYYMMDD');
+  if (process.env.UI_HL7_COMPACT_SCREENSHOT) {
+    await page.setViewportSize({ width: 1440, height: 1400 });
+    await page
+      .getByRole('dialog', { name: 'New channel', exact: true })
+      .locator('.editor-body')
+      .evaluate((element) => {
+        element.scrollTop = 0;
+      });
+    await page.screenshot({ path: process.env.UI_HL7_COMPACT_SCREENSHOT });
+  }
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await editor.getByRole('button', { name: 'Target Field 4', exact: true }).click();
+  await expect(
+    editor.getByRole('region', { name: 'Target Field 4 choices', exact: true }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await editor.getByRole('button', { name: 'Target Field 4', exact: true }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const trigger = editor.getByRole('button', { name: 'Target Field 1', exact: true });
+  await trigger.focus();
+  await page.keyboard.press('Enter');
+  const choices = editor.getByRole('region', { name: 'Target Field 1 choices', exact: true });
+  await expect(choices.getByLabel('Search fields', { exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(choices).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await expect(editor).toBeVisible();
+  // Empty extra rows must not block saving or produce an empty stored mapping.
+  await editor.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  const body = captured(state, '/api/channel')[0].body;
+  expect(body.processingScript).toBe('');
+  const mapping = readFieldMapping(
+    (body.destinations as { processingScript: string }[])[0].processingScript,
+  );
+  expect(mapping?.rows).toHaveLength(4);
+  expect(mapping?.rows[2]).toMatchObject({
+    source: 'birth_date',
+    target: 'PID.7',
+    conversion: 'DATE_TO_HL7',
+  });
+  expect(state.externalRequests).toEqual([]);
+});
+
+test('HL7 target tree expands only on request and retains explicit advanced repeated paths', async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  await openExisting(page);
+  const editor = await hl7Destination(page);
+  await editor.getByRole('combobox', { name: 'Message type', exact: true }).selectOption('ORU^R01');
+  await editor.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+  await editor.getByLabel('Source Field 1', { exact: true }).fill('observations[1].value');
+  await editor.getByRole('button', { name: 'Target Field 1', exact: true }).click();
+  const choices = editor.getByRole('region', { name: 'Target Field 1 choices', exact: true });
+  const pid = choices
+    .locator('details')
+    .filter({ has: page.locator(':scope > summary', { hasText: 'PID — Patient identification' }) })
+    .first();
+  await expect(pid).not.toHaveAttribute('open');
+  await pid.locator(':scope > summary').focus();
+  await page.keyboard.press('Space');
+  await expect(pid).toHaveAttribute('open', '');
+  await editor.getByText('Advanced field path', { exact: true }).click();
+  await editor.getByLabel('Custom Target Field 1', { exact: true }).fill('OBX[1].5');
+  await editor.getByRole('button', { name: 'Use field path', exact: true }).click();
+  await expect(choices).toHaveCount(0);
+  await expect(editor.getByRole('button', { name: 'Target Field 1', exact: true })).toContainText(
+    'OBX[1]-5',
+  );
+  await expect(editor.getByRole('alert')).toContainText(
+    'consecutive repeating HL7 segment indexes starting at 0',
+  );
+  await editor.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+  await editor.getByLabel('Source Field 2', { exact: true }).fill('observations[0].value');
+  await editor.getByRole('button', { name: 'Target Field 2', exact: true }).click();
+  await editor.getByText('Advanced field path', { exact: true }).click();
+  await editor.getByLabel('Custom Target Field 2', { exact: true }).fill('OBX[0].5');
+  await editor.getByRole('button', { name: 'Use field path', exact: true }).click();
+  await expect(editor.getByRole('alert')).toHaveCount(0);
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  const saved = captured(state, '/api/channel/1')[0].body.destinations as {
+    processingScript: string;
+  }[];
+  expect(readFieldMapping(saved[0].processingScript)?.rows[0].target).toBe('OBX[1].5');
+});
+
+for (const [type, required] of [
+  ['ADT^A01', 'PID-3'],
+  ['ORU^R01', 'OBX-5'],
+  ['ORM^O01', 'ORC-2'],
+] as const)
+  test(`HL7 ${type} offers its actual curated template fields`, async ({ page }) => {
+    await workspace(page);
+    await openExisting(page);
+    const dialog = await hl7Destination(page);
+    await dialog.getByRole('combobox', { name: 'Message type', exact: true }).selectOption(type);
+    await expect(dialog.getByText('Template structure and fields', { exact: true })).toHaveCount(0);
+    await expect(dialog.locator('output[aria-label="HL7 version"]')).toHaveText('2.5');
+    await expect(dialog.getByRole('combobox', { name: 'HL7 version', exact: true })).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Target Field 1', exact: true }).click();
+    const choices = dialog.getByRole('region', { name: 'Target Field 1 choices', exact: true });
+    await choices.getByLabel('Search fields', { exact: true }).fill(required);
+    await expect(choices).toContainText(required);
+  });
+
+test('MLLP destinations use host port TLS and ACK guidance with actionable invalid host errors', async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  await openExisting(page);
+  await step(page, 2);
+  await page.getByRole('combobox', { name: 'Connector', exact: true }).selectOption('MLLP');
+  await expect(
+    page.locator('.destination-editor').getByRole('textbox', { name: /Endpoint/ }),
+  ).toHaveCount(0);
+  await page.getByLabel('Host', { exact: true }).fill('127.0.0.1');
+  await page.getByLabel('Port', { exact: true }).fill('2575');
+  await expect(page.getByText('ACK', { exact: false }).first()).toBeVisible();
+  await page.getByLabel('Host', { exact: true }).fill('bad host');
+  await step(page, 3);
+  await expect(page.getByRole('button', { name: 'Save Channel', exact: true })).toHaveCount(0);
+  await page.getByLabel('Host', { exact: true }).fill('receiver.example.test');
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  const saved = (
+    captured(state, '/api/channel/1')[0].body.destinations as {
+      endpoint: string;
+      outboundDataType: string;
+    }[]
+  )[0];
+  expect(saved.endpoint).toMatch(/^(?:tcp|mllp):\/\/receiver\.example\.test:2575/);
+  expect(saved.outboundDataType).toBe('HL7V2');
+});
+
+test('REST delivery edits preserve saved security settings without authentication or header controls', async ({
+  page,
+}) => {
+  const state = await workspace(page, {
+    channels: [
+      {
+        ...existingChannel,
+        destinations: [
+          {
+            ...existingChannel.destinations[0],
+            deliveryPolicy: {
+              http: {
+                authentication: 'BEARER',
+                headers: [{ name: 'X-Vendor-Key', slot: 'VENDOR_KEY' }],
+              },
+            },
+          },
+        ],
+      },
+    ],
+  });
+  await openExisting(page);
+  await step(page, 2);
+  await page.getByText('Advanced destination settings', { exact: true }).click();
+  await destinationSection(page, 'Delivery settings');
+  await page.getByRole('combobox', { name: 'HTTP method', exact: true }).selectOption('PATCH');
+  await page.getByRole('combobox', { name: 'Content-Type', exact: true }).selectOption('text/xml');
+  await expect(page.getByRole('combobox', { name: 'Authentication', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add Header', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Environment slot 1', { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText('Saved destination security settings are retained.', { exact: true }),
+  ).toBeVisible();
+  await step(page, 3);
+  await page.getByText('View details', { exact: true }).click();
+  await expect(page.getByText('PATCH · text/xml', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  expect(
+    (captured(state, '/api/channel/1')[0].body.destinations as { deliveryPolicy: unknown }[])[0]
+      .deliveryPolicy,
+  ).toMatchObject({
+    http: {
+      method: 'PATCH',
+      contentType: 'text/xml',
+      authentication: 'BEARER',
+      headers: [{ name: 'X-Vendor-Key', slot: 'VENDOR_KEY' }],
+    },
+  });
+});
+
+test('review shows actual HL7 raw lines and a searchable metadata tree without unmasking values', async ({
+  page,
+}) => {
+  await workspace(page);
+  const raw =
+    'MSH|^~\\&|SYNTHETIC|TEST|RECEIVER|TEST|20261018220000||ADT^A04|SYNTHETIC-001|T|2.5\rPID|1||SYNTHETIC-001||Patient^Example\r';
+  await page.route('**/api/channel/preview-transformation', (route) =>
+    route.fulfill({
+      json: {
+        success: true,
+        accepted: true,
+        elapsedMs: 4,
+        networkDelivery: 'NOT_SENT',
+        input: { format: 'JSON', payload: { patient_id: '[REDACTED]' } },
+        source: {
+          format: 'JSON',
+          payload: {},
+          validation: 'PASSED',
+          filter: 'ACCEPTED',
+          transformation: 'PASS_THROUGH',
+        },
+        results: [
+          {
+            name: 'PATIENT_XML_RECEIVER',
+            outputFormat: 'HL7V2',
+            status: 'VALID',
+            routed: true,
+            finalPayload: raw,
+            fieldTree: [
+              {
+                path: 'PID',
+                label: 'PID',
+                type: 'object',
+                selectable: true,
+                children: [
+                  {
+                    path: 'PID.3',
+                    label: 'PID.3 · Patient identifier',
+                    type: 'string',
+                    selectable: true,
+                  },
+                ],
+              },
+            ],
+            stages: { filter: 'BYPASSED', transformation: 'TRANSFORMED', conversion: 'CONVERTED' },
+            delivery: 'NOT_SENT',
+          },
+        ],
+      },
+    }),
+  );
+  await openExisting(page);
+  await preview(page);
+  const output = page.getByRole('region', { name: 'Generated output', exact: true });
+  await expect(output.locator('pre')).toContainText('MSH|');
+  await output.getByRole('button', { name: 'HL7 field tree', exact: true }).click();
+  const tree = output.getByRole('region', { name: 'Generated HL7 fields', exact: true });
+  await tree.getByLabel('Search fields', { exact: true }).fill('Patient identifier');
+  await expect(tree).toContainText('PID.3');
+  await expect(tree).not.toContainText('SYNTHETIC-001');
+  await output.getByRole('button', { name: 'Raw HL7', exact: true }).click();
+  await expect(output.locator('pre')).toContainText('PID|');
+});
+
+for (const format of ['XML', 'HL7V2', 'TEXT'] as const)
+  test(`${format} keeps Source compact and supports format-specific input only in Review`, async ({
+    page,
+  }) => {
+    const state = await workspace(page);
+    await openExisting(page);
+    await page.getByRole('combobox', { name: 'Inbound format', exact: true }).selectOption(format);
+    await expect(page.getByText('Sample message (optional)', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Analyze fields', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('textbox', { name: /^Test input/ })).toHaveCount(0);
+    await step(page, 3);
+    await openReviewTest(page);
+    const input = page.getByRole('textbox', { name: `Test input · ${format}`, exact: false });
+    await expect(input).toBeVisible();
+    await page.getByText('Input help', { exact: true }).click();
+    await page.getByRole('button', { name: 'Load sample', exact: true }).click();
+    const value = await input.inputValue();
+    if (format === 'XML') expect(value).toContain('<Patient');
+    else if (format === 'HL7V2') expect(value).toMatch(/^MSH\|/);
+    else expect(value).toBe('Synthetic example message');
+    await step(page, 0);
+    await expect(page.getByText('Sample message (optional)', { exact: true })).toHaveCount(0);
+    await step(page, 3);
+    await openReviewTest(page);
+    await expect(input).toHaveValue(value);
+    expect(captured(state, '/api/channel/discover-fields')).toEqual([]);
+    expect(state.externalRequests).toEqual([]);
+  });
+
+test('V2 mapping replacement with a script is explicit and cancellation keeps the configuration', async ({
+  page,
+}) => {
+  const script = compileFieldMapping({
+    version: 2,
+    rows: [{ source: 'patient_id', target: 'PatientID', required: false, conversion: 'TEXT' }],
+  });
+  const state = await workspace(page, {
+    channels: [{ ...existingChannel, processingScript: script }],
+  });
+  await openExisting(page);
+  await step(page, 1);
+  await page
+    .getByRole('region', { name: 'Shared transformation', exact: true })
+    .getByText('Advanced Custom Transformation Script', { exact: false })
+    .click();
+  const edit = page.getByRole('button', { name: 'Edit Script', exact: true });
+  await edit.click();
+  const confirm = page.getByRole('dialog', {
+    name: 'Replace field mappings with a custom script?',
+    exact: true,
+  });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByLabel('Source Field 1', { exact: true })).toHaveValue('patient_id');
+  await edit.click();
+  await confirm.getByRole('button', { name: 'Replace with custom script', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: 'Custom Transformation Script', exact: true });
+  await expect(editor.locator('textarea')).toHaveValue('');
+  await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByLabel('Target Field 1', { exact: true })).toHaveValue('PatientID');
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  expect(captured(state, '/api/channel/1')[0].body.processingScript).toBe(script);
+});
+
+test('clean wizard defaults hide optional editors and keep one scroll area with visible navigation', async ({
+  page,
+}) => {
+  const state = await workspace(page, { channels: [] });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: 'New Channel', exact: true }).click();
+  await page.getByLabel('Channel name', { exact: false }).fill('SYNTHETIC_CLEAN_WIZARD');
+  const dialog = page.getByRole('dialog', { name: 'New channel', exact: true });
+  await expect(dialog.getByText(/\/api\/message\/inbound\/\{channelId\}/)).toHaveCount(0);
+  await expect(
+    dialog.getByText('Source API key can be created after saving this channel.', { exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    dialog.getByRole('region', { name: 'Source field explorer', exact: true }),
+  ).toHaveCount(0);
+  await expect(dialog.getByLabel('Source sample · JSON', { exact: true })).toHaveCount(0);
+  await expect(dialog.getByText('Sample message (optional)', { exact: true })).toHaveCount(0);
+  await expect(
+    dialog.getByRole('checkbox', { name: 'Enable source filter', exact: true }),
+  ).not.toBeVisible();
+  if (process.env.UI_CLEAN_SOURCE_SCREENSHOT)
+    await page.screenshot({ path: process.env.UI_CLEAN_SOURCE_SCREENSHOT });
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByRole('radio', { name: 'No transformation', exact: true })).toBeChecked();
+  await expect(page.getByRole('button', { name: 'Add Mapping', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Edit Script', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  if (process.env.UI_CLEAN_TRANSFORM_SCREENSHOT)
+    await page.screenshot({ path: process.env.UI_CLEAN_TRANSFORM_SCREENSHOT });
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByLabel('Destination name').fill('SYNTHETIC_RECEIVER');
+  await page.getByLabel('Endpoint', { exact: false }).fill(receiver);
+  const advanced = page.locator('details[aria-label="Advanced destination settings"]');
+  await expect(advanced).not.toHaveAttribute('open');
+  await expect(advanced.locator(':scope > summary')).not.toContainText('Customized');
+  await expect(page.getByRole('combobox', { name: 'HTTP method', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Header name 1', { exact: true })).toHaveCount(0);
+  if (process.env.UI_CLEAN_DEST_SCREENSHOT)
+    await page.screenshot({ path: process.env.UI_CLEAN_DEST_SCREENSHOT });
+  await advanced.locator(':scope > summary').click();
+  const body = dialog.locator('.editor-body');
+  await expect(body).toHaveCSS('overflow-y', 'auto');
+  await expect(dialog.locator('.modal-body')).toHaveCSS('overflow-y', 'hidden');
+  await body.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeInViewport();
+  await expect(page.getByLabel('Channel setup steps')).toBeInViewport();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByLabel('Integration flow')).toBeInViewport();
+  await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBe(0);
+  await expect(
+    page.getByRole('region', { name: 'Source processing summary', exact: true }),
+  ).toHaveCount(0);
+  if (process.env.UI_CLEAN_REVIEW_SCREENSHOT)
+    await page.screenshot({ path: process.env.UI_CLEAN_REVIEW_SCREENSHOT });
+  const scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(scan.violations).toEqual([]);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  const saved = captured(state, '/api/channel')[0].body;
+  expect(saved.processingScript).toBe('');
+  expect((saved.destinations as { deliveryPolicy?: unknown }[])[0].deliveryPolicy).toBeUndefined();
+  expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
+  expect(state.externalRequests).toEqual([]);
+});
+
+test('switching common transformation to none requires confirmation and cancel preserves mapping', async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  await openExisting(page);
+  await step(page, 1);
+  await addSharedMapping(page);
+  await page.getByLabel('Source Field 1', { exact: true }).fill('patient_id');
+  await page.getByLabel('Target Field 1', { exact: true }).fill('PatientID');
+  await page.getByRole('radio', { name: 'No transformation', exact: true }).click();
+  const confirm = page.getByRole('dialog', { name: 'Use pass-through?', exact: true });
+  await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByLabel('Target Field 1', { exact: true })).toHaveValue('PatientID');
+  await page.getByRole('radio', { name: 'No transformation', exact: true }).click();
+  await confirm.getByRole('button', { name: 'Use pass-through', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Add Mapping', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  expect(captured(state, '/api/channel/1')[0].body.processingScript).toBe('');
+});
+
+test('delivery errors reveal the exact field and retain saved security settings after save', async ({
+  page,
+}) => {
+  const state = await workspace(page, {
+    channels: [
+      {
+        ...existingChannel,
+        destinations: [
+          {
+            ...existingChannel.destinations[0],
+            deliveryPolicy: {
+              http: {
+                authentication: 'BEARER',
+                headers: [{ name: 'X-Vendor-Key', slot: 'VENDOR_KEY' }],
+              },
+            },
+          },
+        ],
+      },
+    ],
+  });
+  await openExisting(page);
+  await step(page, 2);
+  const advanced = page.locator('details[aria-label="Advanced destination settings"]');
+  await advanced.locator(':scope > summary').click();
+  await expect(advanced.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add Header', exact: true })).toHaveCount(0);
+  await destinationSection(page, 'Delivery settings');
+  const timeout = page.getByLabel('Request timeout (seconds)', { exact: true });
+  await timeout.fill('0');
+  await advanced.locator(':scope > summary').click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(advanced).toHaveAttribute('open', '');
+  await expect(timeout).toBeFocused();
+  await expect(timeout.locator('..').getByRole('alert')).toContainText('0.1 to 120');
+  await timeout.fill('2.5');
+  await advanced.locator(':scope > summary').click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  const saved = (
+    captured(state, '/api/channel/1')[0].body.destinations as {
+      timeoutMs: number;
+      deliveryPolicy: unknown;
+    }[]
+  )[0];
+  expect(saved).toMatchObject({
+    timeoutMs: 2500,
+    deliveryPolicy: { http: { headers: [{ name: 'X-Vendor-Key', slot: 'VENDOR_KEY' }] } },
+  });
+  await openExisting(page);
+  await step(page, 2);
+  await expect(advanced).not.toHaveAttribute('open');
+  await expect(advanced.locator(':scope > summary')).toContainText('Customized');
+  await advanced.locator(':scope > summary').click();
+  await expect(page.getByLabel('Environment slot 1', { exact: true })).toHaveCount(0);
+  // Saving an existing channel creates a draft; reopening active configuration retains its original timeout.
+  await destinationSection(page, 'Delivery settings');
+  await expect(timeout).toHaveValue('10');
+  expect(state.externalRequests).toEqual([]);
+});
+
+test('changing output format keeps the Content-Type override and guides correction without header errors', async ({
+  page,
+}) => {
+  const state = await workspace(page, {
+    channels: [
+      {
+        ...existingChannel,
+        destinations: [
+          {
+            ...existingChannel.destinations[0],
+            deliveryPolicy: { http: { method: 'PATCH', contentType: 'text/xml' } },
+          },
+        ],
+      },
+    ],
+  });
+  await openExisting(page);
+  await step(page, 2);
+  await page.getByRole('combobox', { name: 'Outbound format', exact: true }).selectOption('JSON');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  const content = page.getByRole('combobox', { name: 'Content-Type', exact: true });
+  await expect(content).toHaveValue('text/xml');
+  await expect(content).toBeFocused();
+  await expect(content.locator('..').getByRole('alert')).toHaveText(
+    'Select a supported Content-Type.',
+  );
+  await expect(page.getByLabel('Header name 1', { exact: true })).toHaveCount(0);
+  await content.selectOption('');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  expect(
+    (captured(state, '/api/channel/1')[0].body.destinations as { deliveryPolicy: unknown }[])[0],
+  ).toMatchObject({ deliveryPolicy: { http: { method: 'PATCH' } } });
+});
+
+test('compact destination shows connection fields only and retains HL7 mapping behind Advanced', async ({
+  page,
+}) => {
+  const script = compileFieldMapping({
+    version: 2,
+    hl7: defaultHl7Configuration('ADT^A04'),
+    rows: [{ source: 'patient_id', target: 'PID.3', required: true }],
+  });
+  const state = await workspace(page, {
+    channels: [
+      {
+        ...existingChannel,
+        destinations: [
+          {
+            ...existingChannel.destinations[0],
+            outboundDataType: 'HL7V2',
+            credentialConfigured: true,
+            processingScript: script,
+          },
+        ],
+      },
+    ],
+  });
+  await openExisting(page);
+  await step(page, 2);
+  const dialog = page.getByRole('dialog', { name: 'Edit channel', exact: true });
+  const destination = dialog.locator('.destination-editor');
+  const advanced = destination.locator('details[aria-label="Advanced destination settings"]');
+  await expect(
+    destination.getByRole('heading', { name: 'Destination 1', exact: true }),
+  ).toBeVisible();
+  await expect(destination.getByLabel('Destination name', { exact: true })).toBeVisible();
+  await expect(destination.getByLabel('Endpoint', { exact: false })).toBeVisible();
+  await expect(destination.getByRole('combobox')).toHaveCount(2);
+  await expect(
+    destination.getByRole('combobox', { name: 'Outbound format', exact: true }),
+  ).toHaveValue('HL7V2');
+  await expect(advanced).not.toHaveAttribute('open');
+  await expect(
+    destination.getByText(
+      'Saved endpoint credentials are retained only while this endpoint is unchanged.',
+      { exact: true },
+    ),
+  ).not.toBeVisible();
+  await expect(advanced.locator(':scope > summary')).toContainText('Customized');
+  await expect(destination.getByRole('table')).toHaveCount(0);
+  await expect(
+    destination.getByRole('combobox', { name: 'Message type', exact: true }),
+  ).toHaveCount(0);
+  if (process.env.UI_COMPACT_DESTINATION_SCREENSHOT) {
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    await dialog.locator('.editor-body').evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await page.screenshot({ path: process.env.UI_COMPACT_DESTINATION_SCREENSHOT });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeInViewport();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await advanced.locator(':scope > summary').focus();
+  await page.keyboard.press('Enter');
+  await expect(destination.getByRole('table')).toHaveCount(0);
+  await destinationSection(page, 'Destination transformation settings');
+  await expect(destination.getByLabel('Source Field 1', { exact: true })).toHaveValue('patient_id');
+  await expect(destination.getByRole('table', { name: 'HL7 field mappings' })).toBeVisible();
+  await expect(
+    destination.getByRole('combobox', { name: 'Authentication', exact: true }),
+  ).toHaveCount(0);
+  await expect(destination.getByRole('button', { name: 'Add Header', exact: true })).toHaveCount(0);
+  await advanced.locator(':scope > summary').click();
+  const scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(scan.violations).toEqual([]);
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  expect(
+    (captured(state, '/api/channel/1')[0].body.destinations as { processingScript: string }[])[0]
+      .processingScript,
+  ).toBe(script);
+  expect(state.externalRequests).toEqual([]);
+});
+
+test('Source follows the agreed layout and Filter status reflects actual configuration', async ({
+  page,
+}) => {
+  const state = await workspace(page, { channels: [] });
+  await page.getByRole('button', { name: 'New Channel', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'New channel', exact: true });
+  await expect(dialog.getByLabel('Channel name', { exact: false })).toBeVisible();
+  await expect(
+    dialog.getByRole('combobox', { name: 'Source connector', exact: true }),
+  ).toBeVisible();
+  await expect(dialog.getByRole('combobox', { name: 'Inbound format', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('region', { name: 'Current source endpoint' })).toHaveCount(0);
+  await expect(dialog.getByRole('region', { name: 'Source authentication' })).toHaveCount(0);
+  await expect(
+    dialog.getByRole('heading', { name: 'Connect the sending system', exact: true }),
+  ).toHaveCount(0);
+  const advanced = dialog.locator('details[data-source-advanced]');
+  await expect(advanced).not.toHaveAttribute('open');
+  await advanced.locator(':scope > summary').click();
+  await expect(advanced.locator(':scope > details > summary')).toHaveText([
+    'Validation',
+    'Filter · Off',
+  ]);
+  const filter = advanced.locator('details[aria-label="Source filter settings"]');
+  await filter.locator(':scope > summary').click();
+  const enabled = filter.getByRole('checkbox', { name: 'Enable source filter', exact: true });
+  await enabled.check();
+  await expect(filter.locator(':scope > summary')).toHaveText('Filter · Needs configuration');
+  await expect(
+    filter.getByText('Use a field from the incoming message.', { exact: false }),
+  ).not.toBeVisible();
+  await filter.getByLabel('Field', { exact: true }).fill('department');
+  await filter.getByLabel('Value', { exact: true }).fill('LAB');
+  await expect(filter.locator(':scope > summary')).toHaveText('Filter · Configured');
+  await filter.getByLabel('Field', { exact: true }).fill('department.');
+  await expect(filter.locator(':scope > summary')).toHaveText('Filter · Needs configuration');
+  await enabled.uncheck();
+  await expect(filter.locator(':scope > summary')).toHaveText('Filter · Off');
+  await expect(dialog.getByLabel('Channel name', { exact: false })).toBeVisible();
+  expect(captured(state, '/api/channel')).toEqual([]);
+  expect(state.rotations).toBe(0);
+  expect(state.externalRequests).toEqual([]);
+});
+
+test('Transformation uses compact mapping rows with one header and optional settings', async ({
+  page,
+}) => {
+  const state = await workspace(page, { channels: [] });
+  await newJsonXmlChannel(page);
+  await step(page, 1);
+  const shared = page.getByRole('region', { name: 'Shared transformation', exact: true });
+  await addSharedMapping(page);
+  await shared.getByLabel('Source Field 1', { exact: true }).fill('patient_id');
+  await shared.getByLabel('Target Field 1', { exact: true }).fill('PatientID');
+  await shared.getByRole('button', { name: 'Add Mapping', exact: true }).click();
+  await shared.getByLabel('Source Field 2', { exact: true }).fill('name');
+  await shared.getByLabel('Target Field 2', { exact: true }).fill('PatientName');
+  await expect(shared.locator('.mapping-grid-head')).toHaveCount(1);
+  await expect(shared.locator('.mapping-grid-head')).toHaveText('Source FieldTarget Field');
+  await expect(shared.getByLabel('Required field 1', { exact: true })).not.toBeVisible();
+  await expect(shared.getByLabel('Default value 1', { exact: true })).not.toBeVisible();
+  await expect(shared.getByLabel('Type conversion 1', { exact: true })).not.toBeVisible();
+  await expect(shared).toContainText('Unmapped fields are excluded.');
+  for (const row of await shared.locator('.mapping-row').all()) {
+    const box = await row.boundingBox();
+    expect(box!.height).toBeLessThan(120);
+  }
+  const addBox = await shared
+    .getByRole('button', { name: 'Add Mapping', exact: true })
+    .boundingBox();
+  expect(addBox!.width).toBeLessThan(250);
+  if (process.env.UI_COMPACT_TRANSFORMATION_SCREENSHOT) {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.screenshot({ path: process.env.UI_COMPACT_TRANSFORMATION_SCREENSHOT });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(shared.getByLabel('Target Field 2', { exact: true })).toBeVisible();
+  const scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(scan.violations).toEqual([]);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const options = shared.locator('details[aria-label="Mapping options 1"]');
+  await options.locator(':scope > summary').click();
+  await shared.getByLabel('Required field 1', { exact: true }).check();
+  await shared.getByLabel('Default value 1', { exact: true }).fill('SYNTHETIC-DEFAULT');
+  await options.locator(':scope > summary').click();
+  await expect(options.locator(':scope > summary')).toContainText('Configured');
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Channel saved', exact: true })).toBeVisible();
+  expect(
+    readFieldMapping(captured(state, '/api/channel')[0].body.processingScript as string)?.rows,
+  ).toEqual([
+    {
+      source: 'patient_id',
+      target: 'PatientID',
+      required: true,
+      defaultValue: 'SYNTHETIC-DEFAULT',
+    },
+    { source: 'name', target: 'PatientName', required: false },
+  ]);
+  expect(state.externalRequests).toEqual([]);
+});
+
+test('Use template fills the destination editor and confirms before replacing custom code', async ({
+  page,
+}) => {
+  const state = await workspace(page, { channels: [] });
+  await newJsonXmlChannel(page);
+  await destinationSection(page, 'Advanced destination settings');
+  const transformation = await destinationSection(page, 'Destination transformation settings');
+  await transformation.getByText('Advanced Custom Transformation Script', { exact: false }).click();
+  const edit = transformation.getByRole('button', { name: 'Edit Script', exact: true });
+  await edit.click();
+  const dialog = page.getByRole('dialog', {
+    name: 'Destination Transformation Script',
+    exact: true,
+  });
+  const code = dialog.getByRole('textbox', {
+    name: 'Destination Transformation Script',
+    exact: true,
+  });
+  const template = '// Transform msg and return the result.\nreturn msg;';
+  const custom = 'return { patientId: msg.patient_id };';
+  await expect(code).toHaveValue('');
+  await expect(dialog.getByRole('button', { name: 'Use template', exact: true })).not.toBeVisible();
+  await dialog.getByText('Script help', { exact: true }).click();
+  await dialog.getByRole('button', { name: 'Use template', exact: true }).click();
+  await expect(code).toHaveValue(template);
+  const confirmation = page.getByRole('dialog', {
+    name: 'Replace script with template?',
+    exact: true,
+  });
+  await expect(confirmation).toHaveCount(0);
+  await code.fill(custom);
+  await dialog.getByRole('button', { name: 'Use template', exact: true }).click();
+  await expect(confirmation).toBeVisible();
+  await expect(code).toHaveValue(custom);
+  await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(code).toHaveValue(custom);
+  await expect(dialog.getByRole('button', { name: 'Use template', exact: true })).toBeFocused();
+  await dialog.getByRole('button', { name: 'Use template', exact: true }).click();
+  await confirmation.getByRole('button', { name: 'Use template', exact: true }).click();
+  await expect(code).toHaveValue(template);
+  await expect(confirmation).toHaveCount(0);
+  const scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(scan.violations).toEqual([]);
+  await dialog.getByRole('button', { name: 'Save Script', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByLabel('Channel setup steps').getByRole('button').nth(2)).toHaveAttribute(
+    'aria-current',
+    'step',
+  );
+  expect(captured(state, '/api/channel')).toEqual([]);
+  expect(captured(state, '/api/channel/dry-run')).toEqual([]);
+  expect(captured(state, '/api/channel/preview-transformation')).toEqual([]);
+  await edit.click();
+  await expect(code).toHaveValue(template);
+  await code.fill(custom);
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await edit.click();
+  await expect(code).toHaveValue(template);
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Channel saved', exact: true })).toBeVisible();
+  const saved = captured(state, '/api/channel')[0].body;
+  expect((saved.destinations as { processingScript: string }[])[0].processingScript).toBe(template);
+  expect(saved.processingScript).toBe('');
+  expect(state.externalRequests).toEqual([]);
+});
+
+test('Use template supplies the destination filter boolean example without applying it on Cancel', async ({
+  page,
+}) => {
+  const state = await workspace(page, { channels: [] });
+  await newJsonXmlChannel(page);
+  const destination = await destinationAdvanced(page);
+  await destination
+    .getByRole('checkbox', { name: 'Enable destination filter', exact: true })
+    .check();
+  await destination.getByText('Advanced custom condition', { exact: true }).click();
+  await destination.getByRole('button', { name: 'Edit custom condition', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Destination custom condition', exact: true });
+  const code = dialog.getByRole('textbox', { name: 'Destination custom condition', exact: true });
+  await dialog.getByText('Script help', { exact: true }).click();
+  await dialog.getByRole('button', { name: 'Use template', exact: true }).click();
+  await expect(code).toHaveValue(/return msg.department === "LAB";/);
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await destination.getByRole('button', { name: 'Edit custom condition', exact: true }).click();
+  await expect(code).toHaveValue('');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  expect(captured(state, '/api/channel')).toEqual([]);
+  expect(captured(state, '/api/channel/dry-run')).toEqual([]);
+  expect(state.externalRequests).toEqual([]);
+});
+
+test('script dialog has a full width editor and normal footer buttons without submitting the wizard', async ({
+  page,
+}) => {
+  const original = 'return { patientId: msg.patient_id };';
+  const replacement = 'return { id: msg.patient_id };';
+  const state = await workspace(page, {
+    channels: [{ ...existingChannel, processingScript: original }],
+  });
+  await openExisting(page);
+  await step(page, 1);
+  const shared = page.getByRole('region', { name: 'Shared transformation', exact: true });
+  await shared.getByText('Advanced Custom Transformation Script', { exact: false }).click();
+  const edit = shared.getByRole('button', { name: 'Edit Script', exact: true });
+  await edit.click();
+  const dialog = page.getByRole('dialog', { name: 'Custom Transformation Script', exact: true });
+  const code = dialog.getByRole('textbox', { name: 'Custom Transformation Script', exact: true });
+  await expect(code).toHaveValue(original);
+  await expect(dialog.getByText('Script help', { exact: true }).locator('..')).not.toHaveAttribute(
+    'open',
+  );
+  const scriptBox = await code.boundingBox();
+  expect(scriptBox!.width).toBeGreaterThan(500);
+  const cancel = dialog.getByRole('button', { name: 'Cancel', exact: true });
+  const save = dialog.getByRole('button', { name: 'Save Script', exact: true });
+  const cancelBox = await cancel.boundingBox();
+  const saveBox = await save.boundingBox();
+  expect(cancelBox!.height).toBeLessThan(56);
+  expect(saveBox!.height).toBeLessThan(56);
+  expect(saveBox!.width).toBeLessThan(200);
+  expect(saveBox!.y).toBeGreaterThanOrEqual(scriptBox!.y + scriptBox!.height);
+  expect(saveBox!.y).toBe(cancelBox!.y);
+  if (process.env.UI_SCRIPT_EDITOR_SCREENSHOT)
+    await page.screenshot({ path: process.env.UI_SCRIPT_EDITOR_SCREENSHOT });
+  await page.setViewportSize({ width: 390, height: 600 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(cancel).toBeInViewport();
+  await expect(save).toBeInViewport();
+  await save.focus();
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: 'Close dialog', exact: true })).toBeFocused();
+  const scan = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  expect(scan.violations).toEqual([]);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await code.fill(replacement);
+  await save.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByLabel('Channel setup steps').getByRole('button').nth(1)).toHaveAttribute(
+    'aria-current',
+    'step',
+  );
+  expect(captured(state, '/api/channel/1')).toEqual([]);
+  await edit.click();
+  await expect(code).toHaveValue(replacement);
+  await code.fill('return { discarded: true };');
+  await cancel.click();
+  await expect(edit).toBeFocused();
+  await edit.click();
+  await expect(code).toHaveValue(replacement);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Edit channel', exact: true })).toBeVisible();
+  await step(page, 3);
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit channel', exact: true })).toHaveCount(0);
+  expect(captured(state, '/api/channel/1')[0].body.processingScript).toBe(replacement);
+  expect(state.externalRequests).toEqual([]);
+});
+
+for (const [legacyType, displayedType, format, enabled] of [
+  ['HL7', 'MLLP', 'HL7V2', true],
+  ['RAW', 'TCP', 'TEXT', false],
+] as const)
+  test(`destination connector ${legacyType} shows one canonical choice and preserves saved configuration`, async ({
+    page,
+  }) => {
+    const state = await workspace(page, {
+      channels: [
+        {
+          ...existingChannel,
+          source: { ...existingChannel.source, inboundDataType: format },
+          destinations: [
+            {
+              ...existingChannel.destinations[0],
+              type: legacyType,
+              outboundDataType: format,
+              endpoint: 'tcp://receiver.example.test:2575',
+              isEnabled: enabled,
+            },
+          ],
+        },
+      ],
+    });
+    await openExisting(page);
+    await step(page, 2);
+    const destination = page.locator('.destination-editor').first();
+    const connector = destination.getByRole('combobox', { name: 'Connector', exact: true });
+    await expect(connector).toHaveValue(displayedType);
+    await expect(connector.locator('option')).toHaveText([
+      'HTTP sender',
+      'MLLP sender',
+      'TCP sender',
+    ]);
+    await expect(
+      destination.getByRole('checkbox', { name: 'Destination enabled', exact: true }),
+    ).toBeChecked({ checked: enabled });
+    await expect(destination.getByLabel('Host', { exact: true })).toHaveValue(
+      'receiver.example.test',
+    );
+    await step(page, 3);
+    await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Edit channel', exact: true })).toHaveCount(0);
+    expect(
+      (captured(state, '/api/channel/1')[0].body.destinations as Record<string, unknown>[])[0],
+    ).toMatchObject({
+      type: legacyType,
+      outboundDataType: format,
+      endpoint: 'tcp://receiver.example.test:2575',
+      isEnabled: enabled,
+    });
+    expect(state.externalRequests).toEqual([]);
+  });
+
+for (const resetOverrides of [false, true])
+  test(`destination sections stay closed and HL7 overrides are ${resetOverrides ? 'explicitly reset' : 'preserved'}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const hl7 = {
+      ...defaultHl7Configuration('ADT^A01'),
+      messageDateTime: '20261018220000',
+      messageControlId: 'SYNTHETIC-FIXED-ID',
+    };
+    const script = compileFieldMapping({
+      version: 2,
+      hl7,
+      rows: [
+        { source: 'patient_id', target: 'PID.3', required: true },
+        { source: 'name', target: 'PID.5', required: true },
+      ],
+    });
+    const state = await workspace(page, {
+      channels: [
+        {
+          ...existingChannel,
+          destinations: [
+            {
+              ...existingChannel.destinations[0],
+              outboundDataType: 'HL7V2',
+              processingScript: script,
+            },
+          ],
+        },
+      ],
+    });
+    await openExisting(page);
+    await step(page, 2);
+    const destination = page.locator('.destination-editor').first();
+    const advanced = await destinationSection(page, 'Advanced destination settings');
+    const groups = advanced.locator(':scope > details');
+    await expect(groups).toHaveCount(4);
+    await expect(groups.locator(':scope > summary')).toHaveText([
+      'Transformation · Configured',
+      'Filter · Off',
+      'Delivery',
+      'HL7 settings',
+    ]);
+    for (const section of await groups.all()) await expect(section).not.toHaveAttribute('open');
+    if (!resetOverrides && process.env.UI_DESTINATION_GROUPS_SCREENSHOT) {
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.screenshot({ path: process.env.UI_DESTINATION_GROUPS_SCREENSHOT });
+    }
+    await destinationSection(page, 'Destination transformation settings');
+    await expect(destination.locator('output[aria-label="HL7 version"]')).toHaveText('2.5');
+    await expect(
+      destination.getByRole('combobox', { name: 'HL7 version', exact: true }),
+    ).toHaveCount(0);
+    await expect(destination.getByRole('columnheader')).toHaveText([
+      'JSON field',
+      'HL7 field',
+      'Actions',
+    ]);
+    await expect(
+      destination.getByRole('button', { name: 'Target Field 1', exact: true }),
+    ).toContainText('Patient identifier');
+    const options = destination.locator('details[aria-label="Mapping options 1"]');
+    await options.locator(':scope > summary').click();
+    const sourceBox = await destination.getByLabel('Source Field 1', { exact: true }).boundingBox();
+    const optionsBox = await options.boundingBox();
+    expect(optionsBox!.width).toBeGreaterThan(sourceBox!.width * 1.7);
+    if (!resetOverrides && process.env.UI_DESTINATION_HL7_SCREENSHOT)
+      await page.screenshot({ path: process.env.UI_DESTINATION_HL7_SCREENSHOT });
+    await options.locator(':scope > summary').click();
+    await destination.getByLabel('Source Field 1', { exact: true }).fill('patient_record_id');
+    const settings = await destinationSection(page, 'HL7 destination settings');
+    await expect(settings.getByRole('status')).toHaveText(
+      'Saved timestamp/control ID overrides are retained.',
+    );
+    await expect(
+      settings.getByRole('textbox', { name: /^Message date\/time|^Message control ID/ }),
+    ).toHaveCount(0);
+    await expect(settings).not.toContainText('SYNTHETIC-FIXED-ID');
+    if (resetOverrides) {
+      await settings
+        .getByRole('button', { name: 'Use generated time and ID', exact: true })
+        .click();
+      await expect(settings.getByRole('status')).toHaveCount(0);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    const scan = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+      .analyze();
+    expect(scan.violations).toEqual([]);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await step(page, 3);
+    await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Edit channel', exact: true })).toHaveCount(0);
+    const saved = readFieldMapping(
+      (captured(state, '/api/channel/1')[0].body.destinations as { processingScript: string }[])[0]
+        .processingScript,
+    );
+    expect(saved).toMatchObject({
+      version: 2,
+      hl7: resetOverrides
+        ? Object.fromEntries(
+            Object.entries(hl7).filter(
+              ([key]) => !['messageDateTime', 'messageControlId'].includes(key),
+            ),
+          )
+        : hl7,
+      rows: [
+        { source: 'patient_record_id', target: 'PID.3', required: true },
+        { source: 'name', target: 'PID.5', required: true },
+      ],
+    });
+    if (resetOverrides && saved?.version === 2) {
+      expect(saved.hl7).not.toHaveProperty('messageDateTime');
+      expect(saved.hl7).not.toHaveProperty('messageControlId');
+    }
+    expect(state.externalRequests).toEqual([]);
+  });

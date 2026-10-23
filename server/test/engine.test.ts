@@ -146,6 +146,36 @@ describe('Engine aggregation and durable retry policy', () => {
   });
   it('disabled retry records error', () =>
     expect(retryDecision({ ...dest, retry_enabled: false }, 0).status).toBe('OUT-ERROR'));
+  it('does not automatically retry permanent HTTP 4xx, but retains 408/429/5xx retry', () => {
+    for (const code of [
+      'HTTP_400',
+      'HTTP_401',
+      'HTTP_403',
+      'HTTP_404',
+      'HTTP_409',
+      'HTTP_422',
+      'INVALID_ENDPOINT',
+      'DESTINATION_HOST_DENIED',
+      'DESTINATION_ADDRESS_DENIED',
+    ])
+      expect(retryDecision(dest, 0, code)).toEqual({ status: 'OUT-ERROR', delay: null });
+    for (const code of ['HTTP_408', 'HTTP_429', 'HTTP_500', 'HTTP_503'])
+      expect(retryDecision(dest, 0, code)).toEqual({ status: 'QUEUED', delay: 30 });
+  });
+  it('records policy rejection without request duration or automatic retry', async () => {
+    mock.send.mockRejectedValueOnce(
+      new AppError(403, 'DESTINATION_HOST_DENIED', 'Destination hostname is not allowed'),
+    );
+    mock.query.mockImplementation(async (sql: string) => ({
+      recordset: sql.includes('SELECT status') ? [{ status: 'OUT-ERROR' }] : [],
+      rowsAffected: [1],
+    }));
+    const result = await processRetry(row);
+    expect(mock.inputs.httpStatus).toBeNull();
+    expect(mock.inputs.requestDurationMs).toBeNull();
+    expect(mock.inputs.delay).toBeNull();
+    expect(result.status).toBe('OUT-ERROR');
+  });
   it('stopped channel never processes', async () => {
     mock.query.mockResolvedValueOnce({ recordset: [{ ...channel, status: 'STOPPED' }] });
     await expect(processInboundMessage(1, {})).rejects.toThrow('Channel is not running');
@@ -190,7 +220,22 @@ describe('Engine aggregation and durable retry policy', () => {
       expect.any(Object),
       1000,
       expect.any(Function),
+      'POST',
     );
+    expect(mock.script).not.toHaveBeenCalled();
+  });
+  it('preserves historical prepared retries when a prior transport event proves preparation', async () => {
+    mock.query.mockImplementation(async (sql: string) => ({
+      recordset: sql.includes('SELECT EXISTS(SELECT 1 FROM "MessageDestinationLog"')
+        ? [{ prepared: true }]
+        : sql.includes('SELECT status')
+          ? [{ status: 'OUT-SENT' }]
+          : [],
+      rowsAffected: [1],
+    }));
+    await processRetry({ ...row, status: 'RETRYING', last_error: 'HTTP_503' });
+    expect(mock.send).toHaveBeenCalledOnce();
+    expect(mock.send.mock.calls[0][1]).toBe('{"data":1}');
     expect(mock.script).not.toHaveBeenCalled();
   });
   it('converts incoming JSON to escaped HL7 before delivery', async () => {
@@ -219,6 +264,7 @@ describe('Engine aggregation and durable retry policy', () => {
       expect.objectContaining({ 'Content-Type': 'application/hl7-v2' }),
       1000,
       expect.any(Function),
+      'POST',
     );
   });
   for (const status of [201, 204, 400, 503])

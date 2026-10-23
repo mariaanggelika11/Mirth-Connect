@@ -277,7 +277,46 @@
         "operationId": "get__api_auth_me",
         "responses": {
           "200": {
-            "description": "Success; see route-specific legacy envelope."
+            "description": "Current user plus optional browser session deadlines. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN",
+                            "DEVELOPER",
+                            "OPERATOR",
+                            "VIEWER"
+                          ]
+                        }
+                      }
+                    },
+                    "session": {
+                      "$ref": "#/components/schemas/BrowserSessionMetadata"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Safe validation error",
@@ -305,7 +344,8 @@
             "description": "Database or capacity unavailable"
           }
         },
-        "parameters": []
+        "parameters": [],
+        "description": "Current database role and user. Browser JWT requests enforce family idle/absolute/revocation on every call and return top-level session metadata. Reading this route does not count as user activity. Bearer automation retains its existing expiry and has no browser session metadata."
       }
     },
     "/api/auth/logout": {
@@ -351,7 +391,31 @@
         "operationId": "post__api_auth_browser_login",
         "responses": {
           "200": {
-            "description": "Success; see route-specific legacy envelope."
+            "description": "Access token and authoritative session deadlines; HttpOnly refresh cookie and readable CSRF cookie are set. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "token",
+                    "session"
+                  ],
+                  "properties": {
+                    "token": {
+                      "type": "string",
+                      "description": "Short-lived access token; keep in memory only."
+                    },
+                    "session": {
+                      "$ref": "#/components/schemas/BrowserSessionMetadata"
+                    },
+                    "csrfToken": {
+                      "type": "string",
+                      "description": "Double-submit CSRF value; not an access token."
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Safe validation error",
@@ -364,7 +428,7 @@
             }
           },
           "401": {
-            "description": "Authentication invalid or expired"
+            "description": "SESSION_INVALID, SESSION_IDLE_EXPIRED or SESSION_ABSOLUTE_EXPIRED. Expired families are revoked; refresh cannot revive them."
           },
           "403": {
             "description": "Permission/origin/CSRF denied"
@@ -390,7 +454,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Browser session policy: default access token 300s, idle timeout 900s, absolute maximum 28800s. Login creates a new family; refresh rotates its token without extending either activity or absolute deadlines. Cookie Max-Age is capped to the remaining absolute lifetime. Schema migration 008 is required; legacy sessions require fresh login."
       }
     },
     "/api/auth/browser/refresh": {
@@ -399,7 +464,27 @@
         "operationId": "post__api_auth_browser_refresh",
         "responses": {
           "200": {
-            "description": "Success; see route-specific legacy envelope."
+            "description": "Access token and authoritative session deadlines; HttpOnly refresh cookie and readable CSRF cookie are set. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "token",
+                    "session"
+                  ],
+                  "properties": {
+                    "token": {
+                      "type": "string",
+                      "description": "Short-lived access token; keep in memory only."
+                    },
+                    "session": {
+                      "$ref": "#/components/schemas/BrowserSessionMetadata"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Safe validation error",
@@ -412,7 +497,7 @@
             }
           },
           "401": {
-            "description": "Authentication invalid or expired"
+            "description": "SESSION_INVALID, SESSION_IDLE_EXPIRED or SESSION_ABSOLUTE_EXPIRED. Expired families are revoked; refresh cannot revive them."
           },
           "403": {
             "description": "Permission/origin/CSRF denied"
@@ -442,7 +527,8 @@
           {
             "refreshCookie": []
           }
-        ]
+        ],
+        "description": "Browser session policy: default access token 300s, idle timeout 900s, absolute maximum 28800s. Login creates a new family; refresh rotates its token without extending either activity or absolute deadlines. Cookie Max-Age is capped to the remaining absolute lifetime. Schema migration 008 is required; legacy sessions require fresh login."
       }
     },
     "/api/auth/browser/logout": {
@@ -494,7 +580,8 @@
           {
             "refreshCookie": []
           }
-        ]
+        ],
+        "description": "Revoke the family and all rotated refresh rows transactionally, audit, then clear cookies. The client clears authenticated UI immediately, synchronizes tabs and persists a nonsecret sign-out intent until revocation succeeds; a network failure must not be reported as confirmed server logout."
       }
     },
     "/api/auth/sessions": {
@@ -1326,7 +1413,7 @@
         "operationId": "post__api_channel_dry_run",
         "responses": {
           "200": {
-            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes and actionable configuration guidance without payload values or exception text. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing.",
+            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes and actionable configuration guidance without payload values or exception text. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing. Destination results explicitly distinguish disabled/source-filtered/condition-filtered/not-sent/error outcomes. Destination filters read the source-processed clone; transformers and retained templates run only for matched enabled destinations. Outbound XML and XML-to-JSON use bounded strict parsing and reject DTD/entities before any delivery. XML/HL7 input can include parsedInput with its entire payload redacted by default; routed HL7 outputs include fieldTree metadata without values. V2 mapping failures provide safe path/conversion/profile guidance. HTTP credential values are not read during preview; receiver authentication is not verified.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1399,42 +1486,39 @@
                         "message": {
                           "type": "string",
                           "description": "Safe actionable guidance for a failed source stage. Canonical field mappings can identify a required target field; payload values and exception text are never included."
+                        },
+                        "validationResults": {
+                          "type": "array",
+                          "maxItems": 50,
+                          "items": {
+                            "$ref": "#/components/schemas/ValidationRuleResult"
+                          },
+                          "description": "Safe active field-rule decisions from the same evaluator as runtime, including failures without payload values."
                         }
                       }
                     },
                     "results": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "name": {
-                            "type": "string"
-                          },
-                          "outputFormat": {
-                            "type": "string"
-                          },
-                          "connectorType": {
-                            "type": "string"
-                          },
-                          "finalPayload": {},
-                          "status": {
-                            "enum": [
-                              "VALID",
-                              "ERROR"
-                            ]
-                          },
-                          "stages": {
-                            "type": "object"
-                          },
-                          "code": {
-                            "type": "string"
-                          },
-                          "message": {
-                            "type": "string",
-                            "description": "Safe actionable guidance for a failed destination stage; no payload values or custom exception text."
-                          }
+                        "$ref": "#/components/schemas/DryRunDestinationResult"
+                      },
+                      "maxItems": 50
+                    },
+                    "parsedInput": {
+                      "type": "object",
+                      "required": [
+                        "format",
+                        "payload"
+                      ],
+                      "properties": {
+                        "format": {
+                          "const": "JSON"
+                        },
+                        "payload": {
+                          "description": "The entire parsed XML/HL7 payload is [REDACTED] by default, including numeric identifiers and values. Actual parsed data is returned only for an explicit ADMIN raw-payload request audited before response."
                         }
-                      }
+                      },
+                      "description": "Optional, after successful XML/HL7 input validation; omitted for JSON/TEXT."
                     }
                   }
                 }
@@ -1491,7 +1575,7 @@
                 ],
                 "properties": {
                   "configuration": {
-                    "$ref": "#/components/schemas/Channel"
+                    "$ref": "#/components/schemas/ChannelPreviewConfiguration"
                   },
                   "payload": {},
                   "raw": {
@@ -1960,7 +2044,7 @@
         "operationId": "get__api_message__id_",
         "responses": {
           "200": {
-            "description": "Message detail retains originalPayload/transformedPayload fields with existing redaction and audited raw access. inboundFormat comes from the captured inbound message; optional sourceTransformed comes only from its immutable channel revision. Destination logs add outboundFormat, connectorType and snapshotCaptured from captured transport configuration. Missing historical metadata is unknown. HTTP response codes are not inferred. Failed/filtered attempts may precede conversion or network submission. Optional destinationLogs[].httpStatus is the actual HTTP response status recorded for each new REST attempt (2xx and non-2xx). It is available to message:read roles without revealing response bodies. Missing/legacy status, network failures, and non-HTTP connectors omit this field; no status is guessed or backfilled.",
+            "description": "Message detail retains existing payload permission, default redaction and audited administrator raw access. destinationOutcomes separates per-destination filtering/preparation/disabled decisions from paginated destinationLogs. Logs add eventKind/networkAttempted/occurredAt; sentAt is returned only for recorded network evidence. httpStatus and durationMs come from observed transport, never inferred or backfilled. Known non-network events do not count as attempts; uncertain historical evidence remains unknown. Source and destination format/configuration metadata comes from immutable captured messages/revisions/snapshots when available; secrets and script bodies are never included.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1995,6 +2079,14 @@
                           "items": {
                             "$ref": "#/components/schemas/MessageDestinationLog"
                           }
+                        },
+                        "destinationOutcomes": {
+                          "type": "array",
+                          "maxItems": 50,
+                          "items": {
+                            "$ref": "#/components/schemas/DestinationOutcome"
+                          },
+                          "description": "Stage and delivery summaries independent of paginated destinationLogs, including captured disabled destinations when immutable revision metadata exists."
                         }
                       }
                     }
@@ -2084,7 +2176,14 @@
             "description": "Permission/origin/CSRF denied"
           },
           "409": {
-            "description": "State, revision or idempotency conflict"
+            "description": "RESEND_UNAVAILABLE for ineligible work; DESTINATION_NOT_PREPARED for unverified final payload or historical preparation failure; INVALID_DELIVERY_SNAPSHOT for unreadable saved connector; DELIVERY_LEASE_LOST for changed ownership. No unsafe request is sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "429": {
             "description": "Management/authentication rate limit"
@@ -2104,7 +2203,8 @@
             }
           }
         ],
-        "x-required-permission": "message:resend"
+        "x-required-permission": "message:resend",
+        "description": "Requires message:resend, a failed outbound state, running channel and enabled non-retired destination. Reuses the saved final serialized body and encrypted connector snapshot; never reruns filters, mappings, templates or conversion. New snapshots mark completed preparation inside encrypted configuration. Legacy queued work or recorded transport/admission evidence can verify old preparation; an old connector snapshot alone is insufficient for failed or unknown preparation. Missing/unproven preparation is rejected before network activity. Reconcile uncertain delivery with the receiver first; no exactly-once guarantee is implied."
       }
     },
     "/api/message/{id}/reconciliation": {
@@ -2716,7 +2816,7 @@
         },
         "responses": {
           "200": {
-            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes and actionable configuration guidance without payload values or exception text. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing.",
+            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes and actionable configuration guidance without payload values or exception text. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing. Destination results explicitly distinguish disabled/source-filtered/condition-filtered/not-sent/error outcomes. Destination filters read the source-processed clone; transformers and retained templates run only for matched enabled destinations. Outbound XML and XML-to-JSON use bounded strict parsing and reject DTD/entities before any delivery. XML/HL7 input can include parsedInput with its entire payload redacted by default; routed HL7 outputs include fieldTree metadata without values. V2 mapping failures provide safe path/conversion/profile guidance. HTTP credential values are not read during preview; receiver authentication is not verified.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2789,42 +2889,39 @@
                         "message": {
                           "type": "string",
                           "description": "Safe actionable guidance for a failed source stage. Canonical field mappings can identify a required target field; payload values and exception text are never included."
+                        },
+                        "validationResults": {
+                          "type": "array",
+                          "maxItems": 50,
+                          "items": {
+                            "$ref": "#/components/schemas/ValidationRuleResult"
+                          },
+                          "description": "Safe active field-rule decisions from the same evaluator as runtime, including failures without payload values."
                         }
                       }
                     },
                     "results": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "name": {
-                            "type": "string"
-                          },
-                          "outputFormat": {
-                            "type": "string"
-                          },
-                          "connectorType": {
-                            "type": "string"
-                          },
-                          "finalPayload": {},
-                          "status": {
-                            "enum": [
-                              "VALID",
-                              "ERROR"
-                            ]
-                          },
-                          "stages": {
-                            "type": "object"
-                          },
-                          "code": {
-                            "type": "string"
-                          },
-                          "message": {
-                            "type": "string",
-                            "description": "Safe actionable guidance for a failed destination stage; no payload values or custom exception text."
-                          }
+                        "$ref": "#/components/schemas/DryRunDestinationResult"
+                      },
+                      "maxItems": 50
+                    },
+                    "parsedInput": {
+                      "type": "object",
+                      "required": [
+                        "format",
+                        "payload"
+                      ],
+                      "properties": {
+                        "format": {
+                          "const": "JSON"
+                        },
+                        "payload": {
+                          "description": "The entire parsed XML/HL7 payload is [REDACTED] by default, including numeric identifiers and values. Actual parsed data is returned only for an explicit ADMIN raw-payload request audited before response."
                         }
-                      }
+                      },
+                      "description": "Optional, after successful XML/HL7 input validation; omitted for JSON/TEXT."
                     }
                   }
                 }
@@ -3661,7 +3758,7 @@
         "operationId": "post__api_channel_preview_transformation",
         "responses": {
           "200": {
-            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes and actionable configuration guidance without payload values or exception text. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing. Connection settings are deliberately not validated; warnings explicitly state this. No application request, DNS lookup or connection probe is made.",
+            "description": "Structured source validation/filter/transformation and per-destination stages/finalPayload/outputFormat; input and source payloads are separately identified. networkDelivery is always NOT_SENT. success=false when a destination stage fails; errors contain safe codes and actionable configuration guidance without payload values or exception text. Source validation/filter/transformation failures identify source.code and the ERROR stage, with no destination processing. Connection settings are deliberately not validated; warnings explicitly state this. No application request, DNS lookup or connection probe is made. Destination results explicitly distinguish disabled/source-filtered/condition-filtered/not-sent/error outcomes. Destination filters read the source-processed clone; transformers and retained templates run only for matched enabled destinations. Outbound XML and XML-to-JSON use bounded strict parsing and reject DTD/entities before any delivery. XML/HL7 input can include parsedInput with its entire payload redacted by default; routed HL7 outputs include fieldTree metadata without values. V2 mapping failures provide safe path/conversion/profile guidance. HTTP credential values are not read during preview; receiver authentication is not verified.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3734,42 +3831,39 @@
                         "message": {
                           "type": "string",
                           "description": "Safe actionable guidance for a failed source stage. Canonical field mappings can identify a required target field; payload values and exception text are never included."
+                        },
+                        "validationResults": {
+                          "type": "array",
+                          "maxItems": 50,
+                          "items": {
+                            "$ref": "#/components/schemas/ValidationRuleResult"
+                          },
+                          "description": "Safe active field-rule decisions from the same evaluator as runtime, including failures without payload values."
                         }
                       }
                     },
                     "results": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "name": {
-                            "type": "string"
-                          },
-                          "outputFormat": {
-                            "type": "string"
-                          },
-                          "connectorType": {
-                            "type": "string"
-                          },
-                          "finalPayload": {},
-                          "status": {
-                            "enum": [
-                              "VALID",
-                              "ERROR"
-                            ]
-                          },
-                          "stages": {
-                            "type": "object"
-                          },
-                          "code": {
-                            "type": "string"
-                          },
-                          "message": {
-                            "type": "string",
-                            "description": "Safe actionable guidance for a failed destination stage; no payload values or custom exception text."
-                          }
+                        "$ref": "#/components/schemas/DryRunDestinationResult"
+                      },
+                      "maxItems": 50
+                    },
+                    "parsedInput": {
+                      "type": "object",
+                      "required": [
+                        "format",
+                        "payload"
+                      ],
+                      "properties": {
+                        "format": {
+                          "const": "JSON"
+                        },
+                        "payload": {
+                          "description": "The entire parsed XML/HL7 payload is [REDACTED] by default, including numeric identifiers and values. Actual parsed data is returned only for an explicit ADMIN raw-payload request audited before response."
                         }
-                      }
+                      },
+                      "description": "Optional, after successful XML/HL7 input validation; omitted for JSON/TEXT."
                     }
                   }
                 }
@@ -3839,7 +3933,7 @@
             }
           }
         },
-        "description": "The channel wizard calls this from Review & Test after Source, Transformation and Destinations are complete. Runs the same isolated source and destination filter/transform/template/conversion pipeline as dry-run. For API compatibility, empty destination names and endpoints remain permitted. DNS, sockets, host allowlist and delivery are not tested. Channel save/full dry-run still requires valid connection settings. Synthetic payloads only; normal redaction and audited administrator raw access apply. Invalid configuration identifies the affected setting; failed stages include safe code/message metadata. Versioned source field validation uses the same evaluator in runtime and dry-run. FIELD_VALIDATION_FAILED returns safe per-field diagnostics; invalid payloads create no outbound delivery or retry. Preview source.validationResults contains all active field outcomes and redaction remains enforced."
+        "description": "The channel wizard calls this from Review & Test after Source, Transformation and Destinations are complete. Runs the same isolated source and destination filter/transform/template/conversion pipeline as dry-run. For API compatibility, empty destination names and endpoints remain permitted. DNS, sockets, host allowlist and delivery are not tested. Channel save/full dry-run still requires valid connection settings. Synthetic payloads only; normal redaction and audited administrator raw access apply. Invalid configuration identifies the affected setting; failed stages include safe code/message metadata. Versioned source field validation uses the same evaluator in runtime and dry-run. FIELD_VALIDATION_FAILED returns safe per-field diagnostics; invalid payloads create no outbound delivery or retry. Preview source.validationResults contains all active field outcomes and redaction remains enforced. A bounded blank optional changeSummary is treated as absent for compatibility with older wizard clients; other schema limits and save/revision validation remain unchanged."
       }
     },
     "/api/channel/{id}/archive": {
@@ -3889,6 +3983,181 @@
         ],
         "x-required-permission": "channel:delete",
         "description": "Requires channel:delete (ADMIN), STOPPED and no IN-PROCESS/PROCESSING/QUEUED/RETRYING messages or unexpired message lease. Persists ARCHIVED using the existing status column. Archived channels cannot be started, edited or published; inspect history with includeArchived=true. No data is deleted."
+      }
+    },
+    "/api/channel/discover-fields": {
+      "post": {
+        "summary": "Discover bounded source/processed field metadata from a synthetic sample",
+        "operationId": "post__api_channel_discover_fields",
+        "description": "Requires authenticated ADMIN/DEVELOPER channel:write. Returns paths/types/labels without values and audits DISCOVER_MESSAGE_FIELDS before returning. Optional source transformation runs in the existing QuickJS sandbox. Reuses bounded runtime parsing, not a separate browser parser. No DNS, probe, destination request, message persistence, channel save or retry work. Existing management rate limits and payload limits apply.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-permission": "channel:write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FieldDiscoveryRequest"
+              },
+              "example": {
+                "format": "JSON",
+                "payload": {
+                  "patient": {
+                    "id": "SYNTHETIC-001"
+                  }
+                },
+                "processingScript": ""
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Audited field metadata only; networkDelivery is NOT_SENT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldDiscoveryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "FIELD_DISCOVERY_INVALID: invalid request format/shape or missing sample.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication missing, invalid or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Current role lacks channel:write.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Configured request/sample or script-context size limit exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Malformed sample, bounded parser failure, or safe source transformation failure; no raw exception or sample values.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Existing management rate limit reached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Existing script capacity limit reached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": []
+      }
+    },
+    "/api/auth/browser/activity": {
+      "post": {
+        "summary": "Renew idle deadline after explicit browser user activity",
+        "operationId": "post__api_auth_browser_activity",
+        "description": "Requires a valid browser JWT, current refresh cookie from the same family and CSRF. Uses server time only. An expired/revoked family cannot be renewed. Automatic polling, role checks and refresh do not invoke this action; the UI throttles trusted pointer/keyboard activity. This is an authenticated activity signal, not cryptographic proof of physical presence. Absolute expiry never changes.",
+        "security": [
+          {
+            "bearerAuth": [],
+            "refreshCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Matching double-submit CSRF value from the mirth_csrf cookie; same family as the browser JWT and current refresh token."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Idle deadline renewed within the absolute limit; Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success",
+                    "session"
+                  ],
+                  "properties": {
+                    "success": {
+                      "const": true
+                    },
+                    "session": {
+                      "$ref": "#/components/schemas/BrowserSessionMetadata"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid browser identity, mismatched family or expired/revoked session. No revival."
+          },
+          "403": {
+            "description": "CSRF/origin rejected."
+          },
+          "429": {
+            "description": "Authentication rate limit; no deadline extension."
+          },
+          "503": {
+            "description": "Database unavailable; session not extended."
+          }
+        }
       }
     }
   },
@@ -4065,6 +4334,9 @@
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 100
+                    },
+                    "http": {
+                      "$ref": "#/components/schemas/HttpSettings"
                     }
                   },
                   "additionalProperties": false
@@ -4107,7 +4379,8 @@
                 "processingScript": {
                   "default": "",
                   "type": "string",
-                  "maxLength": 65536
+                  "maxLength": 65536,
+                  "description": "Optional per-destination transformer in the existing bounded sandbox. Runs on an independent clone after the destination filter and before templateScript/outbound conversion. Canonical visual mappings and retained advanced scripts use this field; one destination cannot mutate another destination input. Canonical MIRTH_FIELD_MAPPING_V2 adds explicit type/date conversions, indexed arrays and optional curated HL7 v2.5 configuration. This remains the existing bounded sandbox script field; see FieldMappingV2 compiler metadata."
                 },
                 "responseScript": {
                   "default": "",
@@ -4117,20 +4390,24 @@
                 "templateScript": {
                   "default": "",
                   "type": "string",
-                  "maxLength": 65536
+                  "maxLength": 65536,
+                  "description": "Optional retained sandbox script executed after processingScript and before outbound conversion. Receives its result as msg and can replace the final request body. This is not a template catalog or picker; legacy configuration is preserved. Failure prevents delivery and automatic retry for this unprepared message."
                 },
                 "filterScript": {
                   "default": "",
                   "type": "string",
-                  "maxLength": 65536
+                  "maxLength": 65536,
+                  "description": "Optional sandboxed Boolean condition evaluated on a clone of the source-processed message before this destination transformer. The enabled destination receives all eligible messages when filterScript is empty or a canonical MIRTH_DESTINATION_FILTER_DISABLED_V1 retained-rule wrapper is present; the inactive rule remains stored and is not executed. Destination isEnabled remains independent. Simple conditions use canonical MIRTH_SIMPLE_CONDITION_V1 metadata and bounded own-property dotted paths, including numeric array indexes; prototype paths are denied. Operators: eq, neq, contains, startsWith, exists, notExists, gt, gte, lt, lte, isEmpty, isNotEmpty. Text comparisons use scalar string representations; numeric comparisons require finite values. isEmpty matches missing/null/empty text; isNotEmpty accepts present non-null nonempty scalar values, including zero/false. Missing/non-scalar values do not satisfy comparisons including neq. The simplified UI requires complete field/value settings for new active conditions. Existing canonical empty comparisons and legacy scripts, including literal false, retain their behavior. Corrupted reserved metadata is rejected. A mismatch creates FILTERED without a network attempt or retry. No new database field is added."
                 },
                 "isEnabled": {
                   "default": true,
-                  "type": "boolean"
+                  "type": "boolean",
+                  "description": "False excludes this destination from runtime jobs, filter evaluation, transformation, templates and delivery. Its stored settings remain retained. Independent of whether its conditional filter is enabled."
                 },
                 "retryEnabled": {
                   "default": false,
-                  "type": "boolean"
+                  "type": "boolean",
+                  "description": "Apply configured bounded retry only after a final payload has been prepared. Filter mismatches, preparation failures and disabled destinations never create automatic retries. Permanent HTTP 4xx except 408/429 stop automatic retry; 408/429 and 5xx use the configured policy. Uncertain transport outcomes are quarantined."
                 },
                 "maxRetries": {
                   "default": 3,
@@ -4173,7 +4450,8 @@
           "processingScript": {
             "default": "",
             "type": "string",
-            "maxLength": 65536
+            "maxLength": 65536,
+            "description": "Common source transformation script, including canonical V1/V2 visual mappings. V2 supports explicit conversions and indexed paths. Destination output format and optional curated HL7 generation belong to the per-destination transformation; no separate source-format selector is added here."
           },
           "responseScript": {
             "default": "",
@@ -4220,6 +4498,9 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 100
+              },
+              "http": {
+                "$ref": "#/components/schemas/HttpSettings"
               }
             },
             "additionalProperties": false
@@ -4262,7 +4543,8 @@
           "processingScript": {
             "default": "",
             "type": "string",
-            "maxLength": 65536
+            "maxLength": 65536,
+            "description": "Optional per-destination transformer in the existing bounded sandbox. Runs on an independent clone after the destination filter and before templateScript/outbound conversion. Canonical visual mappings and retained advanced scripts use this field; one destination cannot mutate another destination input. Canonical MIRTH_FIELD_MAPPING_V2 adds explicit type/date conversions, indexed arrays and optional curated HL7 v2.5 configuration. This remains the existing bounded sandbox script field; see FieldMappingV2 compiler metadata."
           },
           "responseScript": {
             "default": "",
@@ -4272,21 +4554,24 @@
           "templateScript": {
             "default": "",
             "type": "string",
-            "maxLength": 65536
+            "maxLength": 65536,
+            "description": "Optional retained sandbox script executed after processingScript and before outbound conversion. Receives its result as msg and can replace the final request body. This is not a template catalog or picker; legacy configuration is preserved. Failure prevents delivery and automatic retry for this unprepared message."
           },
           "filterScript": {
             "default": "",
             "type": "string",
             "maxLength": 65536,
-            "description": "Optional sandboxed boolean filter. Simple Field/Operator/Value conditions compile into an intact canonical MIRTH_SIMPLE_CONDITION_V1 script stored in this existing field. Supported operators: eq, neq, contains, startsWith, exists, notExists, gt, gte, lt, lte. Text operators compare string representations of scalar values; numeric operators accept only finite numbers/nonempty numeric strings. Missing/non-scalar values do not satisfy comparisons, including neq. Presence operators test own-property path existence, including existing null/empty values. Unrecognized/custom/legacy scripts are preserved; no separate condition API or database field."
+            "description": "Optional sandboxed Boolean condition evaluated on a clone of the source-processed message before this destination transformer. The enabled destination receives all eligible messages when filterScript is empty or a canonical MIRTH_DESTINATION_FILTER_DISABLED_V1 retained-rule wrapper is present; the inactive rule remains stored and is not executed. Destination isEnabled remains independent. Simple conditions use canonical MIRTH_SIMPLE_CONDITION_V1 metadata and bounded own-property dotted paths, including numeric array indexes; prototype paths are denied. Operators: eq, neq, contains, startsWith, exists, notExists, gt, gte, lt, lte, isEmpty, isNotEmpty. Text comparisons use scalar string representations; numeric comparisons require finite values. isEmpty matches missing/null/empty text; isNotEmpty accepts present non-null nonempty scalar values, including zero/false. Missing/non-scalar values do not satisfy comparisons including neq. The simplified UI requires complete field/value settings for new active conditions. Existing canonical empty comparisons and legacy scripts, including literal false, retain their behavior. Corrupted reserved metadata is rejected. A mismatch creates FILTERED without a network attempt or retry. No new database field is added."
           },
           "isEnabled": {
             "default": true,
-            "type": "boolean"
+            "type": "boolean",
+            "description": "False excludes this destination from runtime jobs, filter evaluation, transformation, templates and delivery. Its stored settings remain retained. Independent of whether its conditional filter is enabled."
           },
           "retryEnabled": {
             "default": false,
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Apply configured bounded retry only after a final payload has been prepared. Filter mismatches, preparation failures and disabled destinations never create automatic retries. Permanent HTTP 4xx except 408/429 stop automatic retry; 408/429 and 5xx use the configured policy. Uncertain transport outcomes are quarantined."
           },
           "maxRetries": {
             "default": 3,
@@ -4463,6 +4748,9 @@
                           "type": "integer",
                           "minimum": 1,
                           "maximum": 100
+                        },
+                        "http": {
+                          "$ref": "#/components/schemas/HttpSettings"
                         }
                       },
                       "additionalProperties": false
@@ -4551,6 +4839,9 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 100
+          },
+          "http": {
+            "$ref": "#/components/schemas/HttpSettings"
           }
         },
         "additionalProperties": false
@@ -4599,7 +4890,7 @@
       },
       "MessageDestinationLog": {
         "type": "object",
-        "description": "One captured destination delivery attempt. Format/name/type come from the immutable destination snapshot when readable. Payload fields require message:payload; ordinary metadata including HTTP status does not.",
+        "description": "Captured destination event. New filtering/preparation outcomes do not create transport attempt logs; retained legacy filtering/preparation events and admission waits are explicitly classified. Format/name/type come from the immutable snapshot when available. Payload fields require message:payload; ordinary metadata does not.",
         "properties": {
           "id": {
             "type": "integer"
@@ -4627,7 +4918,8 @@
           },
           "sentAt": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "Present only for an event with actual network-attempt evidence. Use occurredAt for non-network events."
           },
           "httpStatus": {
             "type": "integer",
@@ -4649,7 +4941,8 @@
             "description": "HL7 acknowledgement code; never overloaded with an HTTP response code."
           },
           "canResend": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "State/configuration eligibility hint. The resend endpoint independently verifies prepared final-payload evidence and may reject unavailable or unsafe historical work."
           },
           "requestData": {
             "description": "Destination input; omitted without message:payload."
@@ -4673,8 +4966,28 @@
               "integer",
               "null"
             ],
-            "minimum": 1,
-            "description": "Exact transport attempt count across the complete saved history of this outbound message, including retries. Null/absent when historical attempt metadata is incomplete. Admission waits do not count as attempts."
+            "minimum": 0,
+            "description": "Recorded transport attempts across the complete outbound history, including retries. Known filtering/preparation/admission and pre-network policy rejection events do not count. Zero for a known non-network event with no attempts; null for ambiguous legacy history."
+          },
+          "eventKind": {
+            "enum": [
+              "DELIVERY_ATTEMPT",
+              "DELIVERY_REJECTION",
+              "FILTERED",
+              "PREPARATION_FAILURE",
+              "ADMISSION_WAIT",
+              "UNKNOWN"
+            ],
+            "description": "Classification from captured transport metadata or known safe diagnostic codes; historical uncertainty is preserved. DELIVERY_REJECTION identifies known local endpoint/configuration/credential denial before a network request; no sentAt or transport duration is claimed."
+          },
+          "networkAttempted": {
+            "type": "boolean",
+            "description": "True for recorded network evidence, false for known non-network events, omitted for UNKNOWN."
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Saved event timestamp, including non-network events."
           }
         }
       },
@@ -4688,7 +5001,9 @@
             "$ref": "#/components/schemas/Channel/properties/idempotencyMode"
           },
           "changeSummary": {
-            "$ref": "#/components/schemas/Channel/properties/changeSummary"
+            "type": "string",
+            "maxLength": 500,
+            "description": "Optional for testing. Empty/whitespace-only values up to 500 characters are treated as absent; save/revision endpoints retain their own summary requirements."
           },
           "name": {
             "$ref": "#/components/schemas/Channel/properties/name"
@@ -5194,6 +5509,877 @@
           }
         },
         "description": "Bounded structurally safe inactive field settings; incomplete paths and semantic limits may be retained, but must satisfy active ValidationFieldRule rules before FIELDS can run."
+      },
+      "DestinationOutcome": {
+        "type": "object",
+        "description": "Safe per-destination processing summary from immutable connector/channel revision and saved processing evidence. Separate from paginated attempt logs; no payload or secret configuration. Disabled destinations can be reconstructed only when present in the captured revision. Missing or ambiguous historical evidence remains UNKNOWN/null.",
+        "required": [
+          "destinationId",
+          "name",
+          "enabled",
+          "status",
+          "filter",
+          "transformation",
+          "template",
+          "conversion",
+          "delivery",
+          "attemptCount"
+        ],
+        "properties": {
+          "destinationId": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "description": "Existing outbound processing status, or derived NOT_RUN for a captured revision destination without an outbound job. No new persisted database status."
+          },
+          "filter": {
+            "enum": [
+              "BYPASSED",
+              "MATCHED",
+              "NOT_MATCHED",
+              "NOT_RUN",
+              "UNKNOWN",
+              "ERROR"
+            ]
+          },
+          "transformation": {
+            "enum": [
+              "TRANSFORMED",
+              "PASS_THROUGH",
+              "ERROR",
+              "NOT_RUN",
+              "UNKNOWN"
+            ]
+          },
+          "template": {
+            "enum": [
+              "APPLIED",
+              "NOT_CONFIGURED",
+              "ERROR",
+              "NOT_RUN",
+              "UNKNOWN"
+            ]
+          },
+          "conversion": {
+            "enum": [
+              "CONVERTED",
+              "ERROR",
+              "NOT_RUN",
+              "UNKNOWN"
+            ]
+          },
+          "delivery": {
+            "enum": [
+              "SENT",
+              "FAILED",
+              "QUEUED",
+              "FILTERED",
+              "DISABLED",
+              "NOT_SENT",
+              "UNKNOWN"
+            ]
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Saved processing timestamp; not an invented network submission time."
+          },
+          "attemptCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Recorded actual transport attempts. Zero when non-delivery is known; null when historical evidence is ambiguous."
+          },
+          "networkAttempted": {
+            "type": "boolean",
+            "description": "Known transport-attempt evidence. Omitted when historical evidence cannot decide."
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Z0-9_]{1,50}$",
+            "description": "Safe failure code without exception text, payload values or credentials."
+          }
+        }
+      },
+      "DryRunDestinationResult": {
+        "type": "object",
+        "description": "Preparation result only. No request, DNS lookup, socket, production message history or retry queue is created. Filtered/disabled destinations never report later processing stages as completed.",
+        "required": [
+          "name",
+          "outputFormat",
+          "connectorType",
+          "enabled",
+          "delivery",
+          "status",
+          "stages",
+          "elapsedMs"
+        ],
+        "properties": {
+          "destinationId": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "outputFormat": {
+            "enum": [
+              "JSON",
+              "XML",
+              "HL7V2",
+              "TEXT"
+            ]
+          },
+          "connectorType": {
+            "enum": [
+              "REST",
+              "HL7",
+              "MLLP",
+              "TCP",
+              "RAW"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "delivery": {
+            "enum": [
+              "DISABLED",
+              "SOURCE_FILTERED",
+              "FILTERED",
+              "NOT_SENT",
+              "NOT_SENT_ERROR"
+            ]
+          },
+          "routed": {
+            "type": "boolean",
+            "description": "Whether the message was eligible for this destination; omitted when preparation failed."
+          },
+          "finalPayload": {
+            "description": "Converted outbound body only for a routed destination after successful preparation. Subject to existing default redaction and audited administrator raw preview permission."
+          },
+          "status": {
+            "enum": [
+              "VALID",
+              "ERROR"
+            ]
+          },
+          "stages": {
+            "type": "object",
+            "required": [
+              "filter",
+              "transformation",
+              "template",
+              "conversion"
+            ],
+            "properties": {
+              "filter": {
+                "enum": [
+                  "NOT_RUN",
+                  "BYPASSED",
+                  "MATCHED",
+                  "NOT_MATCHED",
+                  "ERROR"
+                ]
+              },
+              "transformation": {
+                "enum": [
+                  "SKIPPED",
+                  "TRANSFORMED",
+                  "PASS_THROUGH",
+                  "ERROR"
+                ]
+              },
+              "template": {
+                "enum": [
+                  "SKIPPED",
+                  "APPLIED",
+                  "NOT_CONFIGURED",
+                  "ERROR"
+                ]
+              },
+              "conversion": {
+                "enum": [
+                  "SKIPPED",
+                  "CONVERTED",
+                  "ERROR"
+                ]
+              }
+            }
+          },
+          "code": {
+            "type": "string",
+            "description": "Safe failed-stage code."
+          },
+          "message": {
+            "type": "string",
+            "description": "Actionable safe guidance without payload values or custom exception text."
+          },
+          "elapsedMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "fieldTree": {
+            "type": "array",
+            "maxItems": 512,
+            "items": {
+              "$ref": "#/components/schemas/DiscoveredField"
+            },
+            "description": "Metadata-only tree for successful routed HL7 output, parsed from the actual generated message. No values, including during raw preview; at most 512 nodes and 12 levels."
+          }
+        }
+      },
+      "HttpHeaderSlot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "slot"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9-]{0,63}$",
+            "description": "Custom header name, unique ignoring case. Managed Authorization/Host/Content-Type/Content-Length/framing/cookie/proxy/correlation/idempotency/routing headers are prohibited."
+          },
+          "slot": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,39}$",
+            "description": "Non-secret environment slot suffix. The value comes only from MIRTH_DESTINATION_<actual-destination-id>_<slot>; no literal credential value is accepted here."
+          }
+        }
+      },
+      "HttpSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "REST sender metadata only, stored in existing deliveryPolicy JSON. Values resolve at delivery from destination-scoped environment variables and are never exported. Duplicated/imported destinations receive new IDs and require their own provisioned secrets. No credential resolution or authentication request occurs in dry-run.",
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "POST",
+              "PUT",
+              "PATCH"
+            ],
+            "default": "POST"
+          },
+          "contentType": {
+            "type": "string",
+            "enum": [
+              "application/json",
+              "application/xml",
+              "text/xml",
+              "application/hl7-v2",
+              "text/plain"
+            ],
+            "description": "Must match outbound format: JSON application/json; XML application/xml or text/xml; HL7V2 application/hl7-v2 or text/plain; TEXT text/plain. Omission selects the first compatible value."
+          },
+          "authentication": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "BEARER",
+              "BASIC"
+            ],
+            "default": "NONE",
+            "description": "BEARER uses MIRTH_DESTINATION_<id>_BEARER_TOKEN; BASIC uses _BASIC_USERNAME and _BASIC_PASSWORD. Explicit auth overrides legacy URL userinfo; NONE preserves legacy URL Basic compatibility. Secret values are nonempty, at most 4096 characters, and must not contain CR/LF/NUL."
+          },
+          "headers": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "$ref": "#/components/schemas/HttpHeaderSlot"
+            }
+          }
+        }
+      },
+      "DiscoveredField": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "label",
+          "type",
+          "selectable"
+        ],
+        "description": "Field metadata only. Never contains the sample value. Trees are bounded to 512 nodes and 12 levels; invalid/prototype paths cannot be selected.",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Actual dotted parsed-structure path. Selectable paths are at most 256 characters and 12 components; indexed arrays/repeated HL7 segments use zero-based numeric components."
+          },
+          "label": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "selectable": {
+            "type": "boolean"
+          },
+          "children": {
+            "type": "array",
+            "maxItems": 512,
+            "items": {
+              "$ref": "#/components/schemas/DiscoveredField"
+            }
+          }
+        }
+      },
+      "FieldDiscoveryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "format",
+          "payload"
+        ],
+        "description": "Synthetic sample only. Existing configured payload byte limits apply. Optional processingScript uses the bounded sandbox; discovery runs no source filter or stored facility validation profile.",
+        "properties": {
+          "format": {
+            "enum": [
+              "JSON",
+              "XML",
+              "HL7V2",
+              "TEXT"
+            ]
+          },
+          "payload": {
+            "description": "JSON data or encoded JSON text, raw XML/HL7 text, or a text sample. Values never appear in the field-discovery response."
+          },
+          "processingScript": {
+            "type": "string",
+            "maxLength": 65536,
+            "default": ""
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "XML",
+                    "HL7V2"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "FieldDiscoveryResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "format",
+          "fields",
+          "processedFields",
+          "truncated",
+          "warnings",
+          "networkDelivery"
+        ],
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "format": {
+            "enum": [
+              "JSON",
+              "XML",
+              "HL7V2",
+              "TEXT"
+            ]
+          },
+          "fields": {
+            "type": "array",
+            "maxItems": 512,
+            "items": {
+              "$ref": "#/components/schemas/DiscoveredField"
+            }
+          },
+          "processedFields": {
+            "type": "array",
+            "maxItems": 512,
+            "items": {
+              "$ref": "#/components/schemas/DiscoveredField"
+            },
+            "description": "Structure after optional source transformation; raw sample values are omitted."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Whether either the source or source-processed field tree exceeded the 512-node/12-level discovery limits; warnings cover both."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "networkDelivery": {
+            "const": "NOT_SENT"
+          }
+        }
+      },
+      "Hl7Configuration": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Curated visual-generation profiles for HL7 v2.5 only. These selected segment/field/date/code checks are not complete HL7 or facility conformance. MSH delimiters/type/processing/version are header-controlled. Omitted time/control ID use a runtime UTC timestamp with +0000/generated ID. See repository profile constraints and hospital UAT requirements.",
+        "required": [
+          "version",
+          "messageType",
+          "sendingApplication",
+          "sendingFacility",
+          "receivingApplication",
+          "receivingFacility",
+          "processingId",
+          "patientClass"
+        ],
+        "properties": {
+          "version": {
+            "const": "2.5"
+          },
+          "messageType": {
+            "enum": [
+              "ADT^A04",
+              "ADT^A01",
+              "ORU^R01",
+              "ORM^O01"
+            ]
+          },
+          "sendingApplication": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^(?=.*\\S)[^\\u0000-\\u001F\\u007F]+$"
+          },
+          "sendingFacility": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^(?=.*\\S)[^\\u0000-\\u001F\\u007F]+$"
+          },
+          "receivingApplication": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^(?=.*\\S)[^\\u0000-\\u001F\\u007F]+$"
+          },
+          "receivingFacility": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^(?=.*\\S)[^\\u0000-\\u001F\\u007F]+$"
+          },
+          "processingId": {
+            "enum": [
+              "P",
+              "T",
+              "D"
+            ],
+            "description": "New preset defaults use T; this is a message-processing field, not deployment authorization."
+          },
+          "messageDateTime": {
+            "type": "string",
+            "maxLength": 19,
+            "pattern": "^(?:[0-9]{14}(?:[+-](?:(?:0[0-9]|1[0-3])[0-5][0-9]|1400))?)?$",
+            "description": "Optional calendar-valid YYYYMMDDHHmmss, with optional +/-HHMM offset of at most 14:00. No offset means sender-local time. Empty/omitted generates UTC with +0000. Partial dates and fractional seconds are not supported by this visual configuration.",
+            "example": "20261018220000+0000"
+          },
+          "messageControlId": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[^\\u0000-\\u001F\\u007F]*$"
+          },
+          "assigningAuthority": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[^\\u0000-\\u001F\\u007F]*$"
+          },
+          "identifierType": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[^\\u0000-\\u001F\\u007F]*$"
+          },
+          "patientClass": {
+            "enum": [
+              "I",
+              "O",
+              "E",
+              "P",
+              "R",
+              "B",
+              "C",
+              "N",
+              "U"
+            ]
+          }
+        },
+        "externalDocs": {
+          "description": "HL7 International message structure family references (informative, not a conformance certificate)",
+          "url": "https://hl7.org/fhir/uv/v2mappings/STU1/message_maps.html"
+        }
+      },
+      "FieldMappingRowV2": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "target",
+          "required"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Bounded own-property path with at most 12 components. JSON/XML dotted paths; XML attributes under $. HL7 PID-5.1 aliases normalize to PID.5.1; explicit zero-based indexes address repetitions in the parsed structure."
+          },
+          "target": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Nonoverlapping output path. JSON arrays use indexes 0-999. HL7 targets must be supported by the selected curated profile; explicit OBX[0].5-style repeats are supported. Reserved MSH fields use header configuration."
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "defaultValue": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "Applied only to missing/null/empty-string source values before required checks and explicit conversion; zero and false remain present."
+          },
+          "conversion": {
+            "enum": [
+              "NONE",
+              "TEXT",
+              "NUMBER",
+              "BOOLEAN",
+              "DATE_TO_HL7",
+              "DATE_FROM_HL7"
+            ],
+            "description": "Explicit conversion only. DATE_TO_HL7 converts calendar-valid YYYY-MM-DD to YYYYMMDD; DATE_FROM_HL7 reverses it. Invalid conversions fail without delivery."
+          }
+        }
+      },
+      "FieldMappingV2": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "rows"
+        ],
+        "description": "Compiler metadata embedded in the canonical MIRTH_FIELD_MAPPING_V2 processingScript. This is not a separate channel request property or new API endpoint. Existing V1 and advanced scripts remain compatible. Optional hl7 seeds curated message structure before existing serialization; hl7 and rootElement cannot both be used. Altered or noncanonical reserved V2 metadata/body fails closed with FIELD_MAPPING_CONFIG_INVALID before sandbox execution or delivery. Older binaries cannot interpret the V2 result envelope; publish a compatible V1 or custom-script revision before downgrade.",
+        "properties": {
+          "version": {
+            "const": 2
+          },
+          "rows": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/FieldMappingRowV2"
+            }
+          },
+          "rootElement": {
+            "type": "string",
+            "maxLength": 80,
+            "pattern": "^(?:[A-Za-z_][A-Za-z0-9_.-]{0,79})?$"
+          },
+          "hl7": {
+            "$ref": "#/components/schemas/Hl7Configuration"
+          }
+        }
+      },
+      "BrowserSessionMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idleTimeoutSeconds",
+          "warningSeconds",
+          "idleExpiresAt",
+          "absoluteExpiresAt",
+          "serverTime"
+        ],
+        "properties": {
+          "idleTimeoutSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 28800,
+            "default": 900
+          },
+          "warningSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 600,
+            "default": 60
+          },
+          "idleExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server-authoritative idle deadline, capped at the absolute deadline. Only explicit authenticated browser activity can move it."
+          },
+          "absoluteExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Fixed deadline since login, at most eight hours. Refresh and activity never extend it."
+          },
+          "serverTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server timestamp used for the browser countdown."
+          }
+        }
+      },
+      "ChannelPreviewConfiguration": {
+        "type": "object",
+        "properties": {
+          "validationProfile": {
+            "default": {},
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LegacyValidationProfile"
+              },
+              {
+                "$ref": "#/components/schemas/ValidationSettings"
+              }
+            ]
+          },
+          "idempotencyMode": {
+            "default": "OPTIONAL",
+            "type": "string",
+            "enum": [
+              "OPTIONAL",
+              "REQUIRED",
+              "DISABLED"
+            ]
+          },
+          "changeSummary": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Optional for testing. Empty/whitespace-only values up to 500 characters are treated as absent; save/revision endpoints retain their own summary requirements."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 150
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "HTTP",
+                  "HL7"
+                ]
+              },
+              "inboundDataType": {
+                "default": "HL7V2",
+                "type": "string",
+                "enum": [
+                  "HL7V2",
+                  "JSON",
+                  "XML",
+                  "TEXT"
+                ]
+              },
+              "endpoint": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "inboundDataType"
+            ],
+            "additionalProperties": false
+          },
+          "destinations": {
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "deliveryPolicy": {
+                  "default": {},
+                  "type": "object",
+                  "properties": {
+                    "failureThreshold": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100
+                    },
+                    "openSeconds": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 3600
+                    },
+                    "maxConcurrency": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100
+                    },
+                    "http": {
+                      "$ref": "#/components/schemas/HttpSettings"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "id": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 150
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "REST",
+                    "HL7",
+                    "MLLP",
+                    "TCP",
+                    "RAW"
+                  ]
+                },
+                "endpoint": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                "outboundDataType": {
+                  "default": "HL7V2",
+                  "type": "string",
+                  "enum": [
+                    "HL7V2",
+                    "JSON",
+                    "XML",
+                    "TEXT"
+                  ]
+                },
+                "processingScript": {
+                  "default": "",
+                  "type": "string",
+                  "maxLength": 65536,
+                  "description": "Optional per-destination transformer in the existing bounded sandbox. Runs on an independent clone after the destination filter and before templateScript/outbound conversion. Canonical visual mappings and retained advanced scripts use this field; one destination cannot mutate another destination input. Canonical MIRTH_FIELD_MAPPING_V2 adds explicit type/date conversions, indexed arrays and optional curated HL7 v2.5 configuration. This remains the existing bounded sandbox script field; see FieldMappingV2 compiler metadata."
+                },
+                "responseScript": {
+                  "default": "",
+                  "type": "string",
+                  "maxLength": 65536
+                },
+                "templateScript": {
+                  "default": "",
+                  "type": "string",
+                  "maxLength": 65536,
+                  "description": "Optional retained sandbox script executed after processingScript and before outbound conversion. Receives its result as msg and can replace the final request body. This is not a template catalog or picker; legacy configuration is preserved. Failure prevents delivery and automatic retry for this unprepared message."
+                },
+                "filterScript": {
+                  "default": "",
+                  "type": "string",
+                  "maxLength": 65536,
+                  "description": "Optional sandboxed Boolean condition evaluated on a clone of the source-processed message before this destination transformer. The enabled destination receives all eligible messages when filterScript is empty or a canonical MIRTH_DESTINATION_FILTER_DISABLED_V1 retained-rule wrapper is present; the inactive rule remains stored and is not executed. Destination isEnabled remains independent. Simple conditions use canonical MIRTH_SIMPLE_CONDITION_V1 metadata and bounded own-property dotted paths, including numeric array indexes; prototype paths are denied. Operators: eq, neq, contains, startsWith, exists, notExists, gt, gte, lt, lte, isEmpty, isNotEmpty. Text comparisons use scalar string representations; numeric comparisons require finite values. isEmpty matches missing/null/empty text; isNotEmpty accepts present non-null nonempty scalar values, including zero/false. Missing/non-scalar values do not satisfy comparisons including neq. The simplified UI requires complete field/value settings for new active conditions. Existing canonical empty comparisons and legacy scripts, including literal false, retain their behavior. Corrupted reserved metadata is rejected. A mismatch creates FILTERED without a network attempt or retry. No new database field is added."
+                },
+                "isEnabled": {
+                  "default": true,
+                  "type": "boolean",
+                  "description": "False excludes this destination from runtime jobs, filter evaluation, transformation, templates and delivery. Its stored settings remain retained. Independent of whether its conditional filter is enabled."
+                },
+                "retryEnabled": {
+                  "default": false,
+                  "type": "boolean",
+                  "description": "Apply configured bounded retry only after a final payload has been prepared. Filter mismatches, preparation failures and disabled destinations never create automatic retries. Permanent HTTP 4xx except 408/429 stop automatic retry; 408/429 and 5xx use the configured policy. Uncertain transport outcomes are quarantined."
+                },
+                "maxRetries": {
+                  "default": 3,
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 10
+                },
+                "retryIntervalSeconds": {
+                  "default": 30,
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 86400
+                },
+                "timeoutMs": {
+                  "default": 10000,
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 120000
+                }
+              },
+              "required": [
+                "deliveryPolicy",
+                "name",
+                "type",
+                "endpoint",
+                "outboundDataType",
+                "processingScript",
+                "responseScript",
+                "templateScript",
+                "filterScript",
+                "isEnabled",
+                "retryEnabled",
+                "maxRetries",
+                "retryIntervalSeconds",
+                "timeoutMs"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "processingScript": {
+            "default": "",
+            "type": "string",
+            "maxLength": 65536,
+            "description": "Common source transformation script, including canonical V1/V2 visual mappings. V2 supports explicit conversions and indexed paths. Destination output format and optional curated HL7 generation belong to the per-destination transformation; no separate source-format selector is added here."
+          },
+          "responseScript": {
+            "default": "",
+            "type": "string",
+            "maxLength": 65536
+          },
+          "filterScript": {
+            "default": "",
+            "type": "string",
+            "maxLength": 65536,
+            "description": "Optional sandboxed boolean filter. Simple Field/Operator/Value conditions compile into an intact canonical MIRTH_SIMPLE_CONDITION_V1 script stored in this existing field. Supported operators: eq, neq, contains, startsWith, exists, notExists, gt, gte, lt, lte. Text operators compare string representations of scalar values; numeric operators accept only finite numbers/nonempty numeric strings. Missing/non-scalar values do not satisfy comparisons, including neq. Presence operators test own-property path existence, including existing null/empty values. Unrecognized/custom/legacy scripts are preserved; no separate condition API or database field."
+          }
+        },
+        "required": [
+          "validationProfile",
+          "idempotencyMode",
+          "name",
+          "source",
+          "destinations",
+          "processingScript",
+          "responseScript",
+          "filterScript"
+        ],
+        "additionalProperties": false,
+        "description": "Full configuration dry-run: same validation as Channel, except a bounded blank optional changeSummary is treated as absent. This does not save a revision."
       }
     }
   }

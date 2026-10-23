@@ -1,6 +1,10 @@
 import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { channelSchema, destinationSchema } from '../utils/validator.js';
+import {
+  channelPreviewSchema,
+  destinationSchema,
+  validateDestinationContentType,
+} from '../utils/validator.js';
 import { AppError } from '../utils/errors.js';
 import { audit } from './audit.services.js';
 import {
@@ -12,13 +16,16 @@ import {
 
 // Keep partial destination settings compatible for API callers. The wizard only
 // invokes this network-free preview after completing all configuration in Review.
-const previewConfiguration = channelSchema.extend({
+const previewConfiguration = channelPreviewSchema.extend({
   destinations: z
     .array(
-      destinationSchema.extend({
-        name: z.string().trim().max(150).default(''),
-        endpoint: z.string().trim().max(2048).default(''),
-      }),
+      z
+        .object({
+          ...destinationSchema.shape,
+          name: z.string().trim().max(150).default(''),
+          endpoint: z.string().trim().max(2048).default(''),
+        })
+        .superRefine(validateDestinationContentType),
     )
     .max(50),
 });

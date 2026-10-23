@@ -86,7 +86,7 @@ export function MessageValidationEditor({ value, format, onChange, showErrors }:
     <details className="advanced-section" aria-label="Source validation settings">
       <summary>Validation{configured && <small> · Configured</small>}</summary>
       <fieldset className="validation-options message-validation">
-        <legend>Message validation</legend>
+        <legend className="sr-only">Message validation</legend>
         <label className="check-field">
           <input
             type="radio"
@@ -343,7 +343,7 @@ export function MessageValidationEditor({ value, format, onChange, showErrors }:
               <textarea
                 aria-label="Custom validation schema editor"
                 spellCheck={false}
-                rows={8}
+                rows={4}
                 className="code-input"
                 value={value.customText}
                 onBlur={() => setTouched(true)}

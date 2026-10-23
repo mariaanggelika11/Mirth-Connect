@@ -4,7 +4,7 @@ import type net from 'node:net';
 const dns = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 vi.mock('node:dns/promises', () => ({ lookup: dns }));
-vi.mock('axios', () => ({ default: { post } }));
+vi.mock('axios', () => ({ default: { request: post } }));
 import { config } from '../src/config/env.js';
 import { sendRest, validateEndpoint } from '../src/utils/transport.js';
 const allowed = config.transport.allowedHosts;
@@ -19,7 +19,7 @@ describe('Destination SSRF policy', () => {
       .mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
     post.mockResolvedValue({ status: 200, data: { fixture: true } });
     await sendRest('https://receiver.example.invalid', '{}', {});
-    const options = post.mock.calls[0][2];
+    const options = post.mock.calls[0][0];
     const agent = options.httpsAgent as http.Agent;
     const pinned = agent.options.lookup as net.LookupFunction;
     pinned('receiver.example.invalid', { all: true }, (error, addresses) => {

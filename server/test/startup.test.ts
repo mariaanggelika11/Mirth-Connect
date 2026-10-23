@@ -68,7 +68,7 @@ describe('Startup migration guard', () => {
       await import('../src/server.js');
 
       expect(state.query).toHaveBeenCalledWith(
-        'SELECT version FROM "SchemaMigrations" WHERE version=7',
+        'SELECT version FROM "SchemaMigrations" WHERE version=8',
       );
       expect(state.error).toHaveBeenCalledWith(
         { code: 'STARTUP_FAILED', cause: 'MIGRATION_REQUIRED', stage: 'migration' },

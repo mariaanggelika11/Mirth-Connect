@@ -204,7 +204,8 @@ describe('Operational APIs and authorization', () => {
       .get('/api/auth/sessions')
       .set('Authorization', 'Bearer ' + token);
     expect(res.status).toBe(200);
-    expect(state.history.some((sql) => sql.includes('GROUP BY family_id'))).toBe(true);
+    expect(state.history.some((sql) => sql.includes('FROM "BrowserSessionFamilies"'))).toBe(true);
+    expect(state.history.some((sql) => sql.includes('idle_expires_at'))).toBe(true);
   });
   it('published revision creates new immutable activation and audit', async () => {
     const configuration = channelSchema.parse({

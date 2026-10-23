@@ -13,6 +13,9 @@ export function effectiveSettings() {
     session: {
       accessTokenSeconds: config.auth.uiExpiration,
       refreshTokenSeconds: config.auth.refreshExpiration,
+      absoluteTimeoutSeconds: config.auth.absoluteExpiration,
+      idleTimeoutSeconds: config.auth.idleExpiration,
+      warningSeconds: config.auth.warningSeconds,
       cookieSecure: config.production,
       cookieSameSite: 'Strict',
       csrfRequired: true,

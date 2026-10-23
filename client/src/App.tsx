@@ -14,6 +14,7 @@ import MonitorView from './features/monitor/MonitorPage';
 import ServerStatusIndicator from './features/monitor/ServerStatusIndicator';
 import OverviewPage from './features/overview/OverviewPage';
 import SettingsPage from './features/settings/SettingsPage';
+import SessionWarning from './features/auth/SessionWarning';
 export type View = 'overview' | 'channels' | 'messages' | 'settings';
 const navigation = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -50,6 +51,7 @@ export default function App() {
   const params = new URLSearchParams(route.query);
   return (
     <div className="app-shell">
+      <SessionWarning />
       <a
         href="#main-content"
         className="skip-link"

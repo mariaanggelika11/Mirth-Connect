@@ -2,6 +2,7 @@ import type { Client } from 'pg';
 import { readFile } from 'node:fs/promises';
 export const operationalTables = [
   'BrowserSessions',
+  'BrowserSessionFamilies',
   'OperationalAlerts',
   'DeadLetterCases',
   'DeliverySlots',
@@ -44,7 +45,7 @@ export async function inspectResetDatabase(client: Client, schema: string) {
       `SELECT version FROM ${quoteIdentifier(schema)}."SchemaMigrations" ORDER BY version`,
     )
   ).rows.map((r) => Number(r.version));
-  if (!versions.includes(1) || versions.some((v) => v > 7))
+  if (!versions.includes(1) || versions.some((v) => v > 8))
     throw new Error('UNSUPPORTED_RESET_SCHEMA_VERSION');
   const counts: Record<string, number> = {},
     fingerprints: Record<string, string> = {};
@@ -106,6 +107,7 @@ export async function resetToSingleAdmin(client: Client, schema: string, usernam
     '005_operational_controls.sql',
     '006_delivery_http_status.sql',
     '007_delivery_timing.sql',
+    '008_browser_session_policy.sql',
   ])
     await client.query(
       await readFile(new URL('../../migrations/' + file, import.meta.url), 'utf8'),
@@ -120,7 +122,7 @@ export async function resetToSingleAdmin(client: Client, schema: string, usernam
     throw new Error('LOGIN_PRESERVATION_VERIFICATION_FAILED');
   const after = await inspectResetDatabase(client, schema);
   if (
-    after.versions.join(',') !== '1,2,3,4,5,6,7' ||
+    after.versions.join(',') !== '1,2,3,4,5,6,7,8' ||
     operationalTables.some((t) => after.counts[t] !== 0)
   )
     throw new Error('RESET_POSTCHECK_FAILED');

@@ -1,5 +1,98 @@
 # Changelog
 
+## Explain unavailable channel deletion — 2026-10-23
+
+- Keep Delete channel visible to authorized administrators on non-archived channels; disable it with a visible, accessible reason when message history exists or the channel is not stopped. Preserve Archive, role checks and backend deletion safeguards.
+- Position the action menu using its measured height and constrain it to the viewport so the extra explanation remains visible on short screens. No API, migration or data change.
+- Improve Stop button text contrast after the running-channel accessibility check exposed its previous low-contrast label.
+
+## Preview rejects an empty optional revision summary — 2026-10-21
+
+- Fix the real wizard draft's HTTP 400 in Review & Test: omit empty changeSummary from frontend preview requests and accept bounded blank summaries as absent in preview/full dry-run for older clients. Keep the saved-channel schema and all script/format/permission limits unchanged.
+- Add safe setting-specific messages for summary/shared-script/legacy-response/idempotency validation failures. Add an isolated API regression using the actual frontend draft and the two-field JSON-to-HL7 mapping, plus negative validation and no-delivery/audit assertions.
+
+## Compact Review & Test — 2026-10-21
+
+- Show a compact responsive flow and closed configuration details. Put testing behind Test configuration — Optional, move Load sample into Input help and show results only after execution. Consolidate payload diagnostics in Processing details while retaining per-destination output, redaction, audited raw access and separate connection checks.
+- Apply required-field checks to direct wizard navigation as well as Continue/Save, returning incomplete channels to their editing step. Preserve receive-only channels, draft/publish semantics and all backend enforcement; no migration or API change.
+
+## Script help templates — 2026-10-21
+
+- Add Use template inside Script help, using the example for the current script type. Confirm before replacing nonempty custom code; Cancel preserves it. Insertion edits only the dialog, with Save Script and Save Channel still required. Sandbox, permissions and execution remain unchanged.
+
+## Destination progressive disclosure — 2026-10-21
+
+- Keep name/connector/output/endpoint in the primary form; use separate closed Transformation, Filter, Delivery and contextual HL7 settings. Retain multi-destination and advanced custom scripts; show Enabled in the saved destination header without bypassing draft/publish.
+- Collapse connector aliases to HTTP/MLLP/TCP sender labels while preserving saved REST/HL7/MLLP/TCP/RAW values. Keep HTTP overrides/retry/timeout in Delivery and capacity/circuit tuning in Expert delivery settings.
+- Show fixed HL7 v2.5 as read-only; replace the Description column with meaningful target labels and full-width row Options. Remove manual time/control-ID inputs; preserve existing overrides and offer an explicit form-only reset to generated defaults.
+- Preserve backend validation, compiled mapping/runtime, snapshots, transport security, secrets, audit and data. No API/schema/migration/dependency changes.
+
+## Transformation layout and mapping usability — 2026-10-21
+
+- Show one source/target header, compact mapping rows, inline mode choices, content-sized Add Mapping and closed per-row Options. Retain Required/default/type conversion, validation, explicit pass-through confirmation and destination-specific HL7 mapping.
+- Fix nested script dialog layout by limiting wizard body styles to its direct body. Give script dialogs a full-width editor, stable footer, optional help and shorter placeholders. Explicit button types prevent Save Script/Cancel from submitting the channel form.
+- Preserve compiled mapping bytes, saved scripts, execution/sandbox behavior and all format/test ownership. Clarify that shared mapping excludes unmapped fields. Make the Channels table scroll region keyboard-focusable after a mobile accessibility check exposed the empty-table case.
+
+## Source layout alignment — 2026-10-21
+
+- Start Source directly with Channel name, connector and inbound format. Show endpoint/key controls only after Save; expose the actual endpoint directly in Channel saved before key setup, keeping one-time key display/rotation and protected synthetic send unchanged.
+- Keep one closed Advanced with Validation and Filter only. Move legacy source response notice to Review details without changing its stored script or runtime. Remove the duplicate visible validation heading, shorten the schema editor and collapse source path help.
+- Report Filter Off / Needs configuration / Configured from actual validity. Add concise shared MLLP routing guidance. No backend, API, dependency, migration or data changes.
+
+## Remove Source sample panel — 2026-10-21
+
+- Remove Sample message, example loading, field analysis and their wizard-only state/refresh controls from Source. Keep test input and Load sample only in Review & Test.
+- Keep direct source/target mapping, HL7 target selection, core pipeline/security and the protected discovery API. Delete the unused SourceSample component/styles; retain synthetic Review fixtures in testSamples.ts. No API, migration or data changes.
+
+## Compact destination connection form — 2026-10-21
+
+- Show Destination name, Connector, Outbound format and Endpoint, followed by one closed Advanced destination settings. Move HL7 type/version/mapping into Advanced without duplicating or resetting the transformer. Keep transport-specific Host/Port/TLS for MLLP and Add Destination.
+- Remove Authentication/Custom Headers/environment-slot editors from the UI. Preserve saved authentication/header metadata and backend enforcement; keep HTTP method and Content-Type under Delivery settings. No database migration or data reset.
+- Verify compact desktop/mobile layout, keyboard/Axe, exact saved mapping retention, delivery error focus and authentication/header retention using synthetic fixtures. Current command results are recorded in the [follow-up audit](docs/UI_SIMPLIFICATION_AUDIT.md#compact-destination-follow-up--2026-10-21).
+
+## Channel wizard UX cleanup — 2026-10-21
+
+- Keep Source → Transformation → Destinations → Review & Test. Hide unassigned source URLs, shorten API-key guidance, restore safe Copy Endpoint for saved channels, and show optional sample fields only after analysis. Samples stay in form memory.
+- Give shared transformation one UI entry in Step 2: No transformation by default, Modify fields on demand, saved mappings/scripts preserved, confirmation before clearing. Remove the duplicate Source Advanced transformer shortcut while retaining its existing runtime stage.
+- Merge destination technical controls into one Advanced section with flat authentication/processing/delivery groups. Keep HL7 mapping inline; open other mappings inline without a second configuration dialog. Preserve environment secret references, filters, legacy output scripts, retry, capacity and circuit settings. Default values no longer produce a Customized badge.
+- Report field-specific HTTP/header/delivery validation after touch or a failed attempt; reveal and focus invalid controls without clearing saved overrides. Keep stable accessible names and backend validation. Use one scrolling wizard body with navigation/footer visible and concise Review summary/Run Test/result; details remain available.
+- Verification: **731 unit/API tests / 47 files**, **108 browser cases**, unchanged coverage **87.44/85.59/89.74/88.47%** statements/branches/functions/lines; typecheck, lint, format, client/server build, OpenAPI structure, targeted working-tree secret scan and local link/diff checks pass. Native PostgreSQL, other browser engines and hospital UAT were not tested in this UI task. Details: [wizard cleanup audit](docs/UI_SIMPLIFICATION_AUDIT.md#full-channel-wizard-cleanup--2026-10-21).
+
+## Compact destination HL7 mapping — 2026-10-21
+
+- Keep the four-step wizard; shared Step 2 mapping remains optional and untouched blank rows are ignored. HL7 destination configuration is inline with only type/version and a flat source/target/description table. One shared field picker opens a searchable component tree on demand, closes after selection and restores keyboard focus; explicit indexed paths remain available.
+- Collapse header/custom script fields under Advanced HL7 Settings. Hide duplicate destination transformer controls for HL7; HTTP method/content type/authentication/header references move into HTTP request options. Preserve existing mappings, sandbox scripts, filters, transport settings and all per-destination pipeline stages.
+- New JSON/XML PID-7 selections use the existing strict ISO date conversion; saved conversions stay intact. PID-5 retains full scalar text in component 1 without inferring name parts. Backend compiler/runtime and database schema are unchanged.
+- Review shows output/status first; stage diagnostics remain available in Advanced. Copy Output copies only the authorized preview already received, preserving redaction and CR bytes.
+- Verification: **711 unit/API tests / 46 files**, **104 browser cases**, unchanged **87.44/85.59/89.74/88.47%** statements/branches/functions/lines coverage; typecheck, lint, format, client/server build, OpenAPI structure and targeted working-tree secret scan pass. Native PostgreSQL/hospital runtime were not tested in this UI task. Details: [UI audit](docs/UI_SIMPLIFICATION_AUDIT.md#compact-hl7-destination-ui--2026-10-21).
+
+## Enforce browser session inactivity and absolute expiry — 2026-10-21
+
+- Set browser defaults to a 15-minute idle deadline, one-minute warning and maximum eight-hour lifetime since login; keep memory-only access JWTs at five minutes. Cap legacy seven-day refresh configuration at the absolute limit. Authenticate every browser JWT/refresh/activity against locked family state; polling/refresh never updates last activity, and expired families cannot be revived.
+- Add transactional/repeatable migration 008 with `BrowserSessionFamilies`, index/FK and one-time revocation of legacy sessions without deleting business/token/audit history. Update startup/preflight/reset/restore/runtime tooling to schema 1–8. Browser login/refresh/`/me` expose safe deadlines; authenticated+CSRF activity is bound to the current cookie/family and uses server time. Expiry/reuse/logout/manual revoke invalidate family and rotated rows with audit; legacy Bearer automation and source channel keys retain separate behavior.
+- Add accessible Session expiring / Continue session / Sign out UI, server/monotonic countdown, resume checks, trusted throttled activity and cross-tab logout. Serialize auth mutations, ignore late responses/stale 401, persist credential-free logout intent with cookie fallback, disable silent restore when storage is unavailable, and offer Retry sign out when revocation fails. Session list uses idle/absolute expiry. Background refresh/activity rotation races fail safely.
+- Keep strict credential brute-force budget 20/minute/IP across aliases; separate session maintenance 300/minute/IP and logout 60/minute/IP so polling cannot exhaust login/logout budgets. All scopes remain bounded. Add actual limiter negative tests.
+- Verification: **706 tests / 46 files**, **102 browser tests**, typecheck/lint/format/build, OpenAPI structure (49 paths / 53 operations), targeted source secret scan and local links/diff pass. Coverage **87.44/85.59/89.74/88.47%** statements/branches/functions/lines, up from 86.64/85.26/88.69/87.44. Browser virtual-time tests cover 15-minute / 8-hour / 3-day boundaries, active use, cross-tab, failed logout/storage disabled/race, and warning Axe checks; persistence remains isolated.
+- Latest **29-case PostgreSQL suite and migration 008 runtime NOT TESTED** locally; no disposable Postgres/Docker tools available. No live environment/database modification, deploy, commit or push. Schema 8 must be migrated with verified backup before restart; all legacy browser users then sign in again. See [session policy/rollout](docs/OPERATIONAL_CONTROLS.md#browser-session-policy--21-october-2026), [manual](docs/MIRTH_LITE_UI.md#browser-session-timeout--21-october-2026) and [actual verification report](docs/UI_SIMPLIFICATION_AUDIT.md#browser-session-hardening--2026-10-21).
+
+## Field discovery, HL7 V2 mapping and real format delivery — 2026-10-18
+
+- Keep Source → Transformation → Destinations → Review & Test. Add one reusable searchable/keyboard field tree and picker for JSON objects/arrays, XML elements/attributes and HL7 segments/components/repetitions. Optional Source synthetic samples discover fields through a permission-checked/audited endpoint; sample values are not persisted or returned in discovery metadata.
+- Extend the existing sandbox mapping compiler with canonical V2 metadata, strict type/date conversions, required/default behavior and safe inline errors. Preserve V1 generated bytes and legacy scripts. Configure four curated HL7 v2.5 profiles per destination: ADT A04/A01, ORU R01 and ORM O01. Reuse the existing HL7 serializer/parser, generated UUID/explicit UTC timestamps and validated header/profile rules. This is a tested subset, not complete HL7 or hospital conformance.
+- Expose working REST POST/PUT/PATCH, compatible media types and per-ID server environment references for Basic/Bearer/custom headers. Keep credential values out of configuration/API/preview. Reject invalid final header values before transport without a fake attempt or retry; preserve UTF-8 Basic through Base64. MLLP uses Host/Port/TLS and correlated framed ACK handling. Optional advanced destination conditions remain sandboxed.
+- Review uses the same engine pipeline and shows actual output per destination, parsed input and a metadata-only HL7 tree. XML/HL7 parsed values remain fully redacted by default; raw requires existing permission/audit. Discovery and dry-run do not send a message. Explicit custom-script replacement preserves V2 mappings on cancel.
+- Verification: **656 tests / 42 files**, **94 browser tests**, typecheck/lint/format/build, OpenAPI structure (48 paths/52 operations), targeted source secret scan and diff/link checks PASS. Coverage **86.64/85.26/88.69/87.44%** statements/branches/functions/lines, above the preceding Destination baseline. Real local HTTP/MLLP receivers prove eight format pairs, isolated destinations, method/auth headers, preview parity and ACK/non-delivery failures; persistence is a stateful fixture. Two passing screenshot cases were recaptured separately.
+- No new migration/dependency, live database/environment modification, commit or push. The latest 24-case PostgreSQL suite is extended but **NOT TESTED** locally; Docker, deployed runtime, hospital UAT/load/security/backup/DR qualification remains outstanding. See [implementation audit](docs/UI_SIMPLIFICATION_AUDIT.md#field-explorer-hl7-and-format-integration--2026-10-18) and [manual / downgrade constraints](docs/MIRTH_LITE_UI.md#field-discovery-v2-mapping-and-hl7--18-october-2026).
+
+## Simplify and enforce destination filtering and transformation — 2026-10-18
+
+- Replace the destination filter mode dropdown with Enable destination filter and the existing safe condition builder. OFF retains the exact saved rule; disabled destination and enabled filter remain separate. Preserve legacy scripts read-only with explicit replacement. Correct legacy bare false evaluation so it cannot fall through to unconditional delivery.
+- Reuse the visual mapping editor per destination with isolated input, required/default/path validation, invalid-edit retention and optional sandbox scripts. Preserve the pipeline: Source validation/filter/transformer → destination filter/transformer → legacy output script → converter → sender. Remove Add template for new configurations; retain and explain existing output scripts inside transformation settings.
+- Separate preparation outcomes from transport attempts. Filtered/error preparation creates no network log or retry; final output and encrypted preparation_version:1 snapshot become available atomically after successful conversion. Resend/retry rejects unprepared or unprovable historical work, and sends only stored final payload. Preserve legacy transport/admission evidence and ambiguous-outcome reconciliation. Exclude known endpoint/host/address pre-network rejections from network timing/counts and automatic retry. Treat HTTP 4xx other than 408/429 as permanent; keep transient retry settings unchanged.
+- Validate final XML and XML→JSON against bounded parsing and DTD/entity denial; preserve valid raw XML bytes. Review shows per-destination matched/disabled/not-run/not-sent stages. Messages adds safe processing outcomes and actual or unknown attempt counts, without labeling historic processing-only events as delivery. No schema migration, reset, live configuration rewrite or new dependency.
+- Verification on development based on 30ceaa5: 529 unit/API/integration tests across 37 files and 82 browser tests PASS. Actual loopback receivers prove JSON→XML/XML→JSON payload/content type, mapping/preview parity, isolated destinations, filter/non-delivery, retry and preparation/resend guards (database is mocked). Coverage rises from 85.61/83.31/87.24/86.40 to 86.27/84.15/87.81/87.10 statements/branches/functions/lines. Typecheck, lint, format, production builds, OpenAPI structural check and targeted source secret scan PASS.
+- Real PostgreSQL test scenarios were extended but NOT TESTED locally because PostgreSQL/Docker tools are unavailable. Live legacy inventory, deployed-server verification, hospital UAT and production load/security review remain NOT TESTED. Stop/drain/reconcile work before binary downgrade; old binaries lack the new resend guard. See the destination audit and manual for compatibility, actual failures corrected, screenshots and rollout limits.
+
 ## Make Source Message Validation explicit and enforceable — 2026-10-18
 
 - Audit before implementation verified Basic syntax adds no field requirements, XML/HL7 parsing already applies without it, and legacy JSON-object Basic has separate semantics. Custom previously expected an internal profile wrapper; a bare JSON Schema could be stripped to an empty profile on save. Keep precise legacy behavior while rejecting unknown active profile keys.

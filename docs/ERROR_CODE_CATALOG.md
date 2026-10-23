@@ -6,6 +6,8 @@ Errors return success=false, code, safe message and requestId; central handler a
 | --- | --- |
 | NO_TOKEN / TOKEN_INVALID / TOKEN_EXPIRED | 401; missing/invalid/expired Bearer |
 | SESSION_INVALID | 401; refresh expired/revoked/reused or csrf mismatch |
+| SESSION_IDLE_EXPIRED | 401; browser family exceeded its inactivity deadline; revoked and audited, explicit activity cannot revive it |
+| SESSION_ABSOLUTE_EXPIRED | 401; browser family reached its fixed maximum lifetime since login; revoked and audited, fresh login required |
 | CSRF_REJECTED | 403; cookie request not verified |
 | FORBIDDEN / RAW_PAYLOAD_DENIED | 403; permission insufficient |
 | IDEMPOTENCY_KEY_REQUIRED / INVALID_IDEMPOTENCY_KEY | 400; required key absent or malformed |
@@ -30,13 +32,31 @@ Errors return success=false, code, safe message and requestId; central handler a
 | DESTINATION_HOST_DENIED / DESTINATION_ADDRESS_DENIED | 403; outbound policy |
 | FIELD_VALIDATION_FAILED | 422; input field rules rejected the payload, safe details contain field/type/reason only, IN-ERROR and no delivery |
 | INVALID_FIELD_RULES / INVALID_VALIDATION_PROFILE / VALIDATION_FORMAT_UNSUPPORTED | 400; incomplete/unsupported rule configuration or incompatible input format, never treated as payload success |
-| FILTER_CONFIG_INVALID | 422; corrupted reserved source filter metadata; IN-ERROR, no delivery |
+| FILTER_CONFIG_INVALID | 422; corrupted reserved source/destination filter metadata; source fails IN-ERROR, destination fails preparation without delivery |
+| FILTER_RESULT_INVALID | 422; an enabled filter returned a non-Boolean value; no delivery for the affected source/destination |
+| DESTINATION_NOT_PREPARED | 409; retry/resend cannot verify a saved final body, or historical evidence indicates preparation failed; reconcile before submitting a new message |
+| INVALID_DELIVERY_SNAPSHOT | 409; saved connector cannot be decrypted or parsed; no resend occurs |
+| FIELD_DISCOVERY_INVALID | 400; unsupported format, missing sample or invalid discovery request shape |
+| FIELD_DISCOVERY_FAILED / SAMPLE_INVALID | 422; sample parsing/source transformation could not produce a safe field explorer; no destination was contacted |
+| FIELD_MAPPING_CONFIG_INVALID | 422; altered/noncanonical reserved V2 generated mapping metadata or body is rejected before sandbox execution or delivery; restore/recompile the mapping or replace it with a complete custom transformation script |
+| FIELD_MAPPING_REQUIRED | 422; a configured source path is missing/empty after applying its default, with safe source/target path guidance |
+| FIELD_MAPPING_CONVERSION | 422; explicit number/Boolean/date conversion failed; guidance states the expected conversion without returning the value |
+| FIELD_MAPPING_TARGET / FIELD_MAPPING_RESULT_INVALID / FIELD_MAPPING_FAILED | 422; conflicting target structure, invalid generated result envelope or bounded mapping failure |
+| HL7_PROFILE_REQUIRED / HL7_PROFILE_DATE / HL7_PROFILE_CODE / HL7_PROFILE_IDENTIFIER | 422; generated v2.5 message violates a selected curated profile field/date/code/identifier rule; safe configured HL7 field guidance |
+| HTTP_CONFIG_INVALID | 422 diagnostic; method/header/content-type configuration invalid or incompatible with outbound format; no HTTP request or automatic retry |
+| DESTINATION_CREDENTIAL_MISSING | 422 diagnostic; the destination-scoped environment credential is absent, oversized or contains forbidden control characters; values are never returned |
 | SCRIPT_TIMEOUT / SCRIPT_EXECUTION_FAILED / SCRIPT_CAPACITY | sandbox/time/capacity diagnostic |
 | TRANSFORMATION_PREVIEW_INVALID / DRY_RUN_INVALID | 400; invalid test configuration identifies the affected source/destination setting without echoing input |
 | PAYLOAD_TOO_LARGE / UPLOAD_LIMIT | body/upload exceeded bound |
 | INTERNAL_ERROR | 500; internal details withheld |
 
 Delivery diagnostics such as DELIVERY_OUTCOME_UNKNOWN, DESTINATION_CIRCUIT_OPEN, DELIVERY_CAPACITY and RESPONSE_SCRIPT_FAILED_AFTER_DELIVERY appear in message metadata. Response-script failure after accepted delivery never triggers automatic network resend. TCP_WRITE_COMPLETE means socket write completed; it does not prove application acceptance.
+
+Destination preparation uses the existing OUT-ERROR state and a bounded internal `last_error` diagnostic: `DESTINATION_FILTER_ERROR:<CODE>`, `DESTINATION_TRANSFORM_ERROR:<CODE>`, `DESTINATION_TEMPLATE_ERROR:<CODE>` or `DESTINATION_CONVERSION_ERROR:<CODE>`. Message detail projects the stage and safe code through `destinationOutcomes`; it never returns script exceptions or payload values as error guidance. These preparation outcomes create no transport attempt log or retry. FILTERED is a non-delivery decision, and disabled destinations run no preparation stage.
+
+`HTTP_400`–`HTTP_499` other than `HTTP_408`/`HTTP_429` are permanent delivery failures and stop automatic retry. HTTP 408/429 and 5xx use the configured retry limits. A transport timeout can be reported as `DESTINATION_TIMEOUT` or the safe Axios code `ECONNABORTED`; uncertain transport outcomes are quarantined as DEAD_LETTER rather than automatically repeated. HTTP response status and duration are recorded only when observed.
+
+Known local HTTP configuration/credential and endpoint-policy failures are DELIVERY_REJECTION events with `networkAttempted=false`, no HTTP status and no transport duration. Their safe codes may be retained in destination metadata while the inbound HTTP request reports its existing aggregate MESSAGE_PROCESSING_FAILED envelope; a diagnostic's originating status is not an invented response from the destination. Dry-run does not resolve credential environment values and cannot verify receiver authentication.
 
 
 Follow-up operational control errors:

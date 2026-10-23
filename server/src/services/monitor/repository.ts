@@ -1,10 +1,17 @@
 import { getConnection } from '../../config/db.js';
 import { AppError } from '../../utils/errors.js';
-import type { MonitorRow, DestinationLogRow } from './mapping.js';
+import type { MonitorRow, DestinationLogRow, DestinationOutcomeRow } from './mapping.js';
 import type { MonitorQuery } from './query.js';
 // Compute before pagination so every visible attempt has the same complete-history count.
 // Admission waits were historically stored as OUT-ERROR; they are not network attempts.
-const attemptCountSql = `CASE WHEN COUNT(*) FILTER(WHERE l.request_duration_ms IS NULL AND l.status<>'QUEUED' AND NOT(l.status='OUT-ERROR' AND l.http_status IS NULL AND l.ack_code IS NULL AND COALESCE(l.response_text,'') IN ('DESTINATION_CIRCUIT_OPEN','DELIVERY_CAPACITY','DELIVERY_ALREADY_ACTIVE'))) OVER(PARTITION BY l.message_id)=0 THEN NULLIF(COUNT(*) FILTER(WHERE l.request_duration_ms IS NOT NULL) OVER(PARTITION BY l.message_id),0) ELSE NULL END attempt_count`;
+const rejectionSql = `(l.status IN ('OUT-ERROR','QUEUED') AND l.http_status IS NULL AND l.ack_code IS NULL AND COALESCE(l.response_text,'') IN ('INVALID_ENDPOINT','DESTINATION_HOST_DENIED','DESTINATION_ADDRESS_DENIED','DESTINATION_CREDENTIAL_MISSING','HTTP_CONFIG_INVALID'))`;
+const networkSql = `(NOT ${rejectionSql} AND (l.request_duration_ms IS NOT NULL OR l.http_status IS NOT NULL OR COALESCE(l.ack_code IN ('AA','AE','AR'),false)))`;
+const admissionSql = `(l.status IN ('OUT-ERROR','QUEUED') AND COALESCE(l.response_text,'') IN ('DESTINATION_CIRCUIT_OPEN','DELIVERY_CAPACITY','DELIVERY_ALREADY_ACTIVE'))`;
+const preparationSql = `(l.status='OUT-ERROR' AND COALESCE(l.response_text,'') ~ '^(SCRIPT_|FIELD_MAPPING_|FILTER_|XML_|INVALID_HL7(_|$)|DESTINATION_(FILTER|TRANSFORM|TEMPLATE|CONVERSION)_ERROR:)')`;
+const nonNetworkSql = `(l.status='FILTERED' OR ${admissionSql} OR ${rejectionSql} OR ${preparationSql})`;
+// List queries project a controlled event label, never a response body or script exception.
+const processingEventSql = `CASE WHEN ${rejectionSql} THEN 'DELIVERY_REJECTION' WHEN ${admissionSql} THEN 'ADMISSION_WAIT' WHEN ${preparationSql} THEN 'PREPARATION_FAILURE' ELSE NULL END processing_event`;
+const attemptCountSql = `CASE WHEN COUNT(*) FILTER(WHERE NOT ${networkSql} AND NOT ${nonNetworkSql}) OVER(PARTITION BY l.message_id)=0 THEN COUNT(*) FILTER(WHERE ${networkSql}) OVER(PARTITION BY l.message_id) ELSE NULL END attempt_count`;
 export async function listMessages(q: MonitorQuery) {
   const pool = await getConnection();
   const r = pool
@@ -31,7 +38,7 @@ export async function listMessages(q: MonitorQuery) {
           .request()
           .input('ids', ids.join(','))
           .query<DestinationLogRow>(
-            `WITH latest AS (SELECT l.id,l.message_id,l.destination_id,l.status,l.http_status,l.request_duration_ms,l.sent_at,${attemptCountSql},ROW_NUMBER() OVER(PARTITION BY l.message_id ORDER BY l.id DESC) rn FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id WHERE o.inbound_message_id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[])) OR o.id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[]))) SELECT l.*,d.name destination_name,o.inbound_message_id,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING' AND d.is_enabled=true AND d.is_deleted=false) retry_eligible FROM latest l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE l.rn=1 ORDER BY l.id DESC`,
+            `WITH latest AS (SELECT l.id,l.message_id,l.destination_id,l.status,l.http_status,l.request_duration_ms,l.sent_at,${processingEventSql},${attemptCountSql},ROW_NUMBER() OVER(PARTITION BY l.message_id ORDER BY l.id DESC) rn FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id WHERE o.inbound_message_id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[])) OR o.id IN (SELECT unnest(string_to_array(@ids, ',')::bigint[]))) SELECT l.*,d.name destination_name,o.inbound_message_id,o.last_error delivery_error,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING' AND d.is_enabled=true AND d.is_deleted=false) retry_eligible FROM latest l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE l.rn=1 ORDER BY l.id DESC`,
           )
       ).recordset
     : [];
@@ -59,10 +66,27 @@ export async function listDeliveryLogs(id: number, logPage: number, logPageSize:
       .input('offset', (logPage - 1) * logPageSize)
       .input('limit', logPageSize + 1)
       .query<DestinationLogRow>(
-        `SELECT l.*,${attemptCountSql},o.transport_config,d.name destination_name,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING' AND d.is_enabled=true AND d.is_deleted=false) retry_eligible FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE o.inbound_message_id=@id OR o.id=@id ORDER BY l.id DESC LIMIT @limit OFFSET @offset`,
+        `SELECT l.*,${attemptCountSql},o.transport_config,o.last_error delivery_error,d.name destination_name,(o.status IN ('OUT-ERROR','DEAD_LETTER') AND o.transport_config IS NOT NULL AND c.status='RUNNING' AND d.is_enabled=true AND d.is_deleted=false) retry_eligible FROM "MessageDestinationLog" l JOIN "Messages" o ON o.id=l.message_id JOIN "Channels" c ON c.id=o.channel_id LEFT JOIN "Destinations" d ON d.id=l.destination_id WHERE o.inbound_message_id=@id OR o.id=@id ORDER BY l.id DESC LIMIT @limit OFFSET @offset`,
       )
   ).recordset;
   return logs;
+}
+export async function listDestinationOutcomes(id: number) {
+  const pool = await getConnection();
+  return (
+    await pool
+      .request()
+      .input('id', id)
+      .query<DestinationOutcomeRow>(
+        `SELECT o.id,o.destination_id,o.status,o.last_error,o.transport_config,o.updated_at,d.name destination_name,
+      COUNT(l.id) FILTER(WHERE ${networkSql}) recorded_attempts,
+      COUNT(l.id) FILTER(WHERE l.id IS NOT NULL AND NOT ${networkSql} AND NOT ${nonNetworkSql}) unknown_attempts,
+      COALESCE(BOOL_OR(${admissionSql}),false) admission_recorded
+      FROM "Messages" o LEFT JOIN "Destinations" d ON d.id=o.destination_id LEFT JOIN "MessageDestinationLog" l ON l.message_id=o.id
+      WHERE o.direction='OUT' AND (o.inbound_message_id=@id OR o.id=@id)
+      GROUP BY o.id,d.name ORDER BY o.id LIMIT 50`,
+      )
+  ).recordset;
 }
 export async function messageStats(today: Date) {
   const pool = await getConnection();

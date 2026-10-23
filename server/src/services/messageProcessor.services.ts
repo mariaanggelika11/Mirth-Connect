@@ -2,7 +2,12 @@ import { serialize, convertPayload } from './engine/conversion.js';
 import { persistValidationFailure } from '../utils/validationDiagnostics.js';
 import { validatePayload, FieldValidationError } from './profileValidation.services.js';
 import { attempt } from './engine/delivery.js';
-import { recordAttempt, updateAggregate } from './engine/repository.js';
+import { recordPreparation, updateAggregate } from './engine/repository.js';
+import {
+  preparationFailure,
+  preparedDestination,
+  type PreparationStage,
+} from './engine/preparation.js';
 export { finalStatus, retryDecision } from './engine/policy.js';
 export { updateAggregate } from './engine/repository.js';
 import { randomUUID, createHash } from 'node:crypto';
@@ -10,7 +15,7 @@ import { getConnection, withTransaction } from '../config/db.js';
 import { executeScript } from './script.services.js';
 import { hl7ToJson, parseSegments } from '../utils/hl7Converer.js';
 import { AppError, safeError } from '../utils/errors.js';
-import { encrypt, decrypt } from '../utils/secrets.js';
+import { encrypt } from '../utils/secrets.js';
 import { increment, observe, gauge } from '../utils/runtimeMetrics.js';
 import { config } from '../config/env.js';
 import { requestDigest, releasableReservation } from '../utils/idempotency.js';
@@ -292,10 +297,9 @@ async function processInboundCore(
             .input('type', dest.outbound_data_type)
             .input('payload', serialize(transformed))
             .input('correlation', correlationId)
-            .input('snapshot', encrypt(serialize(dest)))
             .input('revision', channel.active_revision || null)
             .query(
-              `INSERT INTO "Messages"(channel_id,destination_id,inbound_message_id,direction,message_type,original_payload,transformed_payload,status,correlation_id,transport_config,channel_revision,lease_until,created_at) VALUES(@channel,@dest,@parent,'OUT',@type,@payload,@payload,'PROCESSING',@correlation,@snapshot,@revision,(CURRENT_TIMESTAMP + (300)::double precision * INTERVAL \'1 second\'),CURRENT_TIMESTAMP) RETURNING *`,
+              `INSERT INTO "Messages"(channel_id,destination_id,inbound_message_id,direction,message_type,original_payload,transformed_payload,status,correlation_id,transport_config,channel_revision,lease_until,created_at) VALUES(@channel,@dest,@parent,'OUT',@type,@payload,@payload,'PROCESSING',@correlation,NULL,@revision,(CURRENT_TIMESTAMP + (300)::double precision * INTERVAL \'1 second\'),CURRENT_TIMESTAMP) RETURNING *`,
             )
         ).recordset[0] as StoredMessage;
         jobs.push({ message: row, dest });
@@ -305,12 +309,13 @@ async function processInboundCore(
     const outboundResults = [];
     for (const { message, dest } of jobs) {
       let outbound = structuredClone(transformed);
+      let stage: PreparationStage = 'filter';
       try {
         if (
           dest.filter_script?.trim() &&
           !(await executeScript(dest.filter_script, { msg: outbound }, 'true'))
         ) {
-          await recordAttempt(message, dest, 'FILTERED', 'FILTERED', null, null, 0);
+          await recordPreparation(message, dest, 'FILTERED', null);
           outboundResults.push({
             destinationId: dest.id,
             outboundMessageId: message.id,
@@ -318,20 +323,20 @@ async function processInboundCore(
           });
           continue;
         }
+        stage = 'transformation';
         if (dest.processing_script?.trim())
           outbound = await executeScript(dest.processing_script, { msg: outbound });
+        stage = 'template';
         if (dest.template_script?.trim())
           outbound = await executeScript(dest.template_script, { msg: outbound });
+        stage = 'conversion';
         outbound = await convertPayload(outbound, dest.outbound_data_type);
       } catch (error) {
-        await recordAttempt(
+        await recordPreparation(
           message,
           dest,
           'OUT-ERROR',
-          safeError(error),
-          safeError(error),
-          null,
-          0,
+          preparationFailure(stage, safeError(error)),
         );
         outboundResults.push({
           destinationId: dest.id,
@@ -341,11 +346,22 @@ async function processInboundCore(
         continue;
       }
       message.transformed_payload = serialize(outbound);
-      await pool
+      message.transport_config = encrypt(serialize({ ...dest, preparation_version: 1 }));
+      const prepared = await pool
         .request()
         .input('id', message.id)
         .input('payload', message.transformed_payload)
-        .query('UPDATE "Messages" SET transformed_payload=@payload WHERE id=@id');
+        .input('snapshot', message.transport_config)
+        .input('owner', message.lease_owner || null)
+        .query(
+          `UPDATE "Messages" SET transformed_payload=@payload,transport_config=@snapshot,updated_at=CURRENT_TIMESTAMP WHERE id=@id AND lease_owner=@owner AND status='PROCESSING'`,
+        );
+      if (prepared.rowsAffected && prepared.rowsAffected[0] !== 1)
+        throw new AppError(
+          409,
+          'DELIVERY_LEASE_LOST',
+          'Delivery lease changed before payload preparation completed',
+        );
       outboundResults.push(await attempt(message, dest, 0));
     }
     const inboundStatus = await updateAggregate(inboundMessageId);
@@ -391,22 +407,48 @@ async function processInboundCore(
     observe('processing_seconds', (performance.now() - started) / 1000);
   }
 }
-export async function processRetry(message: StoredMessage) {
-  const dest = JSON.parse(decrypt(message.transport_config)) as Destination;
+export async function processRetry(message: StoredMessage & { last_error?: string }) {
+  let dest: Destination;
+  try {
+    dest = await preparedDestination(message);
+  } catch (error) {
+    const pool = await getConnection();
+    await pool
+      .request()
+      .input('id', message.id)
+      .input('owner', message.lease_owner || null)
+      .input('error', safeError(error))
+      .query(
+        `UPDATE "Messages" SET status='OUT-ERROR',last_error=@error,transport_config=NULL,next_retry_at=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=@id AND lease_owner=@owner AND status='RETRYING'`,
+      );
+    await updateAggregate(message.inbound_message_id);
+    throw error;
+  }
   const result = await attempt(message, dest, message.retry_count + 1);
   await updateAggregate(message.inbound_message_id);
   return result;
 }
 export async function resendMessage(id: number) {
-  const pool = await getConnection();
-  const row = (
-    await pool
-      .request()
-      .input('id', id)
-      .query(
-        `UPDATE "Messages" SET status='RETRYING',lease_owner=gen_random_uuid()::text,lease_until=(CURRENT_TIMESTAMP + (300)::double precision * INTERVAL \'1 second\') WHERE id=@id AND direction='OUT' AND status IN ('OUT-ERROR','DEAD_LETTER') AND destination_id IS NOT NULL AND transport_config IS NOT NULL AND EXISTS(SELECT 1 FROM "Destinations" d WHERE d.id="Messages".destination_id AND d.is_enabled=true AND d.is_deleted=false) AND EXISTS(SELECT 1 FROM "Channels" c WHERE c.id="Messages".channel_id AND c.status='RUNNING') RETURNING *`,
-      )
-  ).recordset[0] as StoredMessage | undefined;
+  const row = await withTransaction(async (tx) => {
+    const candidate = (
+      await tx
+        .request()
+        .input('id', id)
+        .query(
+          `SELECT * FROM "Messages" WHERE id=@id AND direction='OUT' AND status IN ('OUT-ERROR','DEAD_LETTER') AND destination_id IS NOT NULL AND transport_config IS NOT NULL AND EXISTS(SELECT 1 FROM "Destinations" d WHERE d.id="Messages".destination_id AND d.is_enabled=true AND d.is_deleted=false) AND EXISTS(SELECT 1 FROM "Channels" c WHERE c.id="Messages".channel_id AND c.status='RUNNING') FOR UPDATE`,
+        )
+    ).recordset[0] as StoredMessage | undefined;
+    if (!candidate) return undefined;
+    await preparedDestination(candidate, tx);
+    return (
+      await tx
+        .request()
+        .input('id', id)
+        .query(
+          `UPDATE "Messages" SET status='RETRYING',lease_owner=gen_random_uuid()::text,lease_until=(CURRENT_TIMESTAMP + (300)::double precision * INTERVAL \'1 second\') WHERE id=@id AND status IN ('OUT-ERROR','DEAD_LETTER') RETURNING *`,
+        )
+    ).recordset[0] as StoredMessage | undefined;
+  });
   if (!row)
     throw new AppError(
       409,

@@ -1,11 +1,14 @@
 import type { ValidationRuleResult } from '../../../../server/src/utils/validationRules';
 import { ValidationResults } from '../../components/ui/ValidationResults';
+import { PayloadPreview } from './PayloadPreview';
+import type { FieldOption } from '../../components/ui/FieldExplorer';
 
 export interface DryRunResult {
   success: boolean;
   accepted: boolean;
   elapsedMs: number;
   input?: { format: string; payload: unknown };
+  parsedInput?: { format: string; payload: unknown };
   source?: {
     format: string;
     payload: unknown;
@@ -30,6 +33,9 @@ export interface DryRunResult {
     message?: string;
     elapsedMs?: number;
     stages?: Record<string, string>;
+    fieldTree?: FieldOption[];
+    enabled?: boolean;
+    delivery?: 'NOT_SENT' | 'FILTERED' | 'DISABLED' | 'SOURCE_FILTERED' | 'NOT_SENT_ERROR';
   }[];
 }
 function payloadText(value: unknown) {
@@ -46,7 +52,69 @@ export const previewStageLabels: Record<string, string> = {
   CONVERTED: 'Converted',
   NOT_CONFIGURED: 'Not configured',
   ERROR: 'Failed',
+  BYPASSED: 'Disabled',
+  MATCHED: 'Matched',
+  NOT_MATCHED: 'Not matched',
+  NOT_RUN: 'Not run',
+  UNKNOWN: 'Not recorded',
+  NOT_SENT: 'Not sent (dry-run)',
+  DISABLED: 'Destination disabled',
+  SOURCE_FILTERED: 'Source filtered',
+  NOT_SENT_ERROR: 'Not sent · processing failed',
 };
+export function destinationPreviewReason(destination: DryRunResult['results'][number]) {
+  if (destination.delivery === 'DISABLED')
+    return 'This destination is disabled. Its filter and transformation were not run.';
+  if (destination.delivery === 'SOURCE_FILTERED')
+    return 'The source filter stopped this message before destination processing.';
+  if (destination.delivery === 'FILTERED' || destination.stages?.filter === 'NOT_MATCHED')
+    return 'The condition did not match. No message was sent to this destination.';
+  return 'This destination did not route the message. Check its enabled state and filter.';
+}
+export function DestinationStageSummary({
+  destination,
+  detailed = false,
+}: {
+  destination: DryRunResult['results'][number];
+  detailed?: boolean;
+}) {
+  if (!destination.stages && destination.enabled === undefined && !destination.delivery)
+    return null;
+  const stages = Object.entries(destination.stages || {}).filter(
+    ([name, status]) =>
+      detailed ||
+      name === 'filter' ||
+      name === 'transformation' ||
+      (name === 'template' && !['NOT_CONFIGURED', 'SKIPPED'].includes(status)),
+  );
+  return (
+    <dl
+      className="definition-list"
+      aria-label={`Processing results: ${destination.name || 'Destination'}`}
+    >
+      {destination.enabled !== undefined && (
+        <div>
+          <dt>Destination</dt>
+          <dd>{destination.enabled ? 'Enabled' : 'Disabled'}</dd>
+        </div>
+      )}
+      {stages.map(([name, status]) => (
+        <div key={name}>
+          <dt>{name.charAt(0).toUpperCase() + name.slice(1)}</dt>
+          <dd>{previewStageLabels[status] || status}</dd>
+        </div>
+      ))}
+      <div>
+        <dt>Delivery</dt>
+        <dd>
+          {destination.delivery
+            ? previewStageLabels[destination.delivery] || destination.delivery
+            : 'Not sent (dry-run)'}
+        </dd>
+      </div>
+    </dl>
+  );
+}
 export function DryRunPreview({ result }: { result: DryRunResult }) {
   return (
     <div className="dry-run-preview" aria-label="Output preview" role="status">
@@ -61,6 +129,12 @@ export function DryRunPreview({ result }: { result: DryRunResult }) {
         <section className="preview-stage" aria-label="Preview input">
           <h4>1. Original inbound payload · {result.input.format}</h4>
           <pre className="code-box">{payloadText(result.input.payload)}</pre>
+          {result.parsedInput && (
+            <>
+              <h4>Parsed input · {result.parsedInput.format}</h4>
+              <pre className="code-box">{payloadText(result.parsedInput.payload)}</pre>
+            </>
+          )}
         </section>
       )}
       {result.source && (
@@ -112,27 +186,22 @@ export function DryRunPreview({ result }: { result: DryRunResult }) {
                 Output format: {destination.outputFormat || 'Configured destination format'}
                 {destination.connectorType ? ` over ${destination.connectorType}` : ''}
               </p>
+              <DestinationStageSummary destination={destination} detailed />
               {destination.status === 'ERROR' ? (
                 <p className="alert error">
                   {destination.message ||
                     `Preview failed: ${destination.code || 'DESTINATION_INVALID'}`}
                 </p>
               ) : destination.routed === false ? (
-                <p>Not routed: the message was filtered or this destination is disabled.</p>
+                <p>{destinationPreviewReason(destination)}</p>
               ) : (
                 <>
-                  {destination.stages && (
-                    <dl className="definition-list">
-                      {Object.entries(destination.stages).map(([name, status]) => (
-                        <div key={name}>
-                          <dt>{name.charAt(0).toUpperCase() + name.slice(1)}</dt>
-                          <dd>{previewStageLabels[status] || status}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  )}
                   <p>Generated outbound payload</p>
-                  <pre className="code-box">{payloadText(destination.finalPayload)}</pre>
+                  <PayloadPreview
+                    payload={destination.finalPayload}
+                    format={destination.outputFormat}
+                    fields={destination.fieldTree}
+                  />
                 </>
               )}
             </div>

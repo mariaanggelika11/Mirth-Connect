@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { downloadChannelXml } from '../../services/channel.config';
 import {
@@ -43,6 +43,7 @@ function ChannelRow({
 }: Omit<Props, 'channels'> & { channel: Channel }) {
   const { can } = useAuth();
   const menuRef = useRef<HTMLDetailsElement>(null);
+  const deleteHintId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState<{ id: number; name: string } | null>(null);
   const [menuPoint, setMenuPoint] = useState({ left: 0, top: 0 });
@@ -72,6 +73,12 @@ function ChannelRow({
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const running = channel.status === ChannelStatus.RUNNING;
+  const deleteReason =
+    channel.hasMessages || channel.received || channel.sent
+      ? 'Has message history. Use Archive.'
+      : channel.status !== ChannelStatus.STOPPED
+        ? 'Stop the channel before deleting.'
+        : '';
   async function toggle() {
     setBusy(true);
     setError('');
@@ -177,9 +184,12 @@ function ChannelRow({
                 setMenuOpen(element.open);
                 if (element.open) {
                   const rect = element.getBoundingClientRect();
+                  const menuHeight =
+                    element.querySelector<HTMLElement>('.action-popover')?.getBoundingClientRect()
+                      .height || 240;
                   setMenuPoint({
                     left: Math.max(8, rect.left - 170),
-                    top: Math.max(8, Math.min(rect.top, window.innerHeight - 240)),
+                    top: Math.max(8, Math.min(rect.top, window.innerHeight - menuHeight - 8)),
                   });
                 }
               }}
@@ -230,20 +240,26 @@ function ChannelRow({
                     Archive channel
                   </button>
                 )}
-                {can('channel:delete') &&
-                  channel.status !== ChannelStatus.ARCHIVED &&
-                  !(channel.hasMessages || channel.received || channel.sent) && (
+                {can('channel:delete') && channel.status !== ChannelStatus.ARCHIVED && (
+                  <>
                     <button
                       className="danger"
                       aria-label="Delete channel"
-                      disabled={channel.status !== ChannelStatus.STOPPED}
-                      title={running ? 'Stop the channel before deleting' : 'Delete channel'}
+                      disabled={!!deleteReason}
+                      aria-describedby={deleteReason ? deleteHintId : undefined}
+                      title={deleteReason || 'Delete channel'}
                       onClick={() => onDelete(channel)}
                     >
                       <Trash2 size={15} />
                       Delete channel
                     </button>
-                  )}
+                    {deleteReason && (
+                      <small id={deleteHintId} className="action-menu-hint">
+                        {deleteReason}
+                      </small>
+                    )}
+                  </>
+                )}
               </div>
             </details>
           </div>
@@ -333,7 +349,7 @@ function ChannelRow({
 export default function ChannelTable(props: Props) {
   return (
     <div className="card-bw">
-      <div className="table-scroll">
+      <div className="table-scroll" role="region" aria-label="Channels table" tabIndex={0}>
         <table className="table channel-table">
           <thead>
             <tr>

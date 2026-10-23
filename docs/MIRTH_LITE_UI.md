@@ -1,6 +1,8 @@
-# Mirth Connect Lite UI — 16 Oktober 2026
+# Mirth Connect Lite UI
 
 ## Konsep dan navigasi
+
+Latest security behavior: [Browser session timeout](#browser-session-timeout--21-october-2026). Field discovery/mapping guidance: [V2 mapping and HL7](#field-discovery-v2-mapping-and-hl7--18-october-2026). Earlier dated sections retain the verification applicable to those releases.
 
 Wizard mengikuti **Source → Transformation → Destinations → Review & Test**. User membuat integrasi Sistem A → Mirth-Connect → Sistem B melalui format, mapping dan endpoint. Filter, scripting dan pengaturan delivery tersedia melalui Advanced. Kemampuan inti engine tetap dipertahankan.
 
@@ -12,8 +14,9 @@ flowchart LR
   F --> T[Source transformer / visual mapping]
   T --> M[Channel message / configuration snapshot]
   M --> DF[Destination filter / routing]
-  DF --> DT[Destination transformer / template]
-  DT --> C[Format conversion]
+  DF --> DT[Destination transformer / visual mapping]
+  DT --> LT[Legacy output script if configured]
+  LT --> C[Format conversion]
   C --> D[Destination connector]
   D --> B[Sistem B]
   D --> R[Retry / error handling / monitoring]
@@ -23,12 +26,15 @@ Navigasi utama terdiri dari Overview, Channels, Messages dan Settings. Start/Sto
 
 | Kemampuan | Lokasi UI |
 | --- | --- |
-| Source connector, inbound format, API key, endpoint | Source |
-| Validation, source filter, source transformer | Advanced source settings |
-| Mapping dua kolom Source Field / Target Field, Add Mapping | Transformation |
+| Source connector, inbound format | Source |
+| API key dan endpoint aktual | Source untuk channel tersimpan; Channel saved setelah Save |
+| Validation, source filter | Advanced source settings |
+| Source transformer bersama | Step 2 → Transformation |
+| Mapping dua kolom Source Field / Target Field, Add Mapping | Transformation → Modify fields |
 | Required/default | Mapping options per baris, awalnya tertutup |
 | Script transformasi kompleks | Advanced Custom Transformation Script |
-| Sample, preview, test transformation, connection probe | Review & Test |
+| Input data uji sintetis | Review & Test saja; tidak disimpan pada channel |
+| Preview, Run Test, connection probe | Review & Test |
 | Nama, connector, outbound format, endpoint destination | Destinations |
 | Destination filter / transformer / template | Advanced destination settings |
 | Retry, timeout, capacity dan circuit protection | Advanced destination settings → Delivery settings |
@@ -48,17 +54,17 @@ Verifikasi dropdown: client build, workspace typecheck, lint, format dan 57 brow
 
 ## 1. Source
 
-Source langsung menampilkan nama channel, connector, inbound format, source endpoint dan source API key. Endpoint HTTP berasal dari backend melalui konfigurasi `PUBLIC_BASE_URL` dan `INBOUND_PATH`; frontend tidak menebak hostname production. Contoh development `http://localhost:9000` dan production `https://connect.bulmar.tech` merupakan nilai konfigurasi, bukan alamat tetap pada UI. Channel baru menampilkan `{channelId}` sampai disimpan.
+Source channel baru hanya menampilkan nama channel, connector, inbound format dan Advanced source settings yang tertutup. Endpoint dan kontrol API key baru ditampilkan setelah Save, langsung pada Channel saved; channel tersimpan juga menampilkannya di Source. Endpoint HTTP berasal dari backend melalui konfigurasi `PUBLIC_BASE_URL` dan `INBOUND_PATH`; frontend tidak menebak hostname production. Contoh development `http://localhost:9000` dan production `https://connect.bulmar.tech` merupakan nilai konfigurasi, bukan alamat tetap pada UI. Channel baru tidak menampilkan URL `{channelId}`. Setelah Save, endpoint aktual tersedia dengan **Copy Endpoint**; hostname tetap berasal dari konfigurasi backend.
 
-API key digunakan oleh sistem sumber untuk mengirim data ke channel. Key hanya tampil sekali setelah generate/rotate; rotasi membatalkan key sebelumnya. Menutup editor atau berpindah langkah menghapus key dari tampilan. Key tidak ditampilkan kembali pada list atau audit plaintext. Tombol **Copy API key** tetap tersedia pada tampilan sekali tersebut. Tombol Copy endpoint, curl, Postman dan request examples sudah dihapus; alamat endpoint masih dapat dipilih/disalin manual.
+API key digunakan oleh sistem sumber untuk mengirim data ke channel. Key hanya tampil sekali setelah generate/rotate; rotasi membatalkan key sebelumnya. Menutup editor atau berpindah langkah menghapus key dari tampilan. Key tidak ditampilkan kembali pada list atau audit plaintext. Tombol **Copy API key** tetap tersedia pada tampilan sekali tersebut. Copy Endpoint tersedia untuk channel tersimpan. Tombol curl, Postman dan request examples tetap tidak ditampilkan. Kegagalan clipboard menyediakan pesan untuk menyalin alamat secara manual.
 
 **Advanced source settings** berurutan:
 
 1. **Validation**: menentukan apakah pesan valid.
-2. **Source filter**: menentukan apakah pesan valid tersebut diproses.
-3. **Source transformer**: menunjukkan status dan tombol Configure transformation untuk normalisasi lanjutan.
+2. **Filter**: menentukan apakah pesan valid tersebut diproses. Status Off / Needs configuration / Configured mengikuti kondisi aktual, bukan checkbox saja. Bantuan path tersedia melalui Field path help. Pada MLLP, pesan harus cocok dengan tepat satu channel HL7 yang berjalan karena listener dipakai bersama.
+Source Transformer diedit hanya melalui **Step 2 → Transformation**, karena kedua akses lama mengubah `processingScript` yang sama. Stage backend tetap tersedia dan hanya dieksekusi sekali.
 
-Source response editor tidak ditampilkan. Channel existing yang memakainya hanya menampilkan **Legacy custom source response is active.** Script tetap disimpan dan dijalankan backend. Response HTTP standar memiliki `success`, `messageId`, `status` serta `result` existing untuk compatibility; response error dan HL7 ACK mengikuti kontrak backend yang berlaku.
+Source response editor tidak ditampilkan. Channel existing yang memakainya menampilkan **Legacy custom source response is active.** hanya pada Review & Test → View details → Source processing, sehingga Advanced Source hanya berisi Validation dan Filter. Script tetap disimpan dan dijalankan backend. Response HTTP standar memiliki `success`, `messageId`, `status` serta `result` existing untuk compatibility; response error dan HL7 ACK mengikuti kontrak backend yang berlaku.
 
 Hasil processing gagal yang sudah tercatat mengembalikan HTTP 502 dengan code `MESSAGE_PROCESSING_FAILED`, pesan aman, requestId dan details kosong. `result` dan custom response legacy tetap dipertahankan. FILTERED tetap HTTP 200 dan QUEUED tetap HTTP 202 tanpa error fields.
 
@@ -146,7 +152,7 @@ Screenshot sintetis: [sebelum](screenshots/validation/before-basic.png), [Field 
 
 ### Filter tanpa script
 
-**Source Filter** hanya memiliki checkbox **Enable source filter** dan builder **Simple condition** (Field / Operator / Value). Channel baru default OFF. Saat OFF, pesan melewati source filtering; validation tetap berjalan. Saat ON, kondisi diperiksa terhadap setiap pesan sebelum transformation dan destination. Tidak ada dropdown accept/reject/custom atau editor script untuk source. Destination filter tetap menyediakan pilihan routing dan script yang sudah ada.
+**Source Filter** hanya memiliki checkbox **Enable source filter** dan builder **Simple condition** (Field / Operator / Value). Channel baru default OFF. Saat OFF, pesan melewati source filtering; validation tetap berjalan. Saat ON, kondisi diperiksa terhadap setiap pesan sebelum transformation dan destination. Tidak ada dropdown accept/reject/custom atau editor script untuk source. Destination Filter kini memakai checkbox dan builder yang sama, dengan konteks evaluasi tersendiri setelah Source Transformer (lihat bagian Destinations).
 
 Field adalah path pada payload aktual, bukan metadata yang dibuat otomatis: JSON `patient.id`; XML `Patient.ID`; HL7 `MSH.9` (nilai message type lengkap, misalnya `ADT^A01`) atau `MSH.10` (control ID). `message_type` hanya berlaku jika pengirim benar-benar mengirim properti JSON tersebut. Dot path mendukung index array mulai 0; maksimum 12 bagian/256 karakter, Value 1.024 karakter; prototype keys ditolak. Konten harus terstruktur JSON/XML/HL7; teks bebas tidak mendukung pemilihan field dan menghasilkan error filter.
 
@@ -162,7 +168,9 @@ Kondisi tidak cocok menghasilkan status inbound **FILTERED**, tanpa transformati
 
 ## 2. Transformation
 
-Transformation hanya menampilkan mapping **Source Field / Target Field**, tombol **Add Mapping** dan bagian opsional **Advanced Custom Transformation Script**. Helper: “Map incoming fields to the fields required by the destination.” Source menentukan inbound format; outbound format dipilih pada masing-masing destination. Tidak ada format selector, sample, example, preview, Test, privacy checkbox atau banner hasil pengujian pada langkah ini.
+Transformation untuk channel baru default **No transformation**, tanpa editor mapping/script atau baris kosong. Pilih **Modify fields** untuk membuka mapping **Source Field / Target Field**, tombol **Add Mapping**, dan **Advanced Custom Transformation Script** yang awalnya tertutup. Channel existing membuka mapping/script yang tersimpan, bukan menggantinya dengan default. Beralih ke No transformation meminta konfirmasi sebelum menghapus konfigurasi aktif; Cancel mempertahankannya. Pilihan mode ditampilkan ringkas dalam satu baris bila ruang cukup. Mapping menampilkan satu header Source Field / Target Field untuk semua baris, dengan label aksesibilitas unik per input. Helper menjelaskan bahwa mapping ini dipakai semua destination dan field yang tidak dipetakan tidak ikut output. Source menentukan inbound format; outbound format dipilih pada masing-masing destination. Tidak ada format selector, sample, example, preview, Test, privacy checkbox atau banner hasil pengujian pada langkah ini.
+
+Dialog custom script memakai editor JavaScript selebar konten dengan footer Cancel / Save Script yang tetap terlihat. Script help tertutup secara default; placeholder singkat hanya contoh dan tidak otomatis diterapkan. Tombol **Use template** mengisi editor dengan contoh sesuai jenis script dan meminta konfirmasi sebelum mengganti kode yang sudah ditulis. Tombol ini tidak menjalankan script atau menyimpan channel. Save Script memperbarui form tanpa submit/berpindah langkah; Save Channel tetap diperlukan. Cancel membuang perubahan di dialog dan mengembalikan fokus. Batas sandbox serta konfirmasi penggantian mapping/script tetap berlaku.
 
 Contoh mapping yang dapat ditambahkan sendiri:
 
@@ -173,13 +181,13 @@ Contoh mapping yang dapat ditambahkan sendiri:
 | gender | Gender |
 | date_of_birth | BirthDate |
 
-**Mapping options** per baris awalnya tertutup dan mempertahankan Required serta default value. `Required` menolak nilai wajib yang hilang. Default digunakan ketika nilai tidak ada, null atau kosong; `0` dan `false` dipertahankan. Default UI berupa string. Field yang tidak dipetakan tidak ikut output. Tanpa mapping/script, field asli diteruskan ke converter.
+**Options** per baris awalnya tertutup dan mempertahankan Required, default value serta Type conversion. Tombol Add Mapping berukuran sesuai isinya, bukan selebar form. `Required` menolak nilai wajib yang hilang. Default digunakan ketika nilai tidak ada, null atau kosong; `0` dan `false` dipertahankan. Default UI berupa string. Field yang tidak dipetakan tidak ikut output. Tanpa mapping/script, field asli diteruskan ke converter.
 
 Tidak ada input XML root pada UI. Metadata `rootElement` dari mapping existing tetap utuh saat baris diedit. Mapping baru tidak menambahkan wrapper `Patient` otomatis; wrapper khusus per destination dapat dibuat melalui Advanced destination transformer. Pipeline dan converter tidak diubah.
 
 Dot paths membaca object bertingkat dan indeks array pada input; target bertingkat dibuat sebagai object. Maksimum 100 baris dan 12 tingkat; target duplikat/tumpang tindih serta prototype keys ditolak. Mapping tidak melakukan array expansion atau konversi tipe otomatis. HL7 menggunakan struktur parser existing, misalnya `PID.3` untuk identifier scalar dan `PID.5.2` untuk component yang tersedia. Profile/repetition berbeda tetap memerlukan path yang sesuai.
 
-Mapping visual disimpan pada **source transformer yang sama**, yaitu `processingScript`, dan dijalankan QuickJS existing. Source transformer pada Advanced dan halaman Transformation adalah dua tampilan dari stage tersebut. Keduanya tidak menciptakan dua transformasi berurutan. Script custom tidak diganti menjadi mapping tanpa konfirmasi eksplisit. Export/import channel XML tetap membawa script beserta metadata mapping/filter.
+Mapping visual disimpan pada **source transformer yang sama**, yaitu `processingScript`, dan dijalankan QuickJS existing. Akses Source transformer lama di Advanced sudah digabung ke Step 2; tidak ada editor kedua atau stage tambahan. Script custom tidak diganti menjadi mapping tanpa konfirmasi eksplisit. Export/import channel XML tetap membawa script beserta metadata mapping/filter.
 
 XML untuk mapping dan simple filter dinormalisasi sebelum masuk worker; script custom lama tetap menerima input aslinya. DTD/entity ditolak, parser dibatasi 20.000 nodes/kedalaman 65, serta tunduk pada batas payload dan sandbox. Error tidak mengembalikan plaintext pasien atau stack internal. Mapping yang belum lengkap menghalangi Continue/Save dan tetap tersedia ketika kembali ke langkah tersebut.
 
@@ -187,7 +195,35 @@ XML untuk mapping dan simple filter dinormalisasi sebelum masuk worker; script c
 
 Default satu destination; **Add Destination** tetap tersedia untuk routing ke banyak sistem. Field utama: nama, connector, outbound format dan endpoint. Setiap destination memiliki outbound format sendiri; perubahan format satu destination tidak diterapkan otomatis pada destination lain. Tidak ada selector output format global pada Transformation.
 
-Advanced berisi tepat tiga kelompok: **Destination filter**, **Destination transformer**, **Delivery settings**. Template berada di disclosure lanjutan pada transformer. Automatic retry menampilkan jumlah retry dan interval ketika aktif; request timeout menggunakan detik. Capacity dan circuit protection tetap berada pada disclosure tambahan. Destination response editor dihapus; responseScript existing tetap aktif dengan notice legacy kecil. Connection test tersedia sesudah konfigurasi lengkap melalui Review & Test.
+Satu **Advanced destination settings**, tertutup secara default, berisi disclosure **Transformation**, **Filter**, **Delivery**, serta **HL7 settings** bila profil HL7 aktif. Semua subsection tertutup pada awalnya. Membuka Advanced tidak langsung membuka seluruh form. Transformation memiliki mapping dan custom script yang sama untuk semua format; Filter default Off; Delivery berisi timeout, retry serta override HTTP method/Content-Type. Batas concurrency/circuit tetap ditegakkan backend; kontrol rinci berada di **Delivery → Expert delivery settings**. Error konfigurasi membuka subsection terkait agar dapat diperbaiki.
+
+Connector hanya menawarkan **HTTP sender**, **MLLP sender**, dan **TCP sender** (pilihan lanjutan). Backend/API tetap memakai enum existing: REST, HL7, MLLP, TCP, RAW. HL7 ditampilkan sebagai MLLP, RAW sebagai TCP, tetapi membuka/menyimpan konfigurasi lama tidak menulis ulang enum, endpoint, TLS, outbound format atau retry policy. Endpoint/host/port ditampilkan sesuai transport. Header **Destination 1**, **Destination 2**, dan seterusnya menghindari judul berulang. Toggle Enabled tersedia untuk destination tersimpan atau konfigurasi disabled existing; perubahannya tetap mengikuti Save draft/publish, bukan bypass lifecycle. Add Destination tetap tersedia.
+
+Kontrol Authentication, Custom headers, Add Header dan environment slot tetap tidak ditampilkan. Konfigurasi authentication/header tersimpan dipertahankan ketika mengedit/menyimpan; backend tetap memvalidasi, membaca secret server dan menegakkannya. Source API key/rotasi, destination SSRF, TLS/certificate validation dan sandbox tidak diubah. Legacy output/response scripts tetap aktif bila tersimpan; legacy output editor hanya tersedia pada Transformation, bukan tombol baru untuk setiap destination.
+
+### Destination filter, transformation dan legacy output script — 18 October 2026
+
+**Destination enabled** berada pada header destination tersimpan; perubahan tetap disimpan sebagai draft sebelum publish. OFF menonaktifkan destination: tidak ada filter, transformasi, delivery atau retry baru. **Enable destination filter** mempunyai fungsi berbeda: OFF melewati pemeriksaan kondisi untuk destination yang aktif, ON membuka Simple condition secara langsung. Dropdown Deliver/Skip/Custom serta editor filter script tidak tersedia untuk konfigurasi baru. Checkbox dan badge Customized berasal dari konfigurasi aktual; Field dan Value yang belum lengkap memblokir Continue/Save/Test. Is empty/Is not empty/Exists/Does not exist tidak memerlukan Value. Kondisi lama yang sengaja membandingkan string kosong tetap valid tanpa diedit; gunakan Is empty untuk aturan baru.
+
+Destination Filter membaca **Source Processed Message**, setelah Source Transformer dan sebelum Destination Transformer. Misalnya jika source mengubah `department` menjadi `routing.department`, pakai path yang baru. Semantik operator/path sama dengan Source Filter di atas. Source Filter menentukan kelanjutan seluruh pesan; Destination Filter hanya memilih satu tujuan. A tanpa filter tetap menerima pesan saat B dengan department=LAB tidak cocok; ketidakcocokan B tidak menggagalkan A.
+
+OFF menyimpan aturan persis dalam wrapper no-op `MIRTH_DESTINATION_FILTER_DISABLED_V1` pada kolom `filter_script` yang sama; tidak ada flag enabled tambahan atau migration. Save/reopen/publish/snapshot/import/export mempertahankannya. Batas wrapper 65.536 karakter dan integrity check sama dengan Source Filter. Script legacy tetap read-only dengan notice dan pilihan **Replace with simple condition** yang eksplisit; toggle OFF/ON tidak mengubah script menjadi accept-all. `return false;` tetap memfilter. Bug lama pada literal polos `false` diperbaiki: nilai tersebut sekarang menghasilkan keputusan false, bukan jatuh ke default true. Audit konfigurasi literal tersebut sebelum upgrade bila pernah mengandalkan perilaku bug.
+
+**Mapping destination** (Advanced destination settings → Transformation, untuk semua format) memetakan field Source Processed Message ke struktur destination, memakai compiler, Required/default, path validation dan sandbox existing. Setiap destination memiliki salinan pesan sendiri. Mapping A tidak mengubah input B. Tidak ada converter atau format selector global baru. JSON/XML/HL7 mengikuti dukungan converter existing; mapping bukan XSD atau FHIR validator. Mapping belum selesai tetap tersedia setelah editor inline ditutup dan menghalangi penyimpanan sampai diperbaiki/dihapus.
+
+Audit menemukan **Advanced Template adalah script QuickJS kedua**, bukan library template. Script menerima `msg` hasil Destination Transformer; nilai return mengganti payload sebelum format conversion. Script lama tidak dihapus, digabung otomatis atau dijalankan dua kali. Notice dan **Legacy output script · Active → Edit legacy output script** tersedia di Advanced destination settings → Transformation. Review & Test menampilkan hasil akhirnya. Mengedit script ini membuka editor terpisah, lalu kembali ke Destinations; Disclosure Transformation membuka kembali mapping yang tetap tersimpan.
+
+Urutan aktual: validation → Source Filter → Source Transformer → salinan per destination → Destination Filter → Destination Transformer → legacy output script → converter → sender. Format destination menentukan Content-Type. JSON→XML dan XML→JSON diuji dengan receiver lokal; output XML harus well-formed, maksimal batas payload/20.000 nodes/65 kedalaman dan tanpa DTD/entity. XML valid yang sudah berupa string tetap mempertahankan bytes-nya.
+
+**FILTERED** disimpan sebagai OUT record untuk destination aktif yang tidak cocok, tanpa network attempt atau retry. Disabled tidak membuat OUT record. Kegagalan filter/transformation/template/conversion menghasilkan OUT-ERROR dengan kode tahap yang aman, tanpa delivery attempt atau retry. Payload final dan encrypted connector snapshot bertanda `preparation_version:1` disimpan atomik hanya setelah preparation berhasil. Retry/resend memakai payload final tersebut, tanpa mengulang transformasi. Penolakan endpoint/host/address sebelum koneksi mempunyai zero network attempt, diagnostic DELIVERY_REJECTION, dan tidak otomatis di-retry. HTTP 4xx selain 408/429 tidak otomatis di-retry; 408/429/5xx tetap mengikuti policy, sementara outcome timeout yang ambigu dikarantina untuk reconciliation.
+
+Manual resend menolak payload belum dipersiapkan. Historical failure tanpa bukti preparation/network/admission yang memadai menghasilkan `DESTINATION_NOT_PREPARED` (409). Perbaiki/publish channel dan submit pesan baru dengan idempotency key yang baru setelah reconciliation terhadap penerima; jangan mengedit snapshot/payload di database untuk memaksa resend. QUEUED lama mempertahankan payload finalnya. Ini pengamanan konservatif, bukan penghapusan history.
+
+Messages menampilkan **Destination processing**: enabled/filter/transformation/delivery, kode aman, timestamp dan jumlah network attempt. Legacy metadata yang tidak dapat dibuktikan ditandai Not recorded. Baris filter/preparation/admission lama tetap dipertahankan sebagai event history; tidak dilabeli delivery sukses atau attempt jaringan baru. Disabled hanya dapat ditampilkan bila captured revision menyediakan metadata. Detail mengambil satu query outcome berbatas, bukan query per destination. Payload tetap redacted secara default; permission dan audit raw access tidak berubah.
+
+Review menampilkan Disabled/Matched/Not matched/Not run dan **Not sent (dry-run)** per destination; filter mismatch tidak menghasilkan preview transformation sukses. Dry-run tidak mengirim, membuat message history atau retry queue, dan tidak melakukan DNS. Connection check tetap aksi terpisah yang eksplisit.
+
+Screenshot sintetis: [sebelum](screenshots/destination/before.png), [filter sesudah](screenshots/destination/after-filter.png), [mapping dan legacy script](screenshots/destination/after-mapping.png). Rincian perubahan, bukti pengujian dan batas verifikasi ada pada [audit Destination](UI_SIMPLIFICATION_AUDIT.md#destination-audit-and-implementation--2026-10-18).
 
 ## 4. Review & Test
 
@@ -228,6 +264,8 @@ Rollback tersedia untuk revision PUBLISHED sebelumnya, bukan revision yang sedan
 
 ADMIN dapat Delete channel STOPPED tanpa riwayat pesan yang masih disimpan, termasuk duplikat baru dengan Revision 1. Revision/configuration milik channel tersebut ikut dihapus secara transaksional; channel asal dan audit tidak dihapus. Jika ada pesan, gunakan **⋯ → Archive channel** setelah Stop dan menyelesaikan antrean/retry/proses aktif. Archive tidak menghapus pesan, revision atau audit. Pilih filter status **Archived** untuk melihatnya; channel archive tidak bisa langsung Start/edit/publish. Buat duplikat baru yang ditinjau jika membutuhkan pengganti. Pemeriksaan delete menggunakan evidence yang masih tersimpan, bukan penanda permanen pernah digunakan setelah retention resmi menghapus seluruh pesan. Jangan membersihkan evidence manual untuk memaksa Delete.
 
+Menu **⋯ → Delete channel** tetap terlihat bagi ADMIN pada channel yang belum diarsipkan. Jika tidak dapat dihapus, tombol dinonaktifkan dan alasan terlihat di bawahnya: **Has message history. Use Archive.** atau **Stop the channel before deleting.** Alasan juga terhubung ke tombol untuk screen reader. Channel archived dan role tanpa permission delete tetap tidak menampilkan tombol tersebut. Perubahan tampilan ini tidak melonggarkan pemeriksaan backend atau menghapus data.
+
 Tidak ada migration baru: archive memakai nilai `ARCHIVED` pada kolom status yang sudah ada. Schema tetap 1–7. Jalankan binary/API/frontend yang sesuai bersama-sama; perubahan lokal ini tidak otomatis memperbarui server deployment.
 
 Binary sebelum perbaikan ini belum melindungi status ARCHIVED dari aktivasi. Jangan menjalankannya bersamaan atau downgrade tanpa review akses dan pengamanan channel yang telah diarsipkan. Untuk revision legacy tanpa ID destination, rollback memakai ulang connector dengan konfigurasi yang cocok di channel yang sama dan mencatat ID yang benar pada snapshot published baru, tanpa menulis ulang history lama.
@@ -257,7 +295,7 @@ Settings memiliki **System information, Roles, Users, Audit log**; Users/Audit m
 
 ## Database upgrade dan compatibility
 
-Follow-up berbasis `1734591` yang memindahkan test ke Review tidak menambah migration atau mengubah data. Build terbaru tetap memerlukan migration **1–7**. Migration `006_delivery_http_status.sql` menambahkan nullable integer `MessageDestinationLog.http_status` (100–599). Migration `007_delivery_timing.sql` menambahkan nullable integer `request_duration_ms` (minimal 0). Record lama tetap NULL. Keduanya additive, transactional/repeatable dan tidak menghapus business data. Migrator, startup guard, disposable reset helpers, restore verification dan runtime smoke menggunakan versi 7.
+Follow-up berbasis `1734591` yang memindahkan test ke Review tidak menambah migration atau mengubah data pada saat itu. **Build saat ini memerlukan migration 1–8**. Migration 006/007 menambah nullable HTTP status/durasi transport; record lama tetap NULL. Migration **008_browser_session_policy.sql** menambahkan family sesi dan mewajibkan login ulang sesi lama sekali, tanpa menghapus user/channel/pesan/audit. Migrator, startup guard, disposable reset helpers, restore verification dan runtime smoke kini memerlukan versi 8. Migration dan deployment baru ini belum diterapkan ke database/server aplikasi pada sesi pengerjaan source.
 
 Untuk upgrade environment existing, verifikasi target dan backup/keyring sesuai runbook sebelum menjalankan command:
 
@@ -278,7 +316,7 @@ Rollback source dapat mempertahankan kolom nullable baru. Jangan drop kolom, dat
 
 ## Validasi dan batas verifikasi
 
-Follow-up mapping-only / Review & Test berbasis branch `development`, commit `1734591`. Verifikasi baru memakai fixture sintetis. Browser menggunakan API fixture untuk UX/permission dan tidak mengklaim pengiriman ke rumah sakit atau webhook eksternal.
+Bagian tabel berikut adalah bukti historis mapping-only; verifikasi Destination terbaru tersedia pada audit Destination yang ditautkan di atas. Follow-up mapping-only / Review & Test berbasis branch `development`, commit `1734591`. Verifikasi baru memakai fixture sintetis. Browser menggunakan API fixture untuk UX/permission dan tidak mengklaim pengiriman ke rumah sakit atau webhook eksternal.
 
 | Command / pemeriksaan | Hasil follow-up terbaru |
 | --- | --- |
@@ -321,3 +359,123 @@ Enam screenshot berikut diambil ulang dari browser test dengan data sintetis. Tr
 - [Settings](screenshots/usability/lite-settings.png)
 
 Audit KEEP / REMOVE / ADVANCED / LEGACY dan before/after yang dibuat sebelum coding tersedia pada [UI simplification audit](UI_SIMPLIFICATION_AUDIT.md).
+
+## Field discovery, V2 mapping and HL7 — 18 October 2026
+
+The wizard remains **Source → Transformation → Destinations → Review & Test**. Input format belongs to Source; output format and HL7 configuration belong to each destination. Step 2 changes the shared internal message, so leave it on No transformation when mappings should differ between destinations. Executing a transformation test still happens only in Step 4.
+
+### Field paths and test input
+
+The Source sample panel, Analyze fields action and destination Refresh fields action have been removed from the wizard. Enter source/target paths directly when mapping; the HL7 destination target picker still provides searchable template fields. No sample is required to create or edit a channel. All synthetic test input and Load sample are available only in **Review & Test**; input remains in form memory and is excluded from saved channels, revisions and exports.
+
+Examples of input paths are `patient.name.first`, `observations.0.code`, XML `Patient.$.id` (attribute) or `Patient.name.first`, and HL7 `PID.5.2` / alias `PID-5.2`. Use explicit indices for repeated structures. Own-property/prototype and overlapping-target protections remain enforced. The protected `/api/channel/discover-fields` endpoint remains available for API clients with its existing bounded parsing, metadata-only response and audit enforcement; the wizard no longer invokes it.
+
+### Mapping and conversion
+
+Add rows, select source/target fields, and expand **Mapping options** for Required, default value and conversion. Completely empty untouched rows are ignored; partially completed rows show a specific error beside the input and block Continue/Save. Placeholders are examples, not configured values. Required is checked after applying a configured default. Defaults apply to missing, null or empty-string values; numeric zero and Boolean false remain real values. Conversion options are strict text, finite number, Boolean, calendar `YYYY-MM-DD → YYYYMMDD` and the reverse. Invalid dates/types fail before delivery with a safe row/path explanation, without echoing the value.
+
+Use **No transformation** for compatible structured input when no shared mapping is needed; destination serialization still runs. Changing a mapped/scripted configuration to No transformation requires confirmation. The mapping table is the editing view; use Review to execute it and inspect actual output. A JSON/XML business object needs an appropriate HL7 mapping/template before it can become a clinical message.
+
+V1 canonical mapping scripts retain their exact generated bytes and remain editable. New conversion/HL7 mappings use V2 metadata in the existing `processing_script`, not a second mapping engine or a new database column. Both run inside the existing bounded QuickJS pipeline. V2 metadata and generated script must agree; tampering is rejected. To replace V2 mappings with an arbitrary script, confirm **Replace with custom script**, then write a complete script in the blank editor. Cancel retains the mapping; generated V2 internals are not offered as a script starter.
+
+### Destination-specific HL7
+
+Select **HL7 v2** at a destination (API value remains `HL7V2`). The main connection form stays compact. Open **Advanced destination settings → Transformation** for message type, version and the mapping table, without another dialog. Step 2 remains optional shared processing. Empty mapping rows are ignored. HTTP method and Content-Type live in Delivery settings; authentication/header editing is available through the protected API, with saved settings retained by the UI. The supported visual version is **2.5**, with four curated templates:
+
+| Template | Supported structure / scope |
+| --- | --- |
+| ADT^A04 registration | MSH → EVN → PID → PV1; message structure ADT_A01 |
+| ADT^A01 admission | MSH → EVN → PID → PV1; message structure ADT_A01 |
+| ORU^R01 result | MSH → PID → OBR → OBX; one order, explicit repeated observations |
+| ORM^O01 order | MSH → PID → ORC → OBR; new observation order |
+
+The table has **JSON field | HL7 field** (source column follows the actual inbound format). Target labels combine code and meaning; the separate Description column is removed. Each row has full-width closed Options below its inputs, so opening Required/default/conversion does not expand a narrow description column. Enter a source path or choose an analyzed sample field. Click the HL7 field to open a searchable dropdown; branches expand on demand, selection closes the dropdown and restores focus, and Escape closes it without closing the channel. Search supports names/codes. The description comes from the same metadata as the backend. For explicit indexed targets, open **Advanced field path** inside the dropdown. Required/default/conversion stay under each row's **Mapping options**.
+
+For the synthetic input below, leave Step 2 empty and add these four destination mappings:
+
+```json
+{"patient_id":"RM001","name":"Budi Santoso","birth_date":"1990-05-20","gender":"M"}
+```
+
+| JSON field | HL7 field | Behavior |
+| --- | --- | --- |
+| patient_id | PID-3.1 | Identifier value; authority/type retain profile defaults |
+| name | PID-5 | Whole text in the first component; no guessed family/given split |
+| birth_date | PID-7 | New selection defaults to strict YYYY-MM-DD → YYYYMMDD |
+| gender | PID-8 | Administrative sex, checked by the selected profile |
+
+Already-HL7 source dates retain their type. If a JSON/XML source already supplies `YYYYMMDD`, choose **Keep original type** in that row's Mapping options. Existing saved conversions are preserved. To split names, explicitly map `last_name → PID-5.1` and `first_name → PID-5.2`, or use an intentional sandboxed script. Selecting `PID-5` with scalar text serializes the complete text into component 1; it does not infer cultural naming semantics. The builder configuration is stored with complete mapping rows. With no mappings, compatible messages use pass-through; template fields do not override their existing headers. Default MSH timestamp/control ID need no manual configuration for testing. Processing ID defaults to **T**, not a production clinical setting.
+
+The target picker lists only fields supported by the selected template. Components and supported subcomponents can be expanded. Required identifiers, order/result constraints, patient/observation codes, dates and target conflicts are checked. This is a tested subset, not full HL7 conformance, XSD validation or a facility-specific profile. Use the existing configurable source validation for inbound message types/versions/required fields; hospital-specific rules and UAT remain necessary. Changing template retains mappings and exposes incompatible targets as errors rather than deleting them silently.
+
+**HL7 settings**, a separate closed subsection, contains sender/receiver applications/facilities, processing ID, patient class and identifier authority/type. Manual date/time and control-ID inputs are removed from normal configuration. Backend generation of UTC time and a per-message UUID is unchanged; mapped values/retained fixed overrides retain their established precedence, and retry uses the prepared snapshot. A generic notice identifies retained fixed overrides without displaying their values. **Use generated time and ID** explicitly clears only those fixed overrides in the form; Save/publish is still required, mappings remain intact and mapped values can still override defaults. Existing overrides are never silently removed.
+
+The default Processing ID remains **T**, and header/facility/identifier defaults are examples, not an organization-approved production profile. No automatic T→P conversion or patient-class change is introduced by this UI cleanup.
+
+### HTTP and MLLP delivery
+
+REST exposes **POST, PUT, PATCH**, an endpoint and compatible Content-Type. Defaults are JSON `application/json`, XML `application/xml`, HL7 `application/hl7-v2`, and text `text/plain`; HL7 also supports `text/plain`. The text default corrects the previous JSON media-type fallback. GET/DELETE and arbitrary incompatible media types are not offered. Authentication and up to ten custom header references remain supported by the protected channel API; their UI editors have been removed. Header names/slots are validated and managed protocol/security headers cannot be overridden.
+
+Credentials are provisioned only on the server, after saving and obtaining the destination ID:
+
+| Setting | Environment reference (ID 42 is illustrative) |
+| --- | --- |
+| Bearer | `MIRTH_DESTINATION_42_BEARER_TOKEN` |
+| Basic | `MIRTH_DESTINATION_42_BASIC_USERNAME`, `MIRTH_DESTINATION_42_BASIC_PASSWORD` |
+| Header `X-API-Key`, slot `API_KEY` | `MIRTH_DESTINATION_42_API_KEY` |
+
+The UI edits method/type and preserves existing auth mode/header slot metadata under `delivery_policy.http`; it never stores or fetches secret values. Configure auth mode/header references through the permission-protected channel API. Use the protected deployment secret/environment mechanism and restart the managed process after provisioning. Missing/invalid/newline credentials fail closed before transport, without a fake attempt or automatic retry. Explicit environment Authorization overrides legacy URL userinfo. Authentication None preserves legacy URL authentication compatibility. New duplicated/imported destinations have new IDs and need their own provisioned secrets. Dry-run neither resolves nor displays credentials. SSRF policy, DNS pinning, redirects disabled, timeout, retry and request/response limits remain enforced.
+
+MLLP uses **Host**, **Port**, optional **Use TLS**, configured timeout and ACK handling; it does not ask for an HTTP URL. Existing `tcp:`/`mllp:` plaintext aliases and `mllps:` TLS remain compatible. Standard MLLP framing is fixed; response success requires a complete correlated AA ACK. AE, mismatched control ID or timeout are not marked successful. TLS certificate/hostname checks and production isolated-network restrictions remain in force. No live-send action runs on changing connector or editing settings.
+
+### Review, privacy and manual QA
+
+Review shows the channel name and a compact Source → Transformation → Destination flow, stacking vertically on mobile. **View details** stays closed and contains source validation/filter/transformation, endpoint, destination-specific profile, HTTP method, retry and timeout without repeating the shared transformation summary. Clicking Continue or a later wizard tab checks the channel name; entering Review also checks every configured destination's name, endpoint and output format. Missing fields return to their editing step. Receive-only channels remain supported.
+
+**Test configuration — Optional** is closed by default. Open it, paste fictional input and click **Run Test**. **Input help → Load sample** provides a format-specific starting example that may need changes for your own validation/mapping. No sample or test is required to save. Test data stays in form memory, outside saved configuration. No empty result heading is shown before execution. After a test, show status, generated output for each destination and actionable errors. Output comes from the actual runtime pipeline; Network delivery stays **NOT SENT**. A successful preview does not prove message delivery or receiver authentication. **Copy Output** copies only the displayed preview, retaining its redaction and original CR bytes. Each HL7 output supports Raw lines and a searchable Tree.
+
+Preview does not require a revision change summary. The wizard omits an empty summary; preview/full dry-run also normalize a bounded blank summary from older clients to absent. Invalid summary types/lengths and invalid generated/shared scripts still fail with safe setting-specific messages. Saving channel/revision changes retains its existing schema. A `400` preview response is a configuration/request rejection; inspect the safe message before changing payload fields or testing delivery.
+
+**Advanced test options → Processing details** consolidates original input, parsed XML/HL7 JSON, source-processed output, validation and per-stage diagnostics. Advanced also retains optional TCP/TLS connection checks, which perform network handshakes without sending messages; a reachable endpoint is not proof of application delivery. Parsed XML/HL7 is fully redacted by default, including numeric identifiers; tree metadata has no values. Unmasked preview requires the existing ADMIN permission and an audit entry. Cached raw content follows current permissions. Editing input/configuration or changing permissions clears stale output; no test reruns automatically. This privacy behavior is intentional even for synthetic samples.
+
+Manual QA with fictional data:
+
+1. Sign in as ADMIN/DEVELOPER and create an HTTP/JSON channel. Verify Source has no Sample message, Analyze fields or test input. In Step 2 choose Modify fields and enter source/target paths directly. A partial row blocks Continue while an untouched blank row does not; Back/Continue retains mappings. Enter fictional test data only in Review & Test.
+2. Leave the shared transformation on No transformation. Add a REST destination with an approved test receiver, outbound HL7 v2, then open Advanced destination settings → Transformation and select ADT^A04. Map `patient_id → PID.3.1`, `last_name → PID.5.1`, `first_name → PID.5.2`, `dob → PID.7` with date conversion, and `gender → PID.8`. Open Advanced destination settings → HL7 settings when changing identifier authority/type; defaults are TEST/MR. Add a second destination with JSON output and a different mapping.
+3. Review the flow, open Test configuration and click Run Test. Confirm each destination has its own output and no receiver request occurs. ADMIN may explicitly unmask this fictional preview to inspect actual values. Invalid date or missing required path must produce an actionable error. Return to editing; test errors must not appear while editing an otherwise valid row.
+4. Save and reopen the draft; verify mappings, HL7 headers, HTTP settings and inactive legacy scripts remain. Publish through Revisions when editing an existing channel. Starting/stopping is explicit. Provision any destination environment references using the newly saved ID.
+5. Only against an approved synthetic receiver: Start, explicitly confirm Send synthetic message, then inspect Messages → Inbound / Source Processed / Outbound / Delivery Result. Check actual receiver bytes, HTTP status or correlated ACK, correlation ID and absence of patient/credential logging. A Review test or connection handshake alone is not delivery proof.
+6. Repeat with XML/HL7 Source using explicit input paths, and with an MLLP test receiver. Change format/back/forward without losing retained settings. Recheck VIEWER/OPERATOR cannot access script/admin/raw actions. Never use a real patient or production receiver for this procedure.
+
+### Storage, rollout and verification limits
+
+No schema migration, dependency, database reset or live configuration rewrite was needed. Schema **001–007**, encryption/keyring, revision snapshots, XML import/export, routing, multiple destinations and stored final retry bodies remain. Credential values stay outside the new configuration; existing encryption is unchanged. A V2 publish/export includes the canonical mapping metadata. The SQL suite includes V2 draft/publish/export/import/rollback and real delivery, but its latest 24 tests have **NOT TESTED** status locally. Run it in disposable PostgreSQL before rollout.
+
+Prefer a channel revision rollback on the current guarded binary. Before binary downgrade, stop/drain/reconcile jobs and select a published configuration compatible with the older compiler: old binaries cannot unwrap the V2 result envelope or enforce the new preparation guards. Keep data, migration history and encryption keys; never delete messages to roll back a UI change.
+
+Verification: **656 unit/API/integration tests across 42 files**, **94 browser tests**, typecheck/lint/format/production build pass. Actual loopback HTTP receivers prove all eight JSON/XML/HL7 format pairs and heterogeneous destinations; actual MLLP sockets prove framed AA/AE/mismatch/timeout behavior. Database persistence is a stateful fixture in those tests. The browser suite uses API fixtures to prove UI behavior and is not deployed-server evidence. Full commands, failures corrected and remaining limits: [implementation audit](UI_SIMPLIFICATION_AUDIT.md#field-explorer-hl7-and-format-integration--2026-10-18). Synthetic screenshots: [source explorer](screenshots/hl7/source-explorer.png), [destination mapping](screenshots/hl7/destination-mapping.png).
+
+Real PostgreSQL, deployed HTTPS/startup, production credentials, hospital UAT, full HL7 profiles, load/security qualification, backup/restore and DR are **NOT TESTED for this change**. No production-readiness claim is made.
+
+## Browser session timeout — 21 October 2026
+
+The workspace now defaults to **15 minutes of inactivity**, a **one-minute warning**, and a maximum **eight hours since sign-in**, even when actively used. Short access tokens still last five minutes and stay in memory. Background polling, role checks, opening/focusing a tab and automatic token refresh do not count as user activity. Backend enforcement protects API access even if the browser timer is paused or altered.
+
+Before expiry, **Session expiring** appears above open editors with **Continue session** and **Sign out**. Continue explicitly renews the idle deadline after server verification; it cannot extend the eight-hour maximum. Closing the browser is not a reliable logout mechanism. On resume or after three days away, an expired session requires fresh sign-in. An expired or revoked family cannot be restored by refresh.
+
+Signing out clears the authenticated workspace immediately and synchronizes other tabs. A refresh response that arrives late cannot sign the user back in. If server revocation fails, the login page says **Sign out could not be confirmed** and offers **Retry sign out**. A credential-free logout-intent marker prevents silent restoration after reload; no token or payload is persisted. If normal browser storage is unavailable, automatic restoration is disabled and explicit sign-in remains available. An offline browser cannot confirm server revocation until the request succeeds, so the warning must not be treated as completed logout. The backend's deadlines still apply.
+
+**Settings → Operational tools → Browser sessions** lists expiry using the earlier idle/absolute deadline, with Revoke session available for own sessions. Source channel API keys and Bearer automation retain their separate authentication. Session controls affect dashboard access; engine delivery continues independently.
+
+The deployment-owned `.env.example` documents `UI_ACCESS_TOKEN_SECONDS=300`, `REFRESH_TOKEN_SECONDS=28800`, `SESSION_ABSOLUTE_SECONDS=28800`, `SESSION_IDLE_SECONDS=900`, and `SESSION_WARNING_SECONDS=60`. A legacy seven-day refresh setting is capped by the eight-hour absolute policy. Values and constraints: [operational session policy](OPERATIONAL_CONTROLS.md#browser-session-policy--21-october-2026). Changing only `JWT_EXPIRES_IN` does not implement browser inactivity protection.
+
+**Migration 008 is required before starting this backend.** It preserves user/channel/message/audit history and existing encrypted credentials, revokes legacy browser sessions once, and leaves newly created families alone on repeat migration. Review preflight/backup, apply the whole chain, build and restart matching frontend/backend, then sign in again. No migration or production environment change was performed during source implementation. Never downgrade to the old authentication artifact as a way to revive sessions; keep schema history/keyring and review downgrade security first.
+
+Manual QA with a synthetic account and disposable environment:
+
+1. Sign in, use the workspace, then leave it untouched. At minute 14, verify the warning is keyboard accessible above any editor. Continue should renew idle time after a successful request. Scrolling/clicking elsewhere while warning is open must not silently dismiss it.
+2. Leave it untouched for 15 minutes and verify sensitive workspace content disappears and sign-in is required. Polling/refresh requests must not keep it alive. Reopen an expired cookie session and confirm it cannot restore login.
+3. Open two tabs and sign out in one; the other must lose authenticated UI. Simulate an unreachable logout endpoint, verify the warning/Retry action, and reload; it must stay signed out locally instead of silently refreshing. Retry after reconnection must revoke the server family.
+4. Exercise a session over the absolute boundary with continuing activity in a disposable test; eight hours still requires reauthentication. Check Settings expiry, role changes and manual revocation. Use automated virtual-time tests for these time boundaries rather than real patient work.
+
+Verification commands, concrete failures corrected and limits are recorded in the [session implementation audit](UI_SIMPLIFICATION_AUDIT.md#browser-session-hardening--2026-10-21). Browser tests use synthetic API fixtures; stateful backend tests verify policy/authorization separately. The latest native PostgreSQL suite, actual deployment and migration8/restore drill still require disposable/staging verification.
