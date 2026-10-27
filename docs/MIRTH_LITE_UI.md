@@ -481,3 +481,31 @@ Manual QA with a synthetic account and disposable environment:
 4. Exercise a session over the absolute boundary with continuing activity in a disposable test; eight hours still requires reauthentication. Check Settings expiry, role changes and manual revocation. Use automated virtual-time tests for these time boundaries rather than real patient work.
 
 Verification commands, concrete failures corrected and limits are recorded in the [session implementation audit](UI_SIMPLIFICATION_AUDIT.md#browser-session-hardening--2026-10-21). Browser tests use synthetic API fixtures; stateful backend tests verify policy/authorization separately. The latest native PostgreSQL suite, actual deployment and migration8/restore drill still require disposable/staging verification.
+
+
+## Imported HL7 JSON with @ehr/hl7-v2 — 27 October 2026
+
+Use **Source: HTTP receiver / JSON → Transformation: No transformation → Destination: HTTP/MLLP sender / HL7 v2**. Leave destination field mappings and custom scripts empty when the input already describes HL7 segments. Review & Test can accept the complete document JSON. A standard flat patient JSON still needs the existing destination mapping to build its HL7 fields. An existing ADT/ORU/ORM mapping is never silently replaced; remove/adjust it explicitly, save a draft and publish before live testing. The visual mapping templates remain the existing v2.5 profiles; importing a structured MDM v2.3 message does not require adding a new clinical template.
+
+Destination JSON conversion uses pinned **@ehr/hl7-v2 1.0.1**. The package's Generator writes messages/segments through a per-call flat compatibility schema. Its default grouped schemas would require groups/segments absent from imported or legacy flat objects. The adapter retains the existing tested field escape writer to preserve already encoded sequences, custom delimiters, numeric zero/false, and CR/LF injection protection; there is no global package mutation or schema merge from user input. The raw HL7 parser and QuickJS-local helpers retain their previous implementation/interface; no Node module/host callback is exposed inside the sandbox. Already serialized HL7 strings retain their bytes.
+
+Accepted input forms:
+
+- Canonical numeric positions, for example `{ "MSH": { "9": { "1": "MDM", "2": "T02" }, "10": "SYNTHETIC-ID", "11": "T", "12": "2.3" } }`.
+- An optional single `HL7Message` wrapper and matching prefixed positions (`MSH.9`, `MSH.9.1`, `PID.5.1`). Segment and field repetitions remain arrays. Duplicate numeric/prefixed aliases, mismatched prefixes, malformed segment names/indices and ambiguous wrappers are rejected.
+- Imported strings decode one layer of the named XML entities amp/lt/gt/quot/apos. Canonical strings retain literal entities. No XML parser, DTD, remote schema lookup or external entity is involved.
+- An exact terminal `{{CR13}}` leaf (or its single-component wrapper) denotes the imported segment boundary. It is omitted and the package emits one real CR. Nonterminal boundary markers fail; literal text containing the marker is preserved. Canonical markers remain literal data.
+
+Only imported representations receive a generated UTC **MSH.7** and UUID **MSH.10** when those values are empty. Supplied values remain unchanged. MSH.9, MSH.11 and MSH.12 remain required; the adapter preserves v2.3 instead of forcing v2.5. Numeric/null/boolean leaves become their appropriate wire strings/empty values. Original input objects are not mutated. Input/output bytes obey the configured payload bound, and normalization has depth, node and expanded-position limits. Failures return safe diagnostic codes without input values. Delivery retains the existing prepared payload/snapshot for retries.
+
+ADMIN sees complete test/message payloads under existing audited raw access. Generic JSON masking is unsafe for numeric/prefixed HL7 keys: non-raw responses therefore hide the complete structured HL7 object. MDM wire documents are also fully masked outside raw access because default ADT/ORU paths do not cover arbitrary TXA/visit/custom document data. Other existing HL7 masking rules remain. Copy follows the authorized displayed content, and logs/audit detail never store this image or the patient payload.
+
+The exact provided image document was verified locally through the preview API (no DNS/send), HTTP reception with HL7 Content-Type, and MLLP with a correlated AA ACK, using isolated database fixtures. Encoded image bytes are compared by SHA-256 and remain unchanged. Only a sanitized small image fixture is committed. Optional local reproduction with the original file:
+
+```sh
+MIRTH_HL7_SAMPLE_PATH='/absolute/path/to/synthetic-message.json' npx vitest run server/test/format-matrix-runtime.test.ts server/test/transformation-preview.test.ts
+```
+
+Successful serialization and a local ACK do not establish clinical conformance or deployed receiver acceptance. The supplied document omits EVN and leaves TXA.2 empty; the v2.3 MDM_T02 specification includes EVN and defines TXA.2 as required ([HL7 v2.3 document management](https://www.hl7.eu/HL7v2x/v23/std23/ch9.htm)). It also uses a slash-separated PID.7 date and inconsistent image metadata: the embedded bytes have a PNG signature while the ED fields say jpeg, including the encoding component. The encoding vocabulary includes Base64 ([HL7 v2.3 control/data types](https://www.hl7.eu/HL7v2x/v23/std23/ch2.htm)). These source values are preserved; the engine does not invent clinical/document types, relabel media or guess date conventions. Agree the correct fields/format with the receiver and apply an explicit mapping/profile. Hospital UAT and receiver-specific validation remain required.
+
+No database migration, existing channel update, source-key change, live database write, process restart or production deployment is performed by installing/building this change. For an existing deployment, install dependencies, build and restart its backend using its existing service manager. No migration command is needed for this converter change.

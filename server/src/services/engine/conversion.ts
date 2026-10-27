@@ -1,5 +1,6 @@
 import { Builder, Parser } from 'xml2js';
-import { jsonToHl7, hl7ToJson, parseSegments } from '../../utils/hl7Converer.js';
+import { hl7ToJson, parseSegments } from '../../utils/hl7Converer.js';
+import { generateHl7 } from '../../utils/ehrHl7Generator.js';
 import { AppError } from '../../utils/errors.js';
 import { config } from '../../config/env.js';
 async function parseXml(value: string) {
@@ -31,7 +32,7 @@ export function serialize(value: unknown) {
 }
 export async function convertPayload(value: unknown, type: string): Promise<unknown> {
   if (type === 'HL7V2') {
-    const raw = typeof value === 'string' ? value : jsonToHl7(value);
+    const raw = typeof value === 'string' ? value : generateHl7(value, config.server.payloadLimit);
     parseSegments(raw);
     return raw;
   }

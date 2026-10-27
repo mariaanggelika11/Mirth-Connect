@@ -981,3 +981,70 @@ Cached raw message/preview values are hidden immediately on permission downgrade
 | Final `npm run test:e2e` | **PASS — 131 tests** | `/tmp/mirth-full-payload-e2e-final.log`. Full suite rerun includes automatic full display/copy/pagination, restricted-role requests, cached and late raw response rejection on downgrade, optional testing, sessions, mobile, keyboard and accessibility. Browser APIs are synthetic intercepted fixtures. |
 | `git diff --check` | **PASS** | No whitespace errors. |
 | Deployed/production verification, live database integration | **NOT TESTED** | No production requests, database writes, migration, restart, deployment, commit or push performed. |
+
+
+## @ehr/hl7-v2 and imported MDM image messages — 2026-10-27
+
+Working branch development, baseline `04e9d8c`. Install pinned `@ehr/hl7-v2@1.0.1` and call its Generator from destination JSON-to-HL7 conversion. A bounded adapter supports both existing numeric positions and the supplied `HL7Message`/prefixed positions, single-layer named XML entities, null/numeric values and terminal `{{CR13}}` segment markers. Imported missing MSH.7/MSH.10 receive UTC/UUID technical defaults; supplied values, v2.3, flat segment order, repetitions and embedded Base64 remain. The package writes messages/segments using an instance-local flat compatibility profile and the existing tested field-escape writer. Its grouped clinical schemas would require missing groups/segments in legacy imports; this profile performs serialization/basic structure checks, not complete MDM clinical validation. No untrusted schema is merged globally. Existing raw HL7 strings and the QuickJS-local helper interface remain unchanged.
+
+Imported structured HL7 JSON cannot safely use name-based JSON masking. Non-raw responses now mask that complete object; unprofiled MDM wire documents are also completely masked because default paths omit TXA/visit/custom document identifiers. ADMIN still receives full payloads through existing permission-checked, audited raw requests. Logs/audit remain metadata-only. Source keys, session controls, SSRF/redirect checks, sandbox, byte limits, retry preparation/snapshots and clinical mapping profiles remain active. Normalization additionally bounds depth, nodes and expanded sparse positions. No migration, real database write, live channel update, restart, deployment, commit or push was performed.
+
+The exact attachment is 88,136 bytes. Actual built conversion produces an 86,911-byte CR-delimited MDM^T02 v2.3 message with MSH/PID/PV1/TXA/OBX/NTE; encoded image is 86,572 bytes and remains byte-identical (SHA-256 `55906c21f620d101e34e57e6469a4fcd90adfc789a3792b0f224a80ca128ea13`). The same attachment passes the real preview API, loopback HTTP reception and loopback MLLP with a correlated AA ACK against isolated database fixtures. The original image/identifiers are not committed. A small sanitized structural fixture is in `server/test/fixtures/mdm-teleport.json`; a local opt-in sample path exercises the exact source file. Generated original-sample output/evidence are ignored local files `reports/hl7-mdm-sample-2026-10-27.hl7` and `.json` with restricted permissions.
+
+The input has genuine conformance limitations: no EVN, empty TXA.2, a slash-form PID.7 date, and ED metadata saying jpeg although the image signature is PNG and ED encoding is not Base64. These are preserved instead of inventing or guessing clinical/media values. Hospital validation/receiver acceptance is **NOT TESTED**; a local receiver/AA only establishes transport and correlation. See [format and receiver prerequisites](MIRTH_LITE_UI.md#imported-hl7-json-with-ehrhl7-v2--27-october-2026). Existing channels with flat-patient ADT mappings must explicitly remove/adjust them and publish a new revision before testing an already structured MDM input.
+
+### Failures and corrections
+
+| Command / attempt | Actual failure | Root cause / correction |
+| --- | --- | --- |
+| `npm audit --json` after installation | **FAIL**, advisories present | Fresh advisories affected existing body-parser, fast-uri, ip-address, multer, vite and zod versions. `npm audit fix --ignore-scripts` applied compatible lockfile updates without forced majors; final audit is zero across all severities. Pinned HL7 package has async/lodash dependencies, no native extension. |
+| Initial `npm run typecheck` | **FAIL**, TS2550 on Object.hasOwn | Repository targets ES2020. Use Object.prototype.hasOwnProperty.call instead of changing the target. Rerun passes. |
+| Initial focused converter/HL7/runtime/security suite | **FAIL — 98 passed / 20 failed** | Adapter used one message-schema level where the package expects a nested named group. Corrected the per-call schema; canonical format/security behavior restored. `/tmp/mirth-ehr-hl7-focused-initial.log`. |
+| Next focused run | **FAIL — 117 passed / 1 failed** | Existing compact-mapping test compared EVN timestamps from independent preview/live executions across a second boundary. Now each EVN time must equal its own MSH time, and all other segment fields are compared. `/tmp/mirth-ehr-hl7-focused-final.log` records this intermediate failure. |
+| First provided-sample run during `npm ci --ignore-scripts` | **FAIL — worker/module errors**, 60 tests completed | I started dependency reinstallation while tests still used node_modules. It temporarily removed Vitest preload/multer files. Waited for installation completion and reran sequentially. `/tmp/mirth-ehr-hl7-provided-sample.log`. |
+| Sequential provided-sample run | **FAIL — 154 passed / 1 failed** | New negative test assumed complete HL7 masking; existing paths masked selected fields and left numeric/prefixed JSON and some MDM document IDs outside coverage. Added conservative complete non-raw masking for these new structures and verified ADMIN/raw preservation. `/tmp/mirth-ehr-hl7-provided-sample-final.log`. |
+| Initial documentation replacement script | **FAIL — assertion before any file write** | Literal backslash matching did not match the README paragraph. Selected the existing paragraph by its stable line prefix and reran successfully. |
+
+### Final verification
+
+| Command | Actual result | Evidence / limit |
+| --- | --- | --- |
+| `npm install --workspace server --save-exact @ehr/hl7-v2@1.0.1 --ignore-scripts` | **PASS** | Version and integrity pinned by workspace manifest/lockfile. |
+| `npm ci --ignore-scripts` | **PASS** | `/tmp/mirth-ehr-hl7-npm-ci.log`. Clean reproducible install with lifecycle scripts deliberately disabled; unit/build/runtime checks below pass. |
+| `npm run typecheck`, `npm run lint` | **PASS** | `/tmp/mirth-ehr-hl7-typecheck-final.log`, `/tmp/mirth-ehr-hl7-lint-final.log`. |
+| `npm run build` | **PASS** | `/tmp/mirth-ehr-hl7-build.log`; client production assets and server build completed before browser verification. |
+| `MIRTH_HL7_SAMPLE_PATH=<provided-file> npx vitest run server/test/ehr-hl7.test.ts server/test/hl7.test.ts server/test/format-matrix-runtime.test.ts server/test/security.test.ts server/test/transformation-preview.test.ts` | **PASS — 165 tests / 5 files** | `/tmp/mirth-ehr-hl7-provided-sample-verified.log`. Exact attachment preview/raw permissions/audit/no-send plus local HTTP and MLLP AA transport; no real database/third-party receiver. |
+| `npm run test:coverage` | **PASS — 777 tests / 48 files** | `/tmp/mirth-ehr-hl7-coverage.log`. Statements 87.82%, branches 86.12%, functions 90.04%, lines 88.81%; previous 87.51/85.77/89.76/88.53%, all increased. CI/default tests use sanitized fixtures. |
+| `npm run test:e2e` | **PASS — 132 tests** | `/tmp/mirth-ehr-hl7-e2e.log`. Includes setup with no mapping, full package-generated MDM preview/copy/save, existing session/revision/permissions/mobile/keyboard/Axe regressions. APIs intercepted; new case executes actual package serialization in its local test handler. |
+| `npm audit --audit-level=high --json` | **PASS — 0 vulnerabilities** | `/tmp/mirth-ehr-hl7-dependency-audit-final.json`, all severities zero after clean install. |
+| `npm run docs:check`, `npm run secrets:scan` | **PASS** | 49 paths / 53 operations; targeted current-source scanner findings empty. No new history scan or independent security certification claimed. |
+| Built converter against exact attachment | **PASS** | Ignored `reports/hl7-mdm-sample-2026-10-27.json`; stored output, CR framing, version/type and image equality verified without printing clinical values/image contents. |
+| PostgreSQL, Docker, deployed service/hospital receiver, UAT/clinical-profile certification | **NOT TESTED** | No database/schema changes; current work does not establish production readiness or remote receiver acceptance. |
+
+
+## Local database ENETUNREACH recovery — 2026-10-27
+
+User reported STARTUP_FAILED / ENETUNREACH at stage database. Inspected configuration through a sanitized parser (host/port/database/TLS only); no URL, credential, key or environment contents printed. Configured development target is MiniMirthDev/public. An elevated route check and TCP handshake to its configured PostgreSQL port succeeded. The actual built PostgreSQL adapter then connected successfully and read only current database/schema and SchemaMigrations versions 1–8. This confirms current connectivity and schema compatibility; the reported failure was a network reachability failure at that earlier startup, not evidence requiring a migration or secret/configuration change. The precise earlier Wi-Fi/VPN/router condition cannot be reconstructed from that log alone.
+
+Initial route inspection was blocked by the sandbox and was rerun with local-network inspection permission. The first root-level diagnostic import could not resolve dotenv because this installation resolves it under the server workspace; reran via createRequire anchored at server/package.json. Both diagnostic corrections completed without printing secrets or changing configuration.
+
+| Command/check | Actual result |
+| --- | --- |
+| Route/TCP handshake to configured DB host:5432 | **PASS**; current network route and port reachable |
+| Built getConnection + SELECT database/schema/migration versions | **PASS**; MiniMirthDev/public, versions 1–8; read-only diagnostic queries |
+| `npm run start` | **PASS**; Integration engine started, PID 3659, bound to 127.0.0.1:9000; local exec session 90369 kept running |
+| `curl -fsS --max-time 10 http://127.0.0.1:9000/health` | **PASS**; status ok |
+| `curl -fsS --max-time 10 http://127.0.0.1:9000/ready` | **PASS**; status ready |
+| HTTP GET / | **PASS**; 200 |
+| `lsof -nP -iTCP:9000 -sTCP:LISTEN` | **PASS**; node PID 3659 listening on 127.0.0.1:9000 |
+
+No environment edit, database migration, reset, network/firewall reconfiguration, source-code workaround, commit or push was needed for this recovery. Existing uncommitted HL7-package work was retained and its already-built backend was started. Startup retains the existing plaintext-MLLP trusted-network warning; no transport security setting was weakened. Long-term Wi-Fi/VPN/router availability is outside this successful local verification.
+
+
+## Message 13 / outbound 14: active ADT mapping applied to MDM input — 2026-10-27
+
+Read-only diagnostics matched correlation 7fd995ae-36bf-402b-8ec6-2d5226cf433a, channel3 revision5. Outbound14 is OUT-ERROR with **DESTINATION_TRANSFORM_ERROR:HL7_PROFILE_REQUIRED**, no prepared snapshot and no destination log/network attempt. Active destination3 still contains a V2 **ADT^A04** mapping with source paths patient_id/name. The supplied input already has a complete Mirth-shaped MDM^T02 structure under HL7Message; the flat-patient mapping cannot find its required identifiers/name. Source transformation is empty and the destination conversion stage was skipped, so this failure does not originate in @ehr/hl7-v2 serialization.
+
+Executed network-free runConfiguration with the actual saved destination script and the supplied attachment: **FAIL — HL7_PROFILE_REQUIRED**, transformation ERROR, conversion SKIPPED, networkDelivery NOT_SENT. Repeated locally with destination processingScript empty: **PASS — MDM^T02**, transformation PASS_THROUGH, conversion CONVERTED, networkDelivery NOT_SENT. A synthetic placeholder endpoint and validateConnections=false prevented receiver contact. No credential, patient value, script body or image contents were printed.
+
+To activate the verified configuration, clear the two old destination mapping rows (and any obsolete custom destination transformer), keep Source JSON/shared No transformation/outbound HL7 v2, test, Save and Publish the successor draft. Old messages with unprepared payloads must be submitted as a new inbound request/key after that publish. The diagnostic did not change the running channel, publish a revision or resend messages13/14.

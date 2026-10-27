@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
 import net from 'node:net';
 import request from 'supertest';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { runtimeDatabase as db } from './support/runtimeDatabase.js';
 import type { RuntimeConnector } from './support/runtimeDatabase.js';
 
@@ -248,6 +250,68 @@ function assertOutput(raw: string, output: Format) {
 }
 
 describe('Real sender format matrix, with only database persistence isolated', () => {
+  it.each(['HTTP', 'MLLP'] as const)(
+    'delivers the Mirth-shaped JSON MDM document through %s without mapping scripts',
+    async (protocol) => {
+      // An opt-in local path verifies the exact user attachment without committing
+      // its identifiers or embedded image. CI uses the sanitized structural fixture.
+      const input = JSON.parse(
+        readFileSync(
+          process.env.MIRTH_HL7_SAMPLE_PATH ||
+            new URL('./fixtures/mdm-teleport.json', import.meta.url),
+          'utf8',
+        ),
+      );
+      const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+      const original = digest(JSON.stringify(input));
+      const httpLocal = protocol === 'HTTP' ? await httpReceiver() : null;
+      const mllpLocal = protocol === 'MLLP' ? await mllpReceiver('AA') : null;
+      db.destinations = [
+        {
+          ...connector(httpLocal?.endpoint || mllpLocal!.endpoint, 'HL7V2', ''),
+          type: protocol === 'HTTP' ? 'REST' : 'MLLP',
+        },
+      ];
+      const preview = await runConfiguration(configuration(), input);
+      expect(preview.success).toBe(true);
+      expect(preview.networkDelivery).toBe('NOT_SENT');
+      expect((httpLocal || mllpLocal)!.received).toHaveLength(0);
+      expect(db.writes).toHaveLength(0);
+      const response = await request(app)
+        .post('/api/inbound/1')
+        .set('X-API-Key', sourceApiKey)
+        .send(input);
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ success: true, status: 'SUCCESS' });
+      expect((httpLocal || mllpLocal)!.received).toHaveLength(1);
+      const raw = httpLocal ? httpLocal.received[0].body : mllpLocal!.received[0];
+      const parsed = parseSegments(raw).segments;
+      const previewParsed = parseSegments(String(preview.results[0].finalPayload)).segments;
+      expect(parsed.map((s) => s.name)).toEqual(['MSH', 'PID', 'PV1', 'TXA', 'OBX', 'NTE']);
+      expect(parsed[0].fields[9]).toBe('MDM^T02');
+      expect(parsed[0].fields[12]).toBe('2.3');
+      expect(parsed[0].fields[10]).toMatch(/^[a-f0-9-]{36}$/);
+      expect(parsed[0].fields[7]).toMatch(/^\d{14}\+0000$/);
+      const image = parsed.find((s) => s.name === 'OBX')!.fields[5].split('^')[4];
+      expect(digest(image)).toBe(digest(input.HL7Message.OBX['OBX.5']['OBX.5.5']));
+      expect(digest(JSON.stringify(parsed.slice(1)))).toBe(
+        digest(JSON.stringify(previewParsed.slice(1))),
+      );
+      expect(digest(JSON.stringify(input))).toBe(original);
+      expect(raw).not.toMatch(/\n|\{\{CR13\}\}|&amp;/);
+      const outbound = [...db.messages.values()].find((row) => row.destination_id === 2)!;
+      expect(digest(JSON.parse(outbound.transformed_payload))).toBe(digest(raw));
+      expect(db.attempts[0]).toMatchObject({ dest: 2, status: 'OUT-SENT' });
+      if (httpLocal) {
+        expect(httpLocal.received[0].headers['content-type']).toMatch(
+          /^application\/hl7-v2(?:;|$)/,
+        );
+        expect(httpLocal.received[0].headers['x-correlation-id']).toBe(
+          response.headers['x-request-id'],
+        );
+      } else expect(db.attempts[0]).toMatchObject({ ack: 'AA' });
+    },
+  );
   it.each([
     ['JSON', 'JSON'],
     ['JSON', 'XML'],
@@ -352,9 +416,19 @@ describe('Real sender format matrix, with only database persistence isolated', (
     });
     const liveHeader = parseSegments(raw).segments[0].fields;
     const previewRaw = String(preview.results[0].finalPayload);
-    expect(parseSegments(previewRaw).segments.slice(1)).toEqual(
-      parseSegments(raw).segments.slice(1),
+    const previewSegments = parseSegments(previewRaw).segments;
+    const liveSegments = parseSegments(raw).segments;
+    expect(previewSegments.find((s) => s.name === 'EVN')!.fields[2]).toBe(
+      previewSegments[0].fields[7],
     );
+    expect(liveSegments.find((s) => s.name === 'EVN')!.fields[2]).toBe(liveHeader[7]);
+    const withoutGeneratedTime = (segments: typeof liveSegments) =>
+      segments.slice(1).map((s) => ({
+        ...s,
+        fields:
+          s.name === 'EVN' ? s.fields.map((v, i) => (i === 2 ? 'GENERATED_TIME' : v)) : s.fields,
+      }));
+    expect(withoutGeneratedTime(previewSegments)).toEqual(withoutGeneratedTime(liveSegments));
     expect(liveHeader[7]).toMatch(/^\d{14}\+0000$/);
     expect(liveHeader[10]).toMatch(/^[0-9a-f-]{36}$/);
     expect(liveHeader[12]).toBe('2.5');

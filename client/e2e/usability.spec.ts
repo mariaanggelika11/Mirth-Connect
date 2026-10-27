@@ -8,6 +8,8 @@ import { expect, test } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { compileFieldMapping, readFieldMapping } from '../../server/src/utils/fieldMapping';
 import { defaultHl7Configuration } from '../../server/src/utils/hl7Configuration';
+import { generateHl7 } from '../../server/src/utils/ehrHl7Generator';
+import { readFileSync } from 'node:fs';
 import {
   compileSimpleCondition,
   readSimpleCondition,
@@ -3690,3 +3692,73 @@ for (const resetOverrides of [false, true])
     }
     expect(state.externalRequests).toEqual([]);
   });
+
+test('JSON to MDM document needs no mappings and displays the package-generated HL7 output', async ({
+  page,
+}) => {
+  const state = await workspace(page, { channels: [] });
+  const input = JSON.parse(
+    readFileSync(new URL('../../server/test/fixtures/mdm-teleport.json', import.meta.url), 'utf8'),
+  );
+  let output = '';
+  await page.route('**/api/channel/preview-transformation', (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.raw).toBe(true);
+    expect(body.configuration.processingScript).toBe('');
+    expect(body.configuration.destinations[0].processingScript).toBe('');
+    expect(body.configuration.destinations[0].outboundDataType).toBe('HL7V2');
+    output = generateHl7(body.payload);
+    return route.fulfill({
+      json: {
+        success: true,
+        accepted: true,
+        rawPayload: true,
+        elapsedMs: 1,
+        networkDelivery: 'NOT_SENT',
+        input: { format: 'JSON', payload: body.payload },
+        source: {
+          format: 'JSON',
+          payload: body.payload,
+          validation: 'PASSED',
+          filter: 'BYPASSED',
+          transformation: 'PASS_THROUGH',
+        },
+        results: [
+          {
+            name: 'SYNTHETIC_MDM_RECEIVER',
+            outputFormat: 'HL7V2',
+            status: 'VALID',
+            routed: true,
+            finalPayload: output,
+            stages: { filter: 'BYPASSED', transformation: 'PASS_THROUGH', conversion: 'CONVERTED' },
+          },
+        ],
+        warnings: [],
+      },
+    });
+  });
+  await page.getByRole('button', { name: 'New Channel', exact: true }).click();
+  await page.getByLabel('Channel name', { exact: false }).fill('SYNTHETIC_JSON_TO_MDM');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByRole('radio', { name: 'No transformation', exact: true })).toBeChecked();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByLabel('Destination name').fill('SYNTHETIC_MDM_RECEIVER');
+  await page.getByLabel('Outbound format', { exact: false }).selectOption('HL7V2');
+  await page.getByLabel('Endpoint', { exact: false }).fill(receiver);
+  await preview(page, input);
+  const result = page.getByRole('region', { name: 'Generated output', exact: true });
+  await expect(result).toContainText('MDM^T02');
+  await expect(result).toContainText('Example^Synthetic');
+  await expect(result).not.toContainText('[REDACTED');
+  await result.getByRole('button', { name: 'Copy Output', exact: true }).click();
+  expect(await clipboard(page)).toBe(output);
+  expect(output).not.toContain('{{CR13}}');
+  await page.getByRole('button', { name: 'Save Channel', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Channel saved', exact: true })).toBeVisible();
+  expect(captured(state, '/api/channel')[0].body).toMatchObject({
+    source: { inboundDataType: 'JSON' },
+    processingScript: '',
+    destinations: [{ outboundDataType: 'HL7V2', processingScript: '' }],
+  });
+  expect(state.externalRequests).toEqual([]);
+});

@@ -47,7 +47,9 @@ Errors return success=false, code, safe message and requestId; central handler a
 | DESTINATION_CREDENTIAL_MISSING | 422 diagnostic; the destination-scoped environment credential is absent, oversized or contains forbidden control characters; values are never returned |
 | SCRIPT_TIMEOUT / SCRIPT_EXECUTION_FAILED / SCRIPT_CAPACITY | sandbox/time/capacity diagnostic |
 | TRANSFORMATION_PREVIEW_INVALID / DRY_RUN_INVALID | 400; invalid test configuration identifies the affected source/destination setting without echoing input |
-| PAYLOAD_TOO_LARGE / UPLOAD_LIMIT | body/upload exceeded bound |
+| PAYLOAD_TOO_LARGE / UPLOAD_LIMIT | body, generated HL7 output or upload exceeded bound before delivery |
+| INVALID_HL7_OBJECT | 422 during JSON conversion; missing/ambiguous MSH or numeric/prefixed positions, misplaced end marker, malformed repetitions, excessive depth/field expansion, or sanitized generator failure |
+| INVALID_HL7_DELIMITERS / INVALID_HL7 | 400/422 during HL7 parse/conversion; invalid encoding characters or missing required MSH values |
 | INTERNAL_ERROR | 500; internal details withheld |
 
 Delivery diagnostics such as DELIVERY_OUTCOME_UNKNOWN, DESTINATION_CIRCUIT_OPEN, DELIVERY_CAPACITY and RESPONSE_SCRIPT_FAILED_AFTER_DELIVERY appear in message metadata. Response-script failure after accepted delivery never triggers automatic network resend. TCP_WRITE_COMPLETE means socket write completed; it does not prove application acceptance.

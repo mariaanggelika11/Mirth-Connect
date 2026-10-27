@@ -5,6 +5,13 @@ const sensitive =
 export function maskPayload(value: unknown, path = ''): unknown {
   if (Array.isArray(value))
     return value.map((v, i) => maskPayload(v, path ? path + '.' + i : String(i)));
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    const root = obj.HL7Message && typeof obj.HL7Message === 'object' ? obj.HL7Message : obj;
+    // Imported HL7 JSON uses numeric/prefixed positions, not patient-name JSON keys.
+    // Do not expose its identifiers or embedded documents through generic JSON rules.
+    if ('MSH' in root && root.MSH && typeof root.MSH === 'object') return '[REDACTED]';
+  }
   if (value && typeof value === 'object')
     return Object.fromEntries(
       Object.entries(value).map(([key, v]) => [
@@ -25,6 +32,11 @@ export function maskPayload(value: unknown, path = ''): unknown {
   if (typeof value === 'string') {
     if (value.startsWith('MSH') && value.length > 4) {
       const separator = value[3];
+      const msh = value.split(/\r\n|\r|\n/, 1)[0].split(separator);
+      // MDM documents may contain PHI in TXA, visit identifiers and site-specific
+      // segments absent from the default ADT/ORU masking paths. Raw permission is
+      // required until a complete document-specific masking policy is available.
+      if (msh[8]?.split(msh[1]?.[0] || '^')[0] === 'MDM') return '[REDACTED TEXT]';
       return value
         .split(/\r\n|\r|\n/)
         .map((line) => {

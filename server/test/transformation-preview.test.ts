@@ -60,6 +60,9 @@ import { initialDraft } from '../../client/src/features/channels/channelDraft.js
 import { defaultHl7Configuration } from '../src/utils/hl7Configuration.js';
 import { hl7ToJson } from '../src/utils/hl7Converer.js';
 import { channelSchema } from '../src/utils/validator.js';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { parseSegments } from '../src/utils/hl7Converer.js';
 
 const token = signToken({ id: 1, name: 'Synthetic operator', role: 'ADMIN' });
 const basePath = '/api/channel/preview-transformation';
@@ -88,6 +91,66 @@ beforeEach(() => {
 });
 
 describe('Transformation-only preview before destination connection setup', () => {
+  it.each(['ADMIN', 'DEVELOPER'])(
+    'previews an imported MDM image without mappings as %s with enforced raw permissions and audit',
+    async (role) => {
+      state.role = role;
+      const input = JSON.parse(
+        readFileSync(
+          process.env.MIRTH_HL7_SAMPLE_PATH ||
+            new URL('./fixtures/mdm-teleport.json', import.meta.url),
+          'utf8',
+        ),
+      );
+      const draft = initialDraft();
+      draft.name = 'SYNTHETIC_JSON_TO_MDM';
+      Object.assign(draft.destinations[0], {
+        name: 'SYNTHETIC_MDM_RECEIVER',
+        endpoint: 'https://receiver.example.test/hl7',
+        outboundDataType: 'HL7V2',
+        processingScript: '',
+      });
+      expect(draft.processingScript).toBe('');
+      const response = await preview({
+        configuration: draft,
+        payload: input,
+        raw: role === 'ADMIN',
+      });
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        success: true,
+        accepted: true,
+        rawPayload: role === 'ADMIN',
+        networkDelivery: 'NOT_SENT',
+        source: { transformation: 'PASS_THROUGH' },
+      });
+      if (role === 'ADMIN') {
+        const parsed = parseSegments(response.body.results[0].finalPayload).segments;
+        expect(parsed[0].fields[9]).toBe('MDM^T02');
+        expect(parsed.map((s) => s.name)).toEqual(['MSH', 'PID', 'PV1', 'TXA', 'OBX', 'NTE']);
+        const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+        expect(hash(parsed.find((s) => s.name === 'OBX')!.fields[5].split('^')[4])).toBe(
+          hash(input.HL7Message.OBX['OBX.5']['OBX.5.5']),
+        );
+      } else {
+        expect(response.body.results[0].finalPayload).toBe('[REDACTED TEXT]');
+        expect(response.body.input.payload).toBe('[REDACTED]');
+        expect(response.body.source.payload).toBe('[REDACTED]');
+        expect(JSON.stringify(response.body)).not.toContain(
+          input.HL7Message.OBX['OBX.5']['OBX.5.5'],
+        );
+        expect(JSON.stringify(response.body)).not.toContain(input.HL7Message.PID['PID.1']);
+      }
+      expect(state.audit).toHaveLength(1);
+      expect(state.audit[0].action).toBe(
+        role === 'ADMIN' ? 'TRANSFORMATION_PREVIEW_RAW' : 'TRANSFORMATION_PREVIEW',
+      );
+      expect(JSON.stringify(state.audit)).not.toContain(input.HL7Message.OBX['OBX.5']['OBX.5.5']);
+      expect(state.send).not.toHaveBeenCalled();
+      expect(state.lookup).not.toHaveBeenCalled();
+      expect(state.probe).not.toHaveBeenCalled();
+    },
+  );
   it('accepts the actual new-channel wizard draft with its blank optional change summary for JSON to HL7', async () => {
     const config = initialDraft();
     config.name = 'TEST_JSON_TO_HL7';

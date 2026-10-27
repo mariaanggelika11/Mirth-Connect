@@ -16,6 +16,7 @@
     "bootstrap:admin": "tsx src/scripts/bootstrap.ts"
   },
   "dependencies": {
+    "@ehr/hl7-v2": "1.0.1",
     "ajv": "^8.20.0",
     "axios": "^1.13.1",
     "bcrypt": "^6.0.0",

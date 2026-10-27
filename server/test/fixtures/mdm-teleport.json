@@ -1,0 +1,151 @@
+{
+  "HL7Message": {
+    "MSH": {
+      "MSH.1": "|",
+      "MSH.2": "^~\\&amp;",
+      "MSH.3": "",
+      "MSH.4": {
+        "MSH.4.1": "SYNTHETIC_TELEPORT"
+      },
+      "MSH.5": "",
+      "MSH.6": "",
+      "MSH.7": "",
+      "MSH.8": "",
+      "MSH.9": {
+        "MSH.9.1": "MDM",
+        "MSH.9.2": "T02"
+      },
+      "MSH.10": "",
+      "MSH.11": {
+        "MSH.11.1": "T"
+      },
+      "MSH.12": {
+        "MSH.12.1": 2.3
+      },
+      "MSH.13": "",
+      "MSH.14": "",
+      "MSH.15": {
+        "MSH.15.1": "{{CR13}}"
+      }
+    },
+    "PID": {
+      "PID.1": "SYNTHETIC-001",
+      "PID.2": {
+        "PID.2.1": "SYNTHETIC-001"
+      },
+      "PID.3": "",
+      "PID.4": "",
+      "PID.5": {
+        "PID.5.1": "Example",
+        "PID.5.2": "Synthetic"
+      },
+      "PID.6": "",
+      "PID.7": {
+        "PID.7.1": "07/07/1997"
+      },
+      "PID.8": {
+        "PID.8.1": "F"
+      },
+      "PID.9": {
+        "PID.9.1": "{{CR13}}"
+      }
+    },
+    "PV1": {
+      "PV1.1": "",
+      "PV1.2": "",
+      "PV1.3": "",
+      "PV1.4": "",
+      "PV1.5": "",
+      "PV1.6": "",
+      "PV1.7": "",
+      "PV1.8": "",
+      "PV1.9": "",
+      "PV1.10": "",
+      "PV1.11": "",
+      "PV1.12": "",
+      "PV1.13": "",
+      "PV1.14": "",
+      "PV1.15": "",
+      "PV1.16": "",
+      "PV1.17": "",
+      "PV1.18": "",
+      "PV1.19": {
+        "PV1.19.1": "SYNTHETIC-VISIT"
+      },
+      "PV1.20": {
+        "PV1.20.1": "{{CR13}}"
+      }
+    },
+    "TXA": {
+      "TXA.1": "",
+      "TXA.2": {
+        "TXA.2.1": null
+      },
+      "TXA.3": "",
+      "TXA.4": {
+        "TXA.4.1": "20261026163535.311"
+      },
+      "TXA.5": {
+        "TXA.5.1": 99999996
+      },
+      "TXA.6": "",
+      "TXA.7": "",
+      "TXA.8": "",
+      "TXA.9": "",
+      "TXA.10": "",
+      "TXA.11": "",
+      "TXA.12": {
+        "TXA.12.1": "SYNTHETIC-DOCUMENT"
+      },
+      "TXA.13": "",
+      "TXA.14": "",
+      "TXA.15": "",
+      "TXA.16": "",
+      "TXA.17": {
+        "TXA.17.1": "AU"
+      },
+      "TXA.18": "",
+      "TXA.19": {
+        "TXA.19.1": "AV"
+      },
+      "TXA.20": {
+        "TXA.20.1": "{{CR13}}"
+      }
+    },
+    "OBX": {
+      "OBX.1": {
+        "OBX.1.1": 1
+      },
+      "OBX.2": {
+        "OBX.2.1": "ED"
+      },
+      "OBX.3": {
+        "OBX.3.1": "IMAGE",
+        "OBX.3.2": "TELEPORTIMAGE"
+      },
+      "OBX.4": {
+        "OBX.4.1": 1
+      },
+      "OBX.5": {
+        "OBX.5.1": "",
+        "OBX.5.2": "",
+        "OBX.5.3": "jpeg",
+        "OBX.5.4": "jpeg",
+        "OBX.5.5": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lGQAAAAASUVORK5CYII="
+      },
+      "OBX.6": {
+        "OBX.6.1": "{{CR13}}"
+      }
+    },
+    "NTE": {
+      "NTE.1": "",
+      "NTE.2": "",
+      "NTE.3": {
+        "NTE.3.1": "Synthetic image fixture only."
+      },
+      "NTE.4": {
+        "NTE.4.1": "{{CR13}}"
+      }
+    }
+  }
+}

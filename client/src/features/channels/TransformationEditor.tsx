@@ -330,7 +330,7 @@ export function TransformationEditor({
             {!mapping.rows.length && (
               <p className="muted">
                 {compactMapping
-                  ? 'Add fields to build this message. Compatible HL7 messages can pass through without mappings.'
+                  ? 'Add fields to build this message. Structured HL7 JSON or raw HL7 can pass through without mappings.'
                   : 'Add a mapping to select or rename incoming fields.'}
               </p>
             )}

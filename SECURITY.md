@@ -2,6 +2,12 @@
 
 Report vulnerabilities privately through the repository owner's approved channel or GitHub private vulnerability reporting if enabled. No contact is invented here; the owner must configure one. Do not include patient payloads, credentials, private keys or raw database dumps in public issues. Provide affected commit, synthetic reproduction and safe diagnostic codes. Rotate exposed credentials before considering historical cleanup. This custom engine has no formal HIPAA/ISO/SATUSEHAT certification claim. Production deployment requires hospital UAT, independent review and the readiness matrix.
 
+## HL7 document conversion follow-up — 2026-10-27
+
+Destination JSON-to-HL7 now uses pinned @ehr/hl7-v2 1.0.1 with a per-call flat schema and a bounded input adapter. Existing field escaping prevents segment injection and preserves canonical escapes; no untrusted schema is merged into package globals. QuickJS retains its local helpers and exposes no package/host callbacks. Input/output bytes, nesting, nodes and expanded positions are bounded. Package exception details are withheld. Structured HL7 JSON and MDM text are fully masked for non-raw responses so numeric/prefixed fields, visit/document IDs and images cannot bypass existing JSON/HL7 path rules; ADMIN raw access remains permission-checked and audited before response. Raw delivery and source-key/session controls are unchanged.
+
+Fresh dependency audit after compatible lockfile fixes and clean install: **0 vulnerabilities** (`/tmp/mirth-ehr-hl7-dependency-audit-final.json`). This follow-up does not establish hospital profile conformance or deployed security. The provided MDM JSON has clinical/profile gaps described in the [manual](docs/MIRTH_LITE_UI.md#imported-hl7-json-with-ehrhl7-v2--27-october-2026).
+
 ## Payload display update — 2026-10-23
 
 The UI automatically requests audited raw payloads for ADMIN in Messages, Review & Test and revision dry-runs. Manual raw/redacted switches are removed. Other roles retain their existing payload permissions and masking; default API responses remain masked. Role changes immediately hide cached raw content, and stale test responses cannot restore it. Source keys, configuration secrets, structured logs, diagnostics and error sanitization remain protected. This presentation change is not evidence of production security certification.

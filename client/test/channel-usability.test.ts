@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   initialDraft,
   newDestination,
-  selectedValidationProfile,
   validationChoice,
   createMessageValidationDraft,
   messageValidationProfile,
@@ -107,27 +106,32 @@ describe('Progressive channel configuration', () => {
     expect(draft.destinations[0].outboundDataType).toBe(DataType.HL7V2);
   });
 
-  it('keeps custom profile text intact while users choose no additional or basic validation', () => {
-    const customText = '{"jsonSchema":{"type":"object","required":["message"]}}';
-    expect(selectedValidationProfile('NONE', customText)).toEqual({});
-    expect(selectedValidationProfile('BASIC', customText)).toEqual({ basicSyntax: true });
-    expect(selectedValidationProfile('BASIC_JSON', customText)).toEqual({
-      jsonSchema: { type: 'object' },
-    });
-    const basicSyntax = selectedValidationProfile('BASIC', customText);
-    basicSyntax.basicSyntax = false;
-    expect(selectedValidationProfile('BASIC', customText)).toEqual({ basicSyntax: true });
-    expect(selectedValidationProfile('CUSTOM', customText)).toEqual(JSON.parse(customText));
-    const basic = selectedValidationProfile('BASIC_JSON', customText);
-    (basic.jsonSchema as Record<string, unknown>).type = 'string';
-    expect(selectedValidationProfile('BASIC_JSON', customText)).toEqual({
-      jsonSchema: { type: 'object' },
-    });
+  it('keeps custom rules intact while users choose no additional validation', () => {
+    const custom = { type: 'object', required: ['message'] };
+    const editor = {
+      ...createMessageValidationDraft({ jsonSchema: custom }, DataType.JSON),
+      changed: true,
+      mode: 'NONE' as const,
+    };
+    const stored = messageValidationProfile(editor, DataType.JSON);
+    expect(stored).toMatchObject({ mode: 'NONE', custom: { jsonSchema: custom } });
+    const reopened = createMessageValidationDraft(stored, DataType.JSON);
+    expect(JSON.parse(reopened.customText)).toEqual(custom);
+    expect(
+      messageValidationProfile({ ...reopened, mode: 'CUSTOM', changed: true }, DataType.JSON),
+    ).toMatchObject({ mode: 'CUSTOM', custom: { jsonSchema: custom } });
   });
 
   it('rejects malformed and non-object custom profiles before save or preview', () => {
     for (const text of ['{', 'null', '[]', '"schema"', '42']) {
-      expect(() => selectedValidationProfile('CUSTOM', text)).toThrow();
+      const editor = {
+        ...createMessageValidationDraft({}, DataType.JSON),
+        changed: true,
+        mode: 'CUSTOM' as const,
+        customText: text,
+      };
+      expect(validationDraftErrors(editor, DataType.JSON).length).toBeGreaterThan(0);
+      expect(() => messageValidationProfile(editor, DataType.JSON)).toThrow();
     }
   });
 });

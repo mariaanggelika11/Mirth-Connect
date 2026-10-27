@@ -1,5 +1,13 @@
 # Changelog
 
+## Package-backed HL7 JSON and MDM documents — 2026-10-27
+
+- Add pinned `@ehr/hl7-v2@1.0.1` for destination JSON-to-HL7 generation, with a bounded compatibility adapter for canonical numeric keys and Mirth-shaped `HL7Message` / `MSH.9.1` keys. Preserve flat segment order, repetitions, Unicode, existing escape policy, 0/false and raw-HL7/sandbox compatibility.
+- Normalize one layer of named XML entities and terminal `{{CR13}}` markers; generate missing technical time/control-ID only on imported representations. Preserve supplied values, HL7 version and embedded Base64 bytes. Keep clinical/profile validation separate from successful serialization/delivery.
+- Mask structured HL7 JSON and unprofiled MDM documents in non-raw responses to protect numeric/prefixed identifiers, TXA/visit data and embedded documents. Keep ADMIN raw access, audits, keys, SSRF, sandbox, size limits and delivery snapshots.
+- Test exact local attachment through preview, HTTP and MLLP/ACK; commit only a sanitized small image fixture. Add no-mapping wizard/copy regression. Correct preview/live EVN timestamp assertions to allow separately generated technical times while comparing clinical content.
+- Apply compatible lockfile security updates after fresh audit advisories; no forced major upgrades, schema migration or live database changes.
+
 ## Automatic authorized payload display — 2026-10-23
 
 - Show full input/output/response payloads automatically to ADMIN in Messages, Review & Test and revision dry-runs; remove manual raw/redacted controls. Copy and pagination follow the displayed values. Include the original HL7 control ID in authorized raw message detail.
